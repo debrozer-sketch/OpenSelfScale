@@ -1,0 +1,1067 @@
+// Экран покупателя: светлая тема, «как воздух».
+// Главный экран: отделы одной строкой, вписаны в ширину экрана (поля 8 px,
+// зазоры 8 px); меньше отделов — колонки шире, больше пяти — плитка «ЕЩЁ».
+// Отдел → его товарные группы → товар; тап по товару = печать.
+// Только встроенные элементы; повторители раскладываются вручную через x/y.
+
+export struct DeptDef {
+    id: string,
+    name: string,
+    bg: color,
+    fg: color,
+    bg-pressed: color,
+    img: image,
+    has-img: bool,
+}
+
+export struct PluTile {
+    id: string,
+    name: string,
+    price: string,
+    // Скидочная цена (по карте); "" = второй цены нет.
+    card-price: string,
+    has-img: bool,
+    img: image,
+}
+
+// Строка меню настроек: имя отдела + флаги краёв списка (стрелки видны
+// только там, где перемещение возможно).
+export struct AdminRow {
+    name: string,
+    first: bool,
+    last: bool,
+}
+
+// Светлая плитка (группы/товары): белый фон, мягкое нажатие.
+component Tile inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> active: true;
+
+    callback tapped;
+
+    border-radius: 16px;
+    background: !active ? #EDEFF2 : ta.pressed ? #E4E8ED : #FFFFFF;
+
+    VerticalLayout {
+        padding: 8px;
+        alignment: center;
+        spacing: 2px;
+        Text {
+            text: root.title;
+            font-size: 22px;
+            font-weight: 700;
+            wrap: word-wrap;
+            overflow: elide;
+            max-height: 56px;
+            horizontal-alignment: center;
+            color: !root.active ? #A6ADB8 : #1A1E24;
+        }
+        if root.subtitle != "" : Text {
+            text: root.subtitle;
+            font-size: 20px;
+            horizontal-alignment: center;
+            color: !root.active ? #A6ADB8 : #707A86;
+        }
+    }
+
+    ta := TouchArea {
+        enabled: root.active;
+        clicked => { root.tapped(); }
+    }
+}
+
+// Колонка отдела: ширина = равная доля строки; скругления сглаживает рендер,
+// рамка 2 px — светло-серый контур зоны нажатия.
+component DeptTile inherits Rectangle {
+    in property <int> idx;
+    in property <length> col-w;
+    in property <length> tile-h;
+    in property <length> font;
+    in property <DeptDef> d;
+
+    callback tapped(string);
+    // Перелистывание страниц отделов свайпом (карусель).
+    callback next-page;
+    callback prev-page;
+
+    width: root.col-w;
+    x: 8px + self.idx * (root.col-w + 8px);
+    y: 8px;
+    height: root.tile-h;
+    border-radius: 24px;
+    border-width: 2px;
+    border-color: #C9CFD7;
+    background: ta.pressed ? d.bg-pressed : d.bg;
+
+    // Зона картинки: вся плитка над полем подписи. Картинка вписывается
+    // в зону целиком (image-fit: contain), по центру: широкая колонка —
+    // крупная картинка, узкая — центрированная. Нет файла — светлая плашка.
+    // Картинка с тем же скруглением, что у плитки/заглушки: clip в
+    // Rectangle со скруглением срезает прямые углы изображения.
+    if d.has-img : Rectangle {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        height: parent.height - 110px - 16px;
+        border-radius: 20px;
+        clip: true;
+        Image {
+            width: 100%;
+            height: 100%;
+            image-fit: cover;
+            source: d.img;
+        }
+    }
+    if !d.has-img : Rectangle {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        height: parent.height - 110px - 16px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.75);
+    }
+
+    Text {
+        x: 8px;
+        y: parent.height - 110px;
+        width: parent.width - 16px;
+        height: 90px;
+        text: d.name;
+        // Единый кегль ряда: считает бэкенд по самой длинной подписи,
+        // чтобы слово всегда влезало целиком.
+        font-size: root.font;
+        font-weight: 700;
+        color: d.fg;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    ta := TouchArea {
+        // Свайп: горизонтальный сдвиг > 80 px листает страницу; тап — только
+        // если палец почти не сместился (< 60 px), иначе клик подавляется.
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.up {
+                if ta.mouse-x - ta.pressed-x < -80px {
+                    root.next-page();
+                } else if ta.mouse-x - ta.pressed-x > 80px {
+                    root.prev-page();
+                }
+            }
+        }
+        clicked => {
+            if Math.abs(ta.mouse-x - ta.pressed-x) < 60px {
+                root.tapped(root.d.id);
+            }
+        }
+    }
+}
+
+// Карточка товара: 9 колонок × 3 строки (27 на страницу), шаг 112×182.
+// Квадратная картинка 100×100 сверху, название до 3 строк, цена ниже.
+// Вторая цена (по карте): обычная мелко серым, карточная зелёным.
+component PluCard inherits Rectangle {
+    in property <int> idx;
+    in property <int> cell-offset: 0;
+    in property <PluTile> p;
+    in property <bool> active: true;
+
+    callback tapped;
+
+    width: 108px;
+    height: 178px;
+    x: 8px + Math.mod(self.idx + self.cell-offset, 9) * 112px;
+    y: 56px + Math.floor((self.idx + self.cell-offset) / 9) * 182px;
+    border-radius: 12px;
+    background: !root.active ? #EDEFF2 : ta.pressed ? #E4E8ED : #FFFFFF;
+
+    // Квадратная зона картинки: 104×104, без окантовки. Нет файла —
+    // светлая плашка (картинки придут из центра позже).
+    Rectangle {
+        x: 2px;
+        y: 2px;
+        width: 104px;
+        height: 104px;
+        border-radius: 10px;
+        clip: true;
+        background: #F0F2F5;
+        if root.p.has-img : Image {
+            width: 100%;
+            height: 100%;
+            image-fit: cover;
+            source: root.p.img;
+        }
+    }
+
+    Text {
+        x: 3px;
+        y: 108px;
+        width: parent.width - 6px;
+        height: 40px;
+        text: root.p.name;
+        font-size: 10px;
+        wrap: word-wrap;
+        overflow: elide;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: !root.active ? #A6ADB8 : #1A1E24;
+    }
+
+    // Цена: одна — по центру; две — столбиком: обычная серым, карточная
+    // зелёным. Кегль цены меньше кегля названия.
+    if root.p.card-price == "" : Text {
+        x: 3px;
+        y: 150px;
+        width: parent.width - 6px;
+        height: 24px;
+        text: root.p.price;
+        font-size: 12px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: !root.active ? #A6ADB8 : #1A1E24;
+    }
+    if root.p.card-price != "" : Text {
+        x: 3px;
+        y: 147px;
+        width: parent.width - 6px;
+        height: 12px;
+        text: root.p.price;
+        font-size: 9px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: #A6ADB8;
+    }
+    if root.p.card-price != "" : Text {
+        x: 3px;
+        y: 158px;
+        width: parent.width - 6px;
+        height: 16px;
+        text: root.p.card-price;
+        font-size: 11px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: #2FA36B;
+    }
+
+    ta := TouchArea {
+        enabled: root.active;
+        clicked => { root.tapped(); }
+    }
+}
+
+// Клавиша экранной клавиатуры поиска.
+component KbKey inherits Rectangle {
+    in property <string> key;
+    in property <length> kw: 72px;
+    in property <length> kx;
+
+    callback key-tapped(string);
+
+    x: root.kx;
+    width: root.kw;
+    height: 58px;
+    border-radius: 12px;
+    border-width: 2px;
+    border-color: #C9CFD7;
+    background: k-ta.pressed ? #E4E8ED : #FFFFFF;
+    Text {
+        text: root.key;
+        font-size: 22px;
+        color: #1A1E24;
+    }
+    k-ta := TouchArea {
+        clicked => { root.key-tapped(root.key); }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "ScaleFW";
+    // Размер экрана задаёт бэкенд (смена панели — без правки разметки).
+    in property <length> screen-w: 1024px;
+    in property <length> screen-h: 768px;
+    width: screen-w;
+    height: screen-h;
+    background: #F6F7F9;
+    default-font-family: "DejaVu Sans";
+
+    // ---- данные от бэкенда ----
+    in property <string> weight-text: "0.000";
+    // 0 пусто, 1 нестабилен, 2 стабилен
+    in property <int> weight-state: 0;
+    // 0 покой, 1 ожидание стабилизации, 2 печать, 3 готово, 4 ошибка принтера
+    in property <int> phase: 0;
+    in property <string> status-text: "Весы · локальный каталог";
+    in property <int> status-level: 0; // 0 норма, 1 внимание, 2 ошибка
+    // 0 отделы, 1 группы отдела, 2 товары группы, 4 настройки отделов
+    in property <int> screen: 0;
+    in property <string> screen-title: "";
+    in property <int> cols: 5;        // колонок в строке отделов
+    // Пейджинг отделов: страницы по cols колонок, кнопка перелистывания —
+    // под колонками, по центру.
+    in property <int> page-no: 0;
+    in property <int> pages-total: 1;
+    // Пейджинг товаров группы: страницы по 10 карточек (5×2).
+    in property <int> items-page-no: 0;
+    // Сдвиг сетки карточек: на страницах, кроме первой, ячейка 0 занята
+    // кнопкой «← НАЗАД», товары начинаются с ячейки 1.
+    in property <int> items-cell-offset: 0;
+    in property <int> items-pages-total: 1;
+    // Страницы отделов в шапке экрана товаров: видимость «НАЗАД»/«ДАЛЕЕ».
+    in property <int> dept-pages-total: 1;
+
+    // Детальная карточка товара: оверлей поверх сетки товаров. Крупная
+    // картинка, цены, живой вес и стоимость текущего веса (обычная и по
+    // карте). Клик вне панели закрывает.
+    in property <PluTile> popup-plu;
+    in property <bool> popup-open: false;
+    in property <string> popup-weight;
+    in property <string> popup-sum;
+    in property <string> popup-card-sum;
+    in property <bool> popup-empty: true;
+    callback plu-confirm();
+    callback plu-cancel();
+    in property <length> dept-font: 30px; // единый кегль подписи отдела
+    // Логотип компании: зона справа от блока веса. Файл <img_dir>/logo.png
+    // подкинули — картинка (вписана в зону), нет — пустое место.
+    in property <image> logo-img;
+    in property <bool> logo-has: false;
+    in property <length> col-w: 195px; // ширина колонки (считает бэкенд)
+    in property <length> tile-h: 592px; // высота колонки
+    in property <[DeptDef]> depts;         // отделы текущей страницы
+    in property <[DeptDef]> header-depts;  // отделы в шапке экрана товаров
+    in property <[PluTile]> items;        // карточки товаров отдела, до 10
+
+    callback dept-tapped(string);
+    callback plu-tapped(string);
+    callback more();
+    callback back();
+    // Промотка отделов в шапке экрана товаров.
+    callback dept-next();
+    callback dept-prev();
+    // Выход на уровень выше: товары → отделы (кнопка в шапке).
+    callback up();
+    // Меню настроек (экран 4): вход — удержание в углу, выход — «ГОТОВО».
+    callback admin-close();
+    callback admin-up(string);
+    callback admin-down(string);
+    callback admin-del(string);
+
+    // Поиск (экран 3): открытие зоны поиска, нажатие клавиши, сброс.
+    callback search-open();
+    callback key-tapped(string);
+    callback search-clear();
+    in property <string> search-text;
+    property <[string]> kb1: ["й","ц","у","к","е","н","г","ш","щ","з","х","ъ"];
+    property <[string]> kb2: ["ф","ы","в","а","п","р","о","л","д","ж","э"];
+    property <[string]> kb3: ["я","ч","с","м","и","т","ь","б","ю"];
+
+    property <bool> can-tap: phase != 2 && phase != 3 && phase != 4;
+
+    // Скрытый вход в настройки: невидимая зона в правом верхнем углу,
+    // активна только на главном экране. Удержание распознаёт бэкенд.
+    admin-corner := TouchArea {
+        x: root.width - 96px;
+        y: 0;
+        width: 96px;
+        height: 40px;
+        enabled: root.screen == 0;
+    }
+    in property <bool> admin-pressed: admin-corner.pressed;
+    in property <[AdminRow]> admin-rows;
+
+    // ---------- A. статус ----------
+    Rectangle {
+        x: 0; y: 0;
+        width: 1024px;
+        height: 40px;
+        background: status-level == 2 ? #F3C6C6
+                  : status-level == 1 ? #F5E3BC : #EDF0F3;
+        Text {
+            x: 16px;
+            width: 992px;
+            height: 40px;
+            text: root.status-text;
+            font-size: 20px;
+            vertical-alignment: center;
+            color: status-level == 2 ? #7A2E2E
+                 : status-level == 1 ? #6B4A1B : #707A86;
+        }
+    }
+
+    // ---------- B1. вес ----------
+    Text {
+        x: 16px; y: 44px;
+        width: 380px;
+        height: 112px;
+        text: root.weight-text;
+        font-size: 96px;
+        font-weight: 700;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        color: weight-state == 0 ? #A6ADB8
+             : weight-state == 1 ? #C77700 : #1A1E24;
+    }
+    Text {
+        x: 404px; y: 96px;
+        text: "кг";
+        font-size: 32px;
+        color: weight-state == 0 ? #A6ADB8 : #707A86;
+    }
+    // Индикатор стабильности: линия под весом во всю ширину экрана,
+    // скруглённая на концах. Зелёная — можно брать товар, янтарная — ждём.
+    if weight-state == 1 || weight-state == 2 : Rectangle {
+        // Линия на ширину весового блока (вес + «кг»), не всего экрана.
+        x: 16px;
+        y: 150px;
+        width: 444px;
+        height: 6px;
+        border-radius: 3px;
+        background: weight-state == 2 ? #2FA36B : #E0A100;
+    }
+
+    // Логотип компании: невидимая зона справа от блока веса, картинка
+    // вписывается целиком (contain). Нет файла — пустое место.
+    if root.logo-has : Rectangle {
+        x: 480px; y: 44px;
+        width: root.width - 496px;
+        height: 112px;
+        Image {
+            width: 100%;
+            height: 100%;
+            image-fit: contain;
+            source: root.logo-img;
+        }
+    }
+
+    // ---------- C. главный экран: отделы одной строкой ----------
+    if screen == 0 : Rectangle {
+        x: 0; y: 160px;
+        width: 1024px;
+        height: 608px;
+
+        for d[i] in root.depts : DeptTile {
+            idx: i;
+            col-w: root.col-w;
+            tile-h: root.tile-h;
+            font: root.dept-font;
+            d: d;
+            tapped(dept) => { root.dept-tapped(dept); }
+            next-page => { root.more(); }
+            prev-page => { root.back(); }
+        }
+    }
+
+    // ---------- C. пейджер: под колонками отделов, с отступом ----------
+    // Экран 0 — страницы отделов; на экране товаров «ДАЛЕЕ» — плитка в гриде.
+    if screen == 0 && pages-total > 1 : Rectangle {
+        y: 160px + root.tile-h + 16px;
+        x: 0;
+        width: root.width;
+        height: 56px;
+        if (screen == 0 && page-no > 0) || (screen == 2 && items-page-no > 0) : Rectangle {
+            x: 16px;
+            y: 0;
+            width: 200px;
+            height: 56px;
+            border-radius: 16px;
+            border-width: 2px;
+            border-color: #C9CFD7;
+            background: pager-back-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                text: "← НАЗАД";
+                font-size: 24px;
+                font-weight: 700;
+                color: #4A5460;
+            }
+            pager-back-ta := TouchArea {
+                clicked => { root.back(); }
+            }
+        }
+        if (screen == 0 && page-no < pages-total - 1)
+           || (screen == 2 && items-page-no < items-pages-total - 1) : Rectangle {
+            x: root.width - 216px;
+            y: 0;
+            width: 200px;
+            height: 56px;
+            border-radius: 16px;
+            border-width: 2px;
+            border-color: #C9CFD7;
+            background: pager-more-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                text: "ДАЛЕЕ →";
+                font-size: 24px;
+                font-weight: 700;
+                color: #4A5460;
+            }
+            pager-more-ta := TouchArea {
+                clicked => { root.more(); }
+            }
+        }
+    }
+
+    // ---------- C. товары отдела ----------
+    if screen == 2 : Rectangle {
+        x: 0; y: 160px;
+        width: 1024px;
+        height: 608px;
+
+        // Кнопки отделов в шапке: столько же, сколько колонок на главном.
+        // Текущий отдел подсвечен; сверх колонок — кнопка промотки.
+        for d[i] in root.header-depts : Rectangle {
+            x: 8px + i * 114px;
+            y: 8px;
+            width: 110px;
+            height: 40px;
+            border-radius: 12px;
+            background: d.name == root.screen-title ? #DDE3EA
+                     : hd-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                x: 4px;
+                width: parent.width - 8px;
+                height: parent.height;
+                text: d.name;
+                font-size: 15px;
+                font-weight: 700;
+                overflow: elide;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: #1A1E24;
+            }
+            hd-ta := TouchArea {
+                clicked => { root.dept-tapped(d.name); }
+            }
+        }
+        // «НАЗАД» — только когда промотка уже делалась.
+        if root.page-no > 0 : Rectangle {
+            x: 8px + root.header-depts.length * 114px;
+            y: 8px;
+            width: 62px;
+            height: 40px;
+            border-radius: 12px;
+            background: dept-prev-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                text: "НАЗАД";
+                font-size: 13px;
+                font-weight: 700;
+                color: #4A5460;
+            }
+            dept-prev-ta := TouchArea {
+                clicked => { root.dept-prev(); }
+            }
+        }
+        // «ДАЛЕЕ» — только если есть следующая порция отделов.
+        if root.page-no < root.dept-pages-total - 1 : Rectangle {
+            x: 8px + root.header-depts.length * 114px
+                + (root.page-no > 0 ? 66px : 0px);
+            y: 8px;
+            width: 62px;
+            height: 40px;
+            border-radius: 12px;
+            background: dept-next-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                text: "ДАЛЕЕ";
+                font-size: 13px;
+                font-weight: 700;
+                color: #4A5460;
+            }
+            dept-next-ta := TouchArea {
+                clicked => { root.dept-next(); }
+            }
+        }
+        // Поиск доступен отовсюду: пилюля в шапке экрана товаров.
+        Rectangle {
+            x: root.width - 308px; y: 8px;
+            width: 300px; height: 40px;
+            border-radius: 12px;
+            border-width: 2px;
+            border-color: #C9CFD7;
+            background: search2-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                x: 12px;
+                width: parent.width - 24px;
+                height: parent.height;
+                text: "Поиск товара";
+                font-size: 16px;
+                color: #A6ADB8;
+                vertical-alignment: center;
+            }
+            search2-ta := TouchArea {
+                clicked => { root.search-open(); }
+            }
+        }
+        // «← НАЗАД» — ячейка 0 на всех страницах, кроме первой.
+        if root.items-page-no > 0 : Rectangle {
+            x: 8px;
+            y: 56px;
+            width: 108px;
+            height: 178px;
+            border-radius: 12px;
+            background: prev2-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                text: "← НАЗАД";
+                font-size: 14px;
+                font-weight: 700;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                color: #4A5460;
+            }
+            prev2-ta := TouchArea {
+                clicked => { root.back(); }
+            }
+        }
+        for p[i] in root.items : PluCard {
+            idx: i;
+            cell-offset: root.items-cell-offset;
+            p: p;
+            active: root.can-tap;
+            tapped => { root.plu-tapped(p.id); }
+        }
+        // «ДАЛЕЕ →» — ячейка сразу за последним товаром (на полной странице
+        // — последняя ячейка сетки), как в оригинальном ПО.
+        if root.items-page-no < root.items-pages-total - 1 : Rectangle {
+            x: 8px + Math.mod(root.items.length + root.items-cell-offset, 9) * 112px;
+            y: 56px + Math.floor((root.items.length + root.items-cell-offset) / 9) * 182px;
+            width: 108px;
+            height: 178px;
+            border-radius: 12px;
+            border-width: 2px;
+            border-color: #C9CFD7;
+            background: next2-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                text: "ДАЛЕЕ →";
+                font-size: 14px;
+                font-weight: 700;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                color: #4A5460;
+            }
+            next2-ta := TouchArea {
+                clicked => { root.more(); }
+            }
+        }
+    }
+
+    // ---------- C. зона поиска: внизу, между «← НАЗАД» и «ДАЛЕЕ →» ----------
+    // Тап открывает экран поиска (3): клавиатура + живая выдача.
+    if screen == 0 : Rectangle {
+        x: root.width / 2 - 200px;
+        y: 160px + root.tile-h + 16px;
+        width: 400px;
+        height: 56px;
+        border-radius: 16px;
+        border-width: 2px;
+        border-color: #C9CFD7;
+        background: search-ta.pressed ? #E4E8ED : #FFFFFF;
+        Text {
+            x: 16px;
+            width: parent.width - 32px;
+            height: parent.height;
+            text: "Поиск товара";
+            font-size: 24px;
+            color: #A6ADB8;
+            vertical-alignment: center;
+        }
+        search-ta := TouchArea {
+            clicked => { root.search-open(); }
+        }
+    }
+
+    // ---------- C. поиск: строка ввода, выдача, клавиатура (экран 3) ----------
+    if screen == 3 : Rectangle {
+        x: 0; y: 160px;
+        width: 1024px;
+        height: 608px;
+
+        // Шапка: «← Назад», поле ввода, «ОЧИСТИТЬ».
+        Rectangle {
+            x: 8px; y: 8px;
+            width: 180px; height: 56px;
+            border-radius: 16px;
+            background: search-back-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                text: "← Назад";
+                font-size: 24px;
+                font-weight: 700;
+                color: #1A1E24;
+            }
+            search-back-ta := TouchArea {
+                clicked => { root.up(); }
+            }
+        }
+        Rectangle {
+            x: 204px; y: 8px;
+            width: 620px; height: 56px;
+            border-radius: 16px;
+            border-width: 2px;
+            border-color: #C9CFD7;
+            background: #FFFFFF;
+            Text {
+                x: 16px;
+                width: parent.width - 32px;
+                height: parent.height;
+                text: root.search-text == "" ? "Введите название…" : root.search-text;
+                font-size: 22px;
+                color: root.search-text == "" ? #A6ADB8 : #1A1E24;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle {
+            x: 840px; y: 8px;
+            width: 176px; height: 56px;
+            border-radius: 16px;
+            border-width: 2px;
+            border-color: #C9CFD7;
+            background: search-clear-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                text: "ОЧИСТИТЬ";
+                font-size: 20px;
+                font-weight: 700;
+                color: #4A5460;
+            }
+            search-clear-ta := TouchArea {
+                clicked => { root.search-clear(); }
+            }
+        }
+
+        // Выдача: до 5 строк «название — цены».
+        for p[i] in root.items : Rectangle {
+            x: 8px;
+            y: 72px + i * 64px;
+            width: 1008px;
+            height: 56px;
+            border-radius: 12px;
+            background: res-ta.pressed ? #E4E8ED : #FFFFFF;
+            Text {
+                x: 16px;
+                width: 560px;
+                height: parent.height;
+                text: p.name;
+                font-size: 20px;
+                font-weight: 700;
+                overflow: elide;
+                vertical-alignment: center;
+                color: #1A1E24;
+            }
+            Text {
+                x: 584px;
+                width: 190px;
+                height: parent.height;
+                text: p.price;
+                font-size: 18px;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                color: p.card-price == "" ? #1A1E24 : #A6ADB8;
+            }
+            if p.card-price != "" : Text {
+                x: 790px;
+                width: 190px;
+                height: parent.height;
+                text: p.card-price;
+                font-size: 18px;
+                font-weight: 700;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                color: #2FA36B;
+            }
+            res-ta := TouchArea {
+                clicked => { root.plu-tapped(p.id); }
+            }
+        }
+        if root.items.length == 0 && root.search-text == "" : Text {
+            x: 0; y: 80px;
+            width: 1024px;
+            text: "Начните вводить название товара";
+            font-size: 22px;
+            horizontal-alignment: center;
+            color: #A6ADB8;
+        }
+        if root.items.length == 0 && root.search-text != "" : Text {
+            x: 0; y: 80px;
+            width: 1024px;
+            text: "Ничего не найдено";
+            font-size: 22px;
+            horizontal-alignment: center;
+            color: #A6ADB8;
+        }
+
+        // Клавиатура: ЙЦУКЕН, пробел, забой.
+        for k[i] in root.kb1 : KbKey {
+            kx: 8px + i * 78px;
+            y: 404px;
+            key: k;
+            key-tapped(k) => { root.key-tapped(k); }
+        }
+        for k[i] in root.kb2 : KbKey {
+            kx: 82px + i * 78px;
+            y: 470px;
+            key: k;
+            key-tapped(k) => { root.key-tapped(k); }
+        }
+        for k[i] in root.kb3 : KbKey {
+            kx: 8px + i * 78px;
+            y: 536px;
+            key: k;
+            key-tapped(k) => { root.key-tapped(k); }
+        }
+        KbKey {
+            kx: 712px;
+            y: 536px;
+            kw: 170px;
+            key: "ПРОБЕЛ";
+            key-tapped(k) => { root.key-tapped(k); }
+        }
+        KbKey {
+            kx: 890px;
+            y: 536px;
+            kw: 118px;
+            key: "ЗАБОЙ";
+            key-tapped(k) => { root.key-tapped(k); }
+        }
+    }
+
+    // ---------- E. детальная карточка товара: оверлей поверх сетки ----------
+    if root.popup-open : Rectangle {
+        x: 0; y: 0;
+        width: root.width;
+        height: root.height;
+        background: transparent;
+        // Клик мимо панели закрывает карточку.
+        popup-back-ta := TouchArea {
+            clicked => { root.plu-cancel(); }
+        }
+
+        Rectangle {
+            x: 152px; y: 150px;
+            width: 720px; height: 468px;
+            border-radius: 24px;
+            border-width: 2px;
+            border-color: #C9CFD7;
+            background: #FFFFFF;
+            // Панель глушит клики (закрытие — только мимо панели/«ОТМЕНА»).
+            popup-panel-ta := TouchArea { }
+
+            // Картинка крупно.
+            Rectangle {
+                x: 24px; y: 24px;
+                width: 280px; height: 280px;
+                border-radius: 16px;
+                clip: true;
+                background: #F0F2F5;
+                if root.popup-plu.has-img : Image {
+                    width: 100%;
+                    height: 100%;
+                    image-fit: cover;
+                    source: root.popup-plu.img;
+                }
+            }
+
+            // Название и цены за килограмм.
+            Text {
+                x: 328px; y: 24px;
+                width: 368px; height: 64px;
+                text: root.popup-plu.name;
+                font-size: 22px;
+                font-weight: 700;
+                wrap: word-wrap;
+                overflow: elide;
+                vertical-alignment: center;
+                color: #1A1E24;
+            }
+            Text {
+                x: 328px; y: 100px;
+                width: 368px; height: 32px;
+                text: "Цена: " + root.popup-plu.price;
+                font-size: 22px;
+                vertical-alignment: center;
+                color: #1A1E24;
+            }
+            if root.popup-plu.card-price != "" : Text {
+                x: 328px; y: 136px;
+                width: 368px; height: 32px;
+                text: "По скидочной карте: " + root.popup-plu.card-price;
+                font-size: 18px;
+                font-weight: 700;
+                vertical-alignment: center;
+                color: #2FA36B;
+            }
+
+            // Вес и стоимость текущего веса; на пустых весах — подсказка.
+            if !root.popup-empty : Text {
+                x: 24px; y: 312px;
+                width: 300px; height: 72px;
+                text: root.popup-weight;
+                font-size: 40px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: #1A1E24;
+            }
+            if !root.popup-empty : Text {
+                x: 328px; y: 316px;
+                width: 368px; height: 32px;
+                text: "Итого: " + root.popup-sum;
+                font-size: 26px;
+                font-weight: 700;
+                vertical-alignment: center;
+                color: #1A1E24;
+            }
+            if !root.popup-empty && root.popup-plu.card-price != "" : Text {
+                x: 328px; y: 352px;
+                width: 368px; height: 32px;
+                text: "Со скидочной картой: " + root.popup-card-sum;
+                font-size: 20px;
+                font-weight: 700;
+                vertical-alignment: center;
+                color: #2FA36B;
+            }
+            if root.popup-empty : Text {
+                x: 24px; y: 320px;
+                width: 672px; height: 56px;
+                text: "Положите товар на весы";
+                font-size: 24px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: #707A86;
+            }
+
+            // Кнопки: отмена и переход к печати.
+            Rectangle {
+                x: 24px; y: 392px;
+                width: 200px; height: 56px;
+                border-radius: 16px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: popup-cancel-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    text: "ОТМЕНА";
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: #4A5460;
+                }
+                popup-cancel-ta := TouchArea {
+                    clicked => { root.plu-cancel(); }
+                }
+            }
+            Rectangle {
+                x: 496px; y: 392px;
+                width: 200px; height: 56px;
+                border-radius: 16px;
+                background: popup-ok-ta.pressed ? #268A5A : #2FA36B;
+                Text {
+                    text: "ПЕЧАТЬ";
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: #FFFFFF;
+                }
+                popup-ok-ta := TouchArea {
+                    clicked => { root.plu-confirm(); }
+                }
+            }
+        }
+    }
+
+    // ---------- B2. уведомления — только верхняя строка (нейтральные) ----------
+    // Центральных всплывашек нет: покупатель может перекладывать товар и
+    // листать каталог одновременно.
+
+    // ---------- D. меню настроек отделов (экран 4) ----------
+    if screen == 4 : Rectangle {
+        x: 0; y: 0;
+        width: root.width;
+        height: root.height;
+        background: #F6F7F9;
+
+        // Шапка: заголовок слева, «ГОТОВО» справа.
+        Rectangle {
+            x: 8px; y: 8px;
+            width: parent.width - 16px;
+            height: 64px;
+            border-radius: 16px;
+            border-width: 2px;
+            border-color: #C9CFD7;
+            background: #FFFFFF;
+            Text {
+                x: 16px;
+                width: parent.width - 32px;
+                height: parent.height;
+                text: "НАСТРОЙКИ · ОТДЕЛЫ";
+                font-size: 26px;
+                font-weight: 700;
+                color: #1A1E24;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                x: parent.width - 176px;
+                y: 8px;
+                width: 160px;
+                height: 48px;
+                border-radius: 12px;
+                background: admin-done-ta.pressed ? #E4E8ED : #EDF0F3;
+                Text {
+                    text: "ГОТОВО";
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                }
+                admin-done-ta := TouchArea {
+                    clicked => { root.admin-close(); }
+                }
+            }
+        }
+
+        // Строки отделов: имя + «вверх» / «вниз» / «убрать».
+        for r[i] in root.admin-rows : Rectangle {
+            x: 8px;
+            y: 84px + i * 72px;
+            width: parent.width - 16px;
+            height: 64px;
+            border-radius: 12px;
+            border-width: 2px;
+            border-color: #C9CFD7;
+            background: #FFFFFF;
+            Text {
+                x: 16px;
+                width: parent.width - 260px;
+                height: parent.height;
+                text: r.name;
+                font-size: 24px;
+                font-weight: 700;
+                color: #1A1E24;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if !r.first : Rectangle {
+                x: parent.width - 232px;
+                y: 8px;
+                width: 64px;
+                height: 48px;
+                border-radius: 10px;
+                background: admin-up-ta.pressed ? #E4E8ED : #EDF0F3;
+                Text { text: "↑"; font-size: 26px; font-weight: 700; color: #4A5460; }
+                admin-up-ta := TouchArea { clicked => { root.admin-up(r.name); } }
+            }
+            if !r.last : Rectangle {
+                x: parent.width - 156px;
+                y: 8px;
+                width: 64px;
+                height: 48px;
+                border-radius: 10px;
+                background: admin-down-ta.pressed ? #E4E8ED : #EDF0F3;
+                Text { text: "↓"; font-size: 26px; font-weight: 700; color: #4A5460; }
+                admin-down-ta := TouchArea { clicked => { root.admin-down(r.name); } }
+            }
+            Rectangle {
+                x: parent.width - 80px;
+                y: 8px;
+                width: 64px;
+                height: 48px;
+                border-radius: 10px;
+                background: admin-del-ta.pressed ? #F2B8B5 : #F6DEDD;
+                Text { text: "✕"; font-size: 26px; font-weight: 700; color: #7A2E2E; }
+                admin-del-ta := TouchArea { clicked => { root.admin-del(r.name); } }
+            }
+        }
+    }
+}

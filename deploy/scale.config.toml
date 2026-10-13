@@ -1,0 +1,26 @@
+# Конфигурация киоска весов (эталон для Штрих-М Слим)
+# Разворачивается в /etc/scalefw/config.toml
+# Ключи БЕЗ секции — только до первого [заголовка], иначе TOML отнесёт их
+# к предыдущей таблице и киоск молча возьмёт дефолт.
+
+incoming_dir = "/var/ftp/scale"
+db_path = "/home/scales/plu.db"
+log_file = "/var/log/scalefw/kiosk.log"
+
+[scales]
+kind = "shtrih-slim"
+port = "/dev/scales"
+baud = 115200
+
+[printer]
+kind = "escpos"
+port = "/dev/ttyS3"
+baud = 19200
+
+# Приём выгрузки «как старое ПО»: сервер магазина сам кладёт plu.xml,
+# layout.xml и ready.flg в каталог приёма (FTP-сервер весов, chroot
+# /var/ftp), lftp-зеркало привозит картинки. Киоск следит за каталогом.
+#[center]
+#protocol = "drop"            # приём из incoming_dir по флагу ready.flg
+#img_local_dir = "/etc/scalefw/img"
+#history_dir = "/var/lib/scalefw/history"

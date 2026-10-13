@@ -1,0 +1,36 @@
+[package]
+name = "kiosk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Бинарник киоска весов: UI, весовой поток, печать, диагностика"
+
+[[bin]]
+name = "kiosk"
+path = "src/main.rs"
+
+[dependencies]
+shtrih-m = { path = "../../crates/shtrih-m" }
+escpos = { path = "../../crates/escpos" }
+datastore = { path = "../../crates/datastore" }
+sync-agent = { path = "../../crates/sync-agent" }
+drivers-api = { path = "../../crates/drivers-api" }
+serialport = { workspace = true }
+rusqlite = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+simplelog = { workspace = true }
+libc = "0.2"
+suppaftp = { version = "6", default-features = false }
+slint = { version = ">=1.9.0,<1.10.0", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "renderer-femtovg",
+    "renderer-software",
+    "backend-winit-x11",
+] }
+
+[build-dependencies]
+slint-build = ">=1.9.0,<1.10.0"

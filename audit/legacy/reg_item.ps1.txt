@@ -1,0 +1,89 @@
+param(
+    $Computername = $args[0],
+    $Username = "administrator",
+    $Password = "<см. .env: пароль не храним в коде>",
+    $Port = 22,
+    $KeyfilePath = "",
+    $AutoUpdateFingerprint = $False
+)
+
+Import-Module Posh-SSH
+
+function This-FingerPrintUpdate(){
+    if($AutoUpdateFingerprint)
+    { Remove-SSHTrustedHost $Computername }
+}
+
+function This-GetSSHCommandOutput(){
+	# Create new session and execute the command given
+    if($keyfilePath.Length -eq 0){
+
+        # Generate credentials object for authentication
+	$SecPasswd   = ConvertTo-SecureString $Password -AsPlainText -Force
+	$Credentials = New-Object System.Management.Automation.PSCredential ($Username, $secpasswd)
+        $Session = New-SSHSession -Computername $Computername -Credential $Credentials -Port $Port -Acceptkey
+
+    }
+    else
+    { $Session = New-SSHSession -Computername $Computername -Acceptkey $true -KeyFile $keyfilePath -Port $Port }
+
+
+
+
+
+
+    # Удаляем SelfServiceScales.plu
+    $Output = (Invoke-SSHCommand -SSHSession $Session -Command "rm /home/administrator/sss/SelfServiceScales.plu").Output
+
+
+    # Копируем файл
+    #Set-SCPFile -LocalFile "./reg" -RemotePath "/home/administrator/sss" -ComputerName $Computername -Credential $Credentials
+    Set-SCPItem -Path "./reg" -Destination "/home/administrator/sss" -ComputerName $Computername -Credential $Credentials
+
+    # устанавливаем права на запуск
+    $Output = (Invoke-SSHCommand -SSHSession $Session -Command "chmod u+x /home/administrator/sss/reg").Output
+
+    # запускаем регалку
+    $Output = $Output+(Invoke-SSHCommand -SSHSession $Session -Command "/home/administrator/sss/reg").Output
+
+    #Перемещаем SelfServiceScales.plu
+    $Output = $Output+(Invoke-SSHCommand -SSHSession $Session -Command "mv /home/administrator/SelfServiceScales.plu /home/administrator/sss/SelfServiceScales.plu").Output
+
+    # Стираем регалку
+    $Output = $Output+(Invoke-SSHCommand -SSHSession $Session -Command "shred -u /home/administrator/sss/reg").Output
+
+    # Копируем раскладку и плушки
+    #$Output = $Output+(Invoke-SSHCommand -SSHSession $Session -Command "cp /home/administrator/sss/layout.xml /var/ftp/scale/layout.xml").Output
+    #Set-SCPFile -LocalFile "./layout.xml" -RemotePath "/var/ftp/scale/" -ComputerName $Computername -Credential $Credentials
+    Set-SCPItem -Path "./layout.xml" -Destination "/var/ftp/scale/" -ComputerName $Computername -Credential $Credentials
+
+    $Output = $Output+(Invoke-SSHCommand -SSHSession $Session -Command "touch /var/ftp/scale/ready.flg").Output
+    Start-Sleep -s 2
+#    $Output = $Output+(Invoke-SSHCommand -SSHSession $Session -Command "cp /home/administrator/sss/plu.xml /var/ftp/scale/plu.xml").Output
+    # Set-SCPFile -LocalFile "./plu.xml" -RemotePath "/var/ftp/scale/" -ComputerName $Computername -Credential $Credentials
+    Set-SCPItem -Path "./plu.xml" -Destination "/var/ftp/scale/" -ComputerName $Computername -Credential $Credentials
+
+    $Output = $Output+(Invoke-SSHCommand -SSHSession $Session -Command "touch /var/ftp/scale/ready.flg").Output
+
+
+
+
+
+
+
+
+
+
+    # Remove the session after we're done
+    Remove-SSHSession -Name $Session | Out-Null
+
+    # return the actual output
+    Write-Host $Output.Trim();
+
+}
+
+# Automatically update the fingerprint for the given host.
+This-FingerPrintUpdate;
+
+# echo the output to PRTG
+This-GetSSHCommandOutput;

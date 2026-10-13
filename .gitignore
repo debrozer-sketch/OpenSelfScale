@@ -1,0 +1,25 @@
+/target
+Cargo.lock.orig
+node_modules/
+dist/
+*.db
+.env
+audit/artifacts/*.trace
+
+# Тяжёлые артефакты деплоя (скачиваются заново, не в git)
+deploy/http/
+deploy/netboot/
+deploy/musl.tgz
+deploy/zig.zip
+*.deb
+
+# Бинарный файл пароля VNC — не в git
+deploy/vnc_passwd
+
+# Тестовые данные магазина
+testdata/
+
+# Мусор
+__pycache__/
+*.exe
+ready.flg

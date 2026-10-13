@@ -1,0 +1,22 @@
+<label width="480">
+    <field x="0" y="40" font="0" size="0" name="namefirst" />
+    <field x="0" y="64" font="0" size="0" name="namesecond" />
+    <field x="0" y="88" font="1" size="0" name="description" />
+    <statictext x="0" y="388" font="1" size="0" text="Упаковщик: оператор #1" />
+    <barcode x="10" y="304" height="48" />
+    <statictext x="0" y="412" font="1" size="0" text='ООО "AAA"' />
+    <statictext x="0" y="430" font="1" size="0" text='Факт.: г.Москва, Кремль' />
+    <field x="208" y="265" font="1" size="0" name="date" />
+    <field x="208" y="282" font="1" size="0" name="time" />
+    <field x="290" y="265" font="1" size="0" name="shelflife" />
+    <field x="380" y="265" font="1" size="0" name="weight" />
+    <statictext x="80" y="330" font="0" size="0" text='По акции' noaction="0"/>
+    <statictext x="80" y="360" font="0" size="0" text='Без акции' noaction="0" />
+    <field x="210" y="330" font="0" size="0" name="actionprice" noaction="0" />
+    <field x="210" y="360" font="0" size="0" name="price" noaction="0" />
+    <field x="320" y="330" font="0" size="0" name="actionsum" noaction="0" />
+    <field x="320" y="360" font="0" size="0" name="sum" noaction="0" />
+    <field x="200" y="345" font="0" size="0" name="price" action="0" />
+    <field x="320" y="350" font="0" size="1" name="sum" action="0" />
+    
+</label>

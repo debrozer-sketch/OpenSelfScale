@@ -1,0 +1,10 @@
+[package]
+name = "escpos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Драйвер этикетного принтера ESC/POS (page mode, этикетки с зазором)"
+
+[dependencies]
+thiserror = { workspace = true }
+log = { workspace = true }

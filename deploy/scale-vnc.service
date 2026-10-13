@@ -1,0 +1,14 @@
+[Unit]
+Description=x11vnc mirror of the scale kiosk display (:0)
+After=scale-kiosk.service
+Requires=scale-kiosk.service
+
+[Service]
+User=administrator
+Environment=XAUTHORITY=/run/scale-kiosk/X.auth
+ExecStart=/usr/bin/x11vnc -display :0 -rfbport 5900 -rfbauth /home/administrator/.config/tigervnc/passwd -forever -shared -o /home/administrator/scale-vnc.log
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical.target

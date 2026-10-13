@@ -1,0 +1,12 @@
+[package]
+name = "datastore"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SQLite-база PLU и импорт из XML старого формата"
+
+[dependencies]
+rusqlite = { workspace = true }
+thiserror = { workspace = true }
+quick-xml = { workspace = true }
+log = { workspace = true }

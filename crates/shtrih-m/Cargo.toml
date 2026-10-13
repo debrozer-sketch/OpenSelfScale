@@ -1,0 +1,12 @@
+[package]
+name = "shtrih-m"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Драйвер весов Штрих-М (Слим) по последовательному порту"
+
+[dependencies]
+drivers-api = { path = "../drivers-api" }
+serialport = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

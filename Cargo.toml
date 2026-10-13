@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/drivers-api",
+    "crates/shtrih-m",
+    "crates/escpos",
+    "crates/datastore",
+    "crates/sync-agent",
+    "app/kiosk",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Proprietary"
+
+[workspace.dependencies]
+serialport = { version = "4", default-features = false }
+rusqlite = { version = "0.32", features = ["bundled"] }
+thiserror = "2"
+quick-xml = "0.36"
+sha2 = "0.10"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+simplelog = "0.12"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "s"
