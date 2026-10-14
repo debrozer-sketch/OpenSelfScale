@@ -12,6 +12,8 @@ pub enum DriverError {
     PortOpen(String),
     #[error("protocol: {0}")]
     Protocol(String),
+    #[error("timeout waiting for reply")]
+    Timeout,
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }

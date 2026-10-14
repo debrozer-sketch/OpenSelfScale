@@ -56,10 +56,20 @@ def main() -> int:
         print("нет SCALE_PASSWORD в .env — не могу подставить пароль root", file=sys.stderr)
         return 1
 
-    seed = SEED_SRC.read_text(encoding="utf-8").replace("__ROOT_PW__", pw)
-    if "__ROOT_PW__" in seed:
-        print("плейсхолдер не заменён", file=sys.stderr)
+    # Адрес зеркала/шлюза — из .env (MIRROR_IP), не хардкод конкретного ПК.
+    mirror = env.get("MIRROR_IP")
+    if not mirror:
+        print("нет MIRROR_IP в .env — не могу подставить адрес зеркала", file=sys.stderr)
         return 1
+    seed = (
+        SEED_SRC.read_text(encoding="utf-8")
+        .replace("__ROOT_PW__", pw)
+        .replace("__MIRROR_IP__", mirror)
+    )
+    for placeholder in ("__ROOT_PW__", "__MIRROR_IP__"):
+        if placeholder in seed:
+            print(f"плейсхолдер не заменён: {placeholder}", file=sys.stderr)
+            return 1
 
     base = INITRD_SRC.read_bytes()
     seed_cpio = cpio_newc_entry("preseed.cfg", seed.encode("utf-8")) + cpio_trailer()

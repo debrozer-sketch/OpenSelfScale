@@ -62,11 +62,11 @@ impl FeedCalibration {
 /// уехало далеко») — полуавтоматический цикл вместо слепых чисел.
 pub fn test_label_bytes(cal: &FeedCalibration) -> Vec<u8> {
     let mut job = LabelJob::begin((448, 232));
-    let _ = job.field(0, 0, false, "КАЛИБРОВКА");
+    let _ = job.field(0, 0, escpos::FieldStyle::Normal, "КАЛИБРОВКА");
     let _ = job.field(
         0,
         32,
-        false,
+        escpos::FieldStyle::Normal,
         &format!("back={} opto={} extra={}", cal.backward_space, cal.opto_thermo_space, cal.extra_feed),
     );
     job.finish()

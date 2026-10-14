@@ -3595,6 +3595,7 @@ name = "shtrih-m"
 version = "0.1.0"
 dependencies = [
  "drivers-api",
+ "libc",
  "log",
  "serialport",
  "thiserror 2.0.21",

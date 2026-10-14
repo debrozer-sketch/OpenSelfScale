@@ -5,7 +5,13 @@
     python scale_ssh.py --sudo "команда"      # выполнить через sudo -S,
                                               # пароль уходит в stdin
 Логин/пароль читаются из .env рядом со скриптом и никогда не печатаются.
+
+Jump-хост (если весы не видны напрямую): SCALE_JUMP в .env. Авторизация
+на jump — ключом SCALE_JUMP_KEY (по умолчанию ~/.ssh/scalefw_bastion),
+иначе паролем SCALE_JUMP_PASSWORD, иначе SCALE_PASSWORD. Переменные
+окружения SCALE_* перекрывают значения из .env.
 """
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -21,7 +27,35 @@ def load_env(path: Path) -> dict:
             continue
         key, _, value = line.partition("=")
         env[key.strip()] = value.strip()
+    for key, value in os.environ.items():
+        if key.startswith("SCALE_") and value:
+            env[key] = value
     return env
+
+
+def _connect_jump(cfg: dict) -> paramiko.SSHClient:
+    """Jump-хост: ключ предпочтительнее пароля."""
+    jump = paramiko.SSHClient()
+    jump.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    kwargs = dict(
+        hostname=cfg["SCALE_JUMP"],
+        port=int(cfg.get("SCALE_JUMP_PORT", "22")),
+        username=cfg.get("SCALE_JUMP_USER", cfg["SCALE_USER"]),
+        timeout=15,
+        banner_timeout=15,
+        auth_timeout=15,
+        allow_agent=False,
+        look_for_keys=False,
+    )
+    key_path = cfg.get("SCALE_JUMP_KEY") or str(
+        Path.home() / ".ssh" / "scalefw_bastion"
+    )
+    if Path(key_path).exists():
+        kwargs["pkey"] = paramiko.Ed25519Key.from_private_key_file(key_path)
+    else:
+        kwargs["password"] = cfg.get("SCALE_JUMP_PASSWORD", cfg["SCALE_PASSWORD"])
+    jump.connect(**kwargs)
+    return jump
 
 
 def connect() -> paramiko.SSHClient:
@@ -35,19 +69,35 @@ def connect() -> paramiko.SSHClient:
         raise RuntimeError("Не заполнены поля в .env: " + ", ".join(missing))
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    sock = None
+    if cfg.get("SCALE_JUMP"):
+        sock = _connect_jump(cfg).get_transport().open_channel(
+            "direct-tcpip",
+            (cfg["SCALE_HOST"], int(cfg.get("SCALE_PORT", "22"))),
+            ("127.0.0.1", 0),
+            timeout=15,
+        )
     client.connect(
         hostname=cfg["SCALE_HOST"],
         port=int(cfg.get("SCALE_PORT", "22")),
         username=cfg["SCALE_USER"],
         password=cfg["SCALE_PASSWORD"],
+        sock=sock,
         timeout=10,
         banner_timeout=10,
         auth_timeout=10,
+        allow_agent=False,
+        look_for_keys=False,
     )
     return client
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     argv = sys.argv[1:]
     sudo = False
     if argv and argv[0] == "--sudo":

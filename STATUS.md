@@ -1,10 +1,13 @@
-# Статус проекта ScaleFW (обновлено 2026-10-13, деплой 10:01 с фиксом пейджера)
+# Статус проекта ScaleFW (обновлено 2026-10-14, аудит-фиксы в работе)
+
+Текущее состояние работ по аудиту: audit/FIXLOG.md (сделано / осталось).
+Полный отчёт аудита: audit/CODE_AUDIT.md.
 
 ## Где что
 - Код: app/kiosk (Rust+Slint, киоск), crates/datastore (БД), crates/shtrih-m, crates/escpos.
 - Сборка: `cargo zigbuild --release -p kiosk --bin kiosk --target x86_64-unknown-linux-gnu.2.41` (PATH: zig 0.13 + MinGW + cargo, MSYS-стиль).
 - Деплой: `python deploy/push.py target/x86_64-unknown-linux-gnu/release/kiosk` → `python scale_ssh.py --sudo "install -m755 /home/administrator/install/kiosk /usr/local/bin/kiosk && systemctl restart scale-kiosk"`.
-- SSH: пользователь **administrator** , пароль в .env, порт из .env.
+- SSH: пользователь **administrator**, пароль в .env, порт из .env.
 - БД на весах: /home/scales/plu.db. Конфиг: /etc/scalefw/config.toml. Лог: /var/log/scalefw/kiosk.log, journalctl -u scale-kiosk.
 - Реальные данные загружены: 214 товаров (plu.xml) + группировка из layout.xml (5 групп → отделы: Фрукты→ФРУКТЫ, Орехи и Сухофрукты→ОРЕХИ, Овощи/Зелень→ОВОЩИ, Конфеты→КОНФЕТЫ, Замороженная рыба→РЫБА). Скидочная цена: БАНАНЫ card_price=12999 (тест).
 - 43 демо-позиции, которых нет в выгрузке, скрыты (groupcode='') — не удалены.
@@ -41,7 +44,9 @@
 ## Известное
 - Печать: payload EAN-13 = 21+last5(itemcode)+weight5, sum_kopecks округление вверх от 0.5.
 - VNC зеркалит физический экран (:0), пароль rfbauth.
-- Сборка Windows: gcc через MinGW в PATH (MSYS-стиль), zig для zigbuild; 12+3 наборов тестов зелёные.
-- zig: pip-пакет ziglang==0.13.0 (каталог site-packages\ziglang в PATH).
+- Сборка Windows: rustup (host stable-x86_64-pc-windows-gnu) + mingw64 GCC 14.2 (%LOCALAPPDATA%\tools\mingw64\bin) + cargo-zigbuild + zig 0.13 (pip-пакет `ziglang`, каталог site-packages\ziglang в PATH). 42 теста зелёные.
+- Сеть весов: 172.32.0.5/24 (основной) + 172.18.105.249/24 (доп-адрес для офисной LAN, /etc/network/interfaces).
+- Боевые весы (192.168.41.129, Ubuntu 16.04, старое ПО) — через jump-хост: SCALE_HOST/SCALE_JUMP/SCALE_JUMP_USER переменными окружения поверх .env; jump авторизуется ключом ~/.ssh/scalefw_bastion.
+- Гашение экрана киоска (blank/DPMS Xorg по умолчанию) отключено: /etc/X11/xorg.conf.d/10-noblank.conf (шаблон deploy/xorg/10-noblank.conf); xset на весах нет, поэтому не через xset. Ревизия боевых весов: audit/PROD_SCALES.md.
 - 13.10 (утро): фикс пейджера шапки — dept_pages_total не инициализировался при старте и в admin-меню, «ДАЛЕЕ» на экране товаров не показывался; теперь ставится везде, где пересобирается depts_all. Привязаны 32 группы в group_dept на весах (44 товара вернулись в меню, в т.ч. ЗЕЛЕНЬ = 7 шт.); непривязанных групп: 0. Настроена ротация /var/log/scalefw/kiosk.log (/etc/logrotate.d/scalefw: weekly, rotate 8, compress, copytruncate).
 - Проверка old.md (старый конвейер): гонка флага/данных — в новом киоске ready.flg не используется, файлы тянет сам киоск; рестарт на обновление — применяет живо; архив — /var/lib/scalefw/history; ротация лога — настроена; картинки без файла — заглушка. Не сделано: транспорт не настроен ([center].host пуст, pull-FTP не тестировался — нужен FTP-источник на стороне магазина).

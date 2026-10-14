@@ -161,6 +161,29 @@ pub fn load_all(conn: &Connection) -> Result<Vec<PluEntry>, StoreError> {
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Товар по PLU целиком (печать, диалог товара).
+pub fn get_item(conn: &Connection, plu: &str) -> Result<Option<PluItem>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT plu, price, card_price, itemcode, groupcode, namefirst, namesecond, shelflife
+         FROM plucodes WHERE plu = ?1",
+    )?;
+    let mut rows = stmt.query([plu])?;
+    rows.next()?
+        .map(|r| {
+            Ok(PluItem {
+                plu: r.get(0)?,
+                price: r.get(1)?,
+                card_price: r.get(2)?,
+                itemcode: r.get(3)?,
+                groupcode: r.get(4)?,
+                namefirst: r.get(5)?,
+                namesecond: r.get(6)?,
+                shelflife: r.get(7)?,
+            })
+        })
+        .transpose()
+}
+
 /// Топ-N групп по числу товаров (для главного экрана).
 pub fn groups_by_size(conn: &Connection, n: usize) -> Result<Vec<(String, i64)>, StoreError> {
     let mut stmt = conn.prepare(
@@ -503,10 +526,8 @@ pub fn parse_layout_xml(data: &str) -> Result<Vec<(String, Vec<String>)>, StoreE
                         if name.is_empty() {
                             return Err(StoreError::Xml("group без name".into()));
                         }
-                        // Empty-тег группы без кнопок: просто фиксируем.
-                        if e.name().as_ref() == b"group" {
-                            groups.push((name, Vec::new()));
-                        }
+                        // Start/Empty тег группы (кнопок может не быть): фиксируем.
+                        groups.push((name, Vec::new()));
                     }
                     b"button" => {
                         let mut plu = String::new();

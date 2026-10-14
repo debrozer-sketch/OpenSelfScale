@@ -9,6 +9,12 @@
 import sys
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import scale_ssh  # noqa: E402  (переиспользует .env и подключение)
 

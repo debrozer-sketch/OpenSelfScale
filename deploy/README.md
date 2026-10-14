@@ -53,3 +53,15 @@ python scale_ssh.py --sudo "kexec -l /home/administrator/install/vmlinuz \
 - Если что-то пошло не так и весы не поднялись — физически перезагрузить
   питанием: загрузчик старой системы уничтожен, дальше только PXE-путь
   (уровень 2 из docs/RECOVERY.md) или флешка.
+
+## Зеркало пакетов для установки (172.32.0.2:8000)
+
+Установщик и apt весов берут пакеты с HTTP-зеркала на рабочем ПК
+(каталог с deploy/xorg/*deb + Packages.xz; поднимается python -m http.server 8000).
+Состав зеркала обязан включать всё из pkgsel/include (openssh-server, mc)
+и зависимости: mc-data, libssl3t64, openssl-provider-legacy, libssh2-1t64,
+libslang2, libgpm2, libext2fs2t64, gcc-14-base, libglib2.0-0t64, libatomic1.
+Индекс пересобирать после каждого пополнения (dpkg-scanpackages на любой
+Debian-машине или python-скрипт). Перед переустановкой весы проверять:
+зеркало доступно, пакеты на месте.
+

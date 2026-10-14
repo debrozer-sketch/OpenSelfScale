@@ -124,7 +124,7 @@ impl Default for Config {
             printer: PrinterProfile::default(),
             ui: UiProfile::default(),
             center: CenterProfile::default(),
-            incoming_dir: PathBuf::from("/home/scales/incoming"),
+            incoming_dir: PathBuf::from("/var/ftp/scale"),
             db_path: PathBuf::from("/home/scales/plu.db"),
             log_file: PathBuf::from("/var/log/scalefw/kiosk.log"),
         }
@@ -132,8 +132,13 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Загрузка config.toml. Формат:
+    /// Загрузка config.toml. Формат (ключи без секции — до первого
+    /// [заголовка], иначе они молча уйдут в предыдущую секцию):
     /// ```toml
+    /// incoming_dir = "/var/ftp/scale"
+    /// db_path = "/home/scales/plu.db"
+    /// log_file = "/var/log/scalefw/kiosk.log"
+    ///
     /// [scales]
     /// kind = "shtrih-slim"
     /// port = "/dev/scales"
@@ -142,9 +147,6 @@ impl Config {
     /// kind = "escpos"
     /// port = "/dev/ttyS3"
     /// baud = 19200
-    /// incoming_dir = "/home/scales/incoming"
-    /// db_path = "/home/scales/plu.db"
-    /// log_file = "/var/log/scalefw/kiosk.log"
     /// ```
     /// Нет файла или битые поля — дефолты эталона; конфиг не может уронить киоск.
     pub fn load(path: &Path) -> Result<Self, String> {

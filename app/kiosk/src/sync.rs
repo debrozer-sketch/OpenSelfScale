@@ -159,21 +159,24 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
             images.push(p);
         }
     }
+    // Ожидание: все картинки должны «остыть» — размер не меняется между
+    // двумя замерами с паузой (защита от копирования недокачанного файла,
+    // который иначе навсегда застрянет битым в img/plu).
     let hot_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
-        let hot = images
-            .iter()
-            .any(|p| {
-                p.metadata()
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|t| t.elapsed().ok())
-                    .is_some_and(|age| age < std::time::Duration::from_secs(2))
-            });
+        let hot = images.iter().any(|p| {
+            let s1 = p.metadata().map(|m| m.len()).ok();
+            if s1.is_none() {
+                return false; // исчез (удалён зеркалом) — не ждать
+            }
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let s2 = p.metadata().map(|m| m.len()).ok();
+            s1 != s2
+        });
         if !hot || std::time::Instant::now() > hot_deadline {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(700));
     }
     let mut copied: Vec<std::path::PathBuf> = Vec::new();
     for p in &images {
@@ -186,7 +189,6 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         }
         copied.push(p.clone());
     }
-
     // Архив исходников — до удаления (материал для разбора инцидентов).
     archive(
         &cfg.center.history_dir,
@@ -218,14 +220,20 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         None => String::new(),
     };
 
-    // Подчистка каталога приёма: флаг, XML и забранные картинки.
-    let _ = std::fs::remove_file(dir.join("ready.flg"));
-    let _ = std::fs::remove_file(&plu);
+    // Подчистка каталога приёма: флаг, XML и забранные картинки. Неудачное
+    // удаление — в лог: залипший ready.flg иначе даёт цикл ошибок в тишине.
+    let rm = |p: &std::path::Path| {
+        if let Err(e) = std::fs::remove_file(p) {
+            log::warn!("выгрузка (drop): не удалён {}: {e}", p.display());
+        }
+    };
+    rm(&dir.join("ready.flg"));
+    rm(&plu);
     if groups.is_some() {
-        let _ = std::fs::remove_file(&layout);
+        rm(&layout);
     }
     for p in &copied {
-        let _ = std::fs::remove_file(p);
+        rm(p);
     }
 
     Ok(Some(format!(

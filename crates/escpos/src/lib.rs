@@ -2,7 +2,7 @@
 //!
 //! Последовательности сняты живым дампом с работающих весов
 //! (см. audit/PROTOCOL.md, раздел 2). Рендер: page mode, абсолютное
-//! позиционирование поля = пара (ESC $ X, GS $ Y) + данные в CP1251.
+//! позиционирование поля = пара (ESC $ X, GS $ Y) + данные в CP866.
 
 use std::io::{Read, Write};
 
@@ -20,6 +20,30 @@ pub enum EscPosError {
     Io(#[from] std::io::Error),
     #[error("CP866 encoding failed for U+{0:04X}")]
     Encoding(u32),
+    #[error("invalid EAN-13 payload: {0}")]
+    InvalidBarcode(String),
+}
+
+/// Стиль текстового поля — снят с живого дампа (scales_io.trace, ttyS3):
+/// - Normal:  ESC ! 0x00 + GS ! 0x00 — наименование;
+/// - FontB:   ESC ! 0x01 + GS ! 0x00 — дата/время/PLU/вес/цена (шрифт B);
+/// - DoubleH: ESC ! 0x00 + GS ! 0x01 — только «Итого» (высота ×2, ширина 1).
+/// Внимание: GS ! 0x11 (2×2) в дампе не встречается.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldStyle {
+    Normal,
+    FontB,
+    DoubleH,
+}
+
+impl FieldStyle {
+    fn bytes(self) -> [u8; 2] {
+        match self {
+            FieldStyle::Normal => [0x00, 0x00],
+            FieldStyle::FontB => [0x01, 0x00],
+            FieldStyle::DoubleH => [0x00, 0x01],
+        }
+    }
 }
 
 /// Кодовая страница 17 = CP866. Подтверждено байтами дампа: «В» = 0x82
@@ -62,7 +86,7 @@ impl LabelJob {
     /// `area`: печатная область (dx, dy) для FS W.
     pub fn begin(area: (u16, u16)) -> Self {
         let mut b = Vec::with_capacity(64);
-        b.extend_from_slice(&[ESC, b't', 0x11]); // кодовая страница CP1251
+        b.extend_from_slice(&[ESC, b't', 0x11]); // кодовая страница 17 = CP866
         b.extend_from_slice(&[FS, b'c', b'0', 0x01]);
         b.extend_from_slice(&[ESC, b'{', 0x01]); // разворот 180° выкл
         b.extend_from_slice(&[FS, b'L']); // вход в page mode
@@ -77,24 +101,32 @@ impl LabelJob {
         Self { buf: b }
     }
 
-    /// Текстовое поле: позиция (ESC $ / GS $) + размер шрифта + CP1251-текст.
-    pub fn field(&mut self, x: u16, y: u16, double_height: bool, text: &str) -> Result<&mut Self, EscPosError> {
-        self.buf
-            .extend_from_slice(&[ESC, b'!', if double_height { 0x01 } else { 0x00 }]);
-        self.buf
-            .extend_from_slice(&[GS, b'!', if double_height { 0x11 } else { 0x00 }]);
+    /// Текстовое поле: позиция (ESC $ / GS $) + стиль + CP866-текст.
+    /// Кодирование текста — ДО записи байтов позиционирования: при ошибке
+    /// буфер не замусоривается частичным кадром.
+    pub fn field(
+        &mut self,
+        x: u16,
+        y: u16,
+        style: FieldStyle,
+        text: &str,
+    ) -> Result<&mut Self, EscPosError> {
+        let encoded = to_cp866(text)?;
+        let [esc_b, gs_b] = style.bytes();
+        self.buf.extend_from_slice(&[ESC, b'!', esc_b]);
+        self.buf.extend_from_slice(&[GS, b'!', gs_b]);
         let [xl, xh] = le16(x);
         self.buf.extend_from_slice(&[ESC, b'$', xl, xh]);
         let [yl, yh] = le16(y);
         self.buf.extend_from_slice(&[GS, b'$', yl, yh]);
-        self.buf.extend_from_slice(&to_cp866(text)?);
+        self.buf.extend_from_slice(&encoded);
         Ok(self)
     }
 
     /// Штрихкод EAN-13 (12 цифр + NUL), снято: `\x1dk\x02<digits>\x00`.
     pub fn barcode_ean13(&mut self, x: u16, y: u16, digits: &str) -> Result<&mut Self, EscPosError> {
         if digits.len() != 12 || !digits.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(EscPosError::Encoding(b'E' as u32)); // валидация до позиций
+            return Err(EscPosError::InvalidBarcode(digits.into()));
         }
         let [xl, xh] = le16(x);
         self.buf.extend_from_slice(&[ESC, b'$', xl, xh]);
@@ -177,14 +209,14 @@ impl<P: Read + Write> EscPosPrinter<P> {
     }
 
     pub fn status(&mut self) -> Result<PrinterStatus, EscPosError> {
-        for level in [4u8] {
-            self.port.write_all(&build_status_query(level))?;
-            self.port.flush()?;
-            let mut b = [0u8; 1];
-            self.port.read_exact(&mut b)?;
-            return Ok(parse_status(level, b[0]));
-        }
-        unreachable!()
+        // Уровень 4: бумага (биты 5/6). Уровни 1-3 в боевом пути не нужны,
+        // но build_status_query/parse_status оставлены для отладки.
+        let level = 4u8;
+        self.port.write_all(&build_status_query(level))?;
+        self.port.flush()?;
+        let mut b = [0u8; 1];
+        self.port.read_exact(&mut b)?;
+        Ok(parse_status(level, b[0]))
     }
 }
 

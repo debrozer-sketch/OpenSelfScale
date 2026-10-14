@@ -407,7 +407,9 @@ struct Kiosk {
     phase: i32,
     selected: Option<datastore::PluEntry>,
     /// Вес на момент запуска печати — по нему считается сумма на экране.
-    print_weight_g: u32,
+    /// None = печать ещё не запущена (сентинел 0 в u32 нельзя: вес 0 г валиден
+    /// как сигнал «товар сняли», см. фазу 2 в тике).
+    print_weight_g: Option<u32>,
     /// Момент перехода в фазу 3 (готово) — для таймаута возврата.
     done_at: Option<Instant>,
     /// Момент сообщения об ошибке принтера — авто-возврат.
@@ -431,7 +433,7 @@ impl Kiosk {
         Kiosk {
             phase: 0,
             selected: None,
-            print_weight_g: 0,
+            print_weight_g: None,
             done_at: None,
             error_at: None,
             idle_since: None,
@@ -615,19 +617,20 @@ fn run_kiosk(cfg: config::Config) {
         ui.window().set_fullscreen(true);
     }
 
-    // Каталог + справочник групп по отделам (main.slint: 5 пастельных
-    // отделов; состав отдела — из маппинга datastore::dept_of).
+    // Каталог + справочник групп по отделам. Состав отдела — из БД-карты
+    // group_dept (правится CLI/центром); dept_of (сид) не используется
+    // в фильтрах, чтобы меню и вход в отдел не расходились.
     let mut all_groups: Vec<(String, i64)> = Vec::new();
-    let mut group_dept: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
     let mut depts: Vec<datastore::DeptRow> = Vec::new();
+    let group_dept: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new()));
     let catalog: Vec<datastore::PluEntry> = match datastore::open(&cfg.db_path) {
         Ok(conn) => {
             // Отделы и привязки из БД: состав/порядок правятся без кода
             // (CLI/центр/SQL). Отдел в меню виден, только если у него есть
             // хотя бы одна непустая группа.
             depts = datastore::depts_list(&conn).unwrap_or_default();
-            group_dept = datastore::group_depts(&conn)
+            *group_dept.borrow_mut() = datastore::group_depts(&conn)
                 .unwrap_or_default()
                 .into_iter()
                 .collect();
@@ -635,9 +638,10 @@ fn run_kiosk(cfg: config::Config) {
                 Ok(items) => {
                     log::info!("загружено товаров: {}", items.len());
                     all_groups = datastore::groups_alpha(&conn).unwrap_or_default();
+                    let gd = group_dept.borrow();
                     let mut unmapped = 0;
                     for (g, n) in &all_groups {
-                        if !group_dept.contains_key(g) {
+                        if !gd.contains_key(g) {
                             unmapped += *n as usize;
                             log::warn!("группа без отдела: {g} ({n} шт.)");
                         }
@@ -668,7 +672,7 @@ fn run_kiosk(cfg: config::Config) {
     let img_dir = cfg.ui.img_dir.clone();
     let depts_all = std::rc::Rc::new(std::cell::RefCell::new(dept_tiles(
         &depts,
-        &group_dept,
+        &group_dept.borrow(),
         &all_groups,
         &img_dir,
     )));
@@ -815,6 +819,7 @@ fn run_kiosk(cfg: config::Config) {
     ui.on_dept_tapped({
         let kiosk = kiosk.clone();
         let catalog = catalog.clone();
+        let group_dept = group_dept.clone();
         let ui_handle = ui.as_weak();
         let items_all = items_all.clone();
         let show = show_items_page.clone();
@@ -823,12 +828,13 @@ fn run_kiosk(cfg: config::Config) {
             kiosk.borrow_mut().idle_since = None;
             let Some(ui) = ui_handle.upgrade() else { return };
             kiosk.borrow_mut().dept_back = 0;
+            let gd = group_dept.borrow();
             let mut items: Vec<PluTile> = catalog
                 .borrow()
                 .iter()
                 .filter(|p| {
                     let g = if p.group.is_empty() { "ПРОЧЕЕ" } else { p.group.as_str() };
-                    datastore::dept_of(g) == Some(dept.as_str())
+                    gd.get(g).map(|d| d == dept.as_str()).unwrap_or(false)
                 })
                 .map(|p| tile_of(p, &img_dir))
                 .collect();
@@ -1143,6 +1149,7 @@ fn run_kiosk(cfg: config::Config) {
         let ui_handle = ui.as_weak();
         let cfg = cfg.clone();
         let catalog = catalog.clone();
+        let group_dept = group_dept.clone();
         let depts_all = depts_all.clone();
         let items_all = items_all.clone();
         let img_dir = img_dir.clone();
@@ -1158,25 +1165,51 @@ fn run_kiosk(cfg: config::Config) {
                     return;
                 }
             };
-            let depts = datastore::depts_list(&conn).unwrap_or_default();
-            let group_dept: std::collections::HashMap<String, String> =
-                datastore::group_depts(&conn).unwrap_or_default().into_iter().collect();
-            let all_groups = datastore::groups_alpha(&conn).unwrap_or_default();
-            let items = datastore::load_all(&conn).unwrap_or_default();
+            // Ошибки чтения НЕ затирают модели пустотой: транзитная блокировка
+            // БД не должна оставлять киоск с пустым меню до следующей синхронизации.
+            let (depts, gd_pairs, all_groups, items);
+            match (
+                datastore::depts_list(&conn),
+                datastore::group_depts(&conn),
+                datastore::groups_alpha(&conn),
+                datastore::load_all(&conn),
+            ) {
+                (Ok(d), Ok(g), Ok(gr), Ok(i)) => {
+                    (depts, gd_pairs, all_groups, items) = (d, g, gr, i);
+                }
+                (a, b, c, d) => {
+                    for (name, e) in [
+                        ("отделы", a.err()),
+                        ("привязки", b.err()),
+                        ("группы", c.err()),
+                        ("PLU", d.err()),
+                    ] {
+                        if let Some(e) = e {
+                            log::error!("обновление данных: {name}: {e}");
+                        }
+                    }
+                    return;
+                }
+            }
             log::info!("данные обновлены: {} товаров", items.len());
             *catalog.borrow_mut() = items;
-            *depts_all.borrow_mut() = dept_tiles(&depts, &group_dept, &all_groups, &img_dir);
+            let gd_map: std::collections::HashMap<String, String> =
+                gd_pairs.into_iter().collect();
+            *depts_all.borrow_mut() =
+                dept_tiles(&depts, &gd_map, &all_groups, &img_dir);
+            *group_dept.borrow_mut() = gd_map;
             let page = kiosk.borrow().dept_page;
             show_dept(&kiosk, page);
             // Открытый экран товаров: пересобрать карточки текущего отдела.
             if ui.get_screen() == 2 {
                 let title = ui.get_screen_title();
+                let gd = group_dept.borrow();
                 let mut tiles: Vec<PluTile> = catalog
                     .borrow()
                     .iter()
                     .filter(|p| {
                         let g = if p.group.is_empty() { "ПРОЧЕЕ" } else { p.group.as_str() };
-                        datastore::dept_of(g) == Some(title.as_str())
+                        gd.get(g).map(|d| d == title.as_str()).unwrap_or(false)
                     })
                     .map(|p| tile_of(p, &img_dir))
                     .collect();
@@ -1295,18 +1328,26 @@ fn run_kiosk(cfg: config::Config) {
                     k.phase = 2;
                 }
                 // Запуск печати: фаза 2 и печать ещё не запущена.
-                if k.phase == 2 && k.print_weight_g == 0 {
+                if k.phase == 2 && k.print_weight_g.is_none() {
                     let weight_g = (snap.mass_kg * 1000.0).round() as u32;
-                    k.print_weight_g = weight_g;
-                    let cfg = cfg.clone();
-                    let tx = tx.clone();
-                    let plu = k.selected.as_ref().map(|p| p.plu.clone()).unwrap_or_default();
-                    log::info!("печать: PLU {plu}, {weight_g} г");
-                    std::thread::spawn(move || {
-                        let res = print::print_for_plu(&cfg, weight_g, &plu)
-                            .map_err(|e| format!("{e}"));
-                        let _ = tx.send(res.map(|_| weight_g));
-                    });
+                    if weight_g == 0 {
+                        // Товар сняли в момент подтверждения: печатать нечего —
+                        // снова ждём вес (фаза 1). Иначе сентинел-гонка: каждый
+                        // тик спавнил бы новый поток печати «0.000 кг».
+                        k.phase = 1;
+                    } else {
+                        k.print_weight_g = Some(weight_g);
+                        let cfg = cfg.clone();
+                        let tx = tx.clone();
+                        let plu =
+                            k.selected.as_ref().map(|p| p.plu.clone()).unwrap_or_default();
+                        log::info!("печать: PLU {plu}, {weight_g} г");
+                        std::thread::spawn(move || {
+                            let res = print::print_for_plu(&cfg, weight_g, &plu)
+                                .map_err(|e| format!("{e}"));
+                            let _ = tx.send(res.map(|_| weight_g));
+                        });
+                    }
                 }
                 // Возвраты по таймаутам.
                 if k.phase == 3 && k.done_at.is_some_and(|t| t.elapsed() > DONE_TIMEOUT) {
@@ -1363,7 +1404,7 @@ fn run_kiosk(cfg: config::Config) {
                     k.admin_hold = None;
                 }
                 if k.phase != 2 {
-                    k.print_weight_g = 0; // сброс для следующей операции
+                    k.print_weight_g = None; // сброс для следующей операции
                 }
 
                 // Уведомления — только верхняя строка, нейтральные тексты:
@@ -1381,12 +1422,13 @@ fn run_kiosk(cfg: config::Config) {
                     ),
                     2 => match k.selected.as_ref() {
                         Some(sel) => {
-                            let sum = sum_str(sum_kopecks(sel.price, k.print_weight_g));
+                            let w = k.print_weight_g.unwrap_or(0);
+                            let sum = sum_str(sum_kopecks(sel.price, w));
                             (
                                 format!(
                                     "{}: {:.3} кг = {} — печатаем…",
                                     sel.name,
-                                    k.print_weight_g as f64 / 1000.0,
+                                    w as f64 / 1000.0,
                                     sum
                                 ),
                                 1,

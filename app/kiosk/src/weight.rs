@@ -151,6 +151,13 @@ fn poll_loop(profile: &ScalesProfile, out: Arc<Mutex<Snapshot>>, stop: Arc<Atomi
                             s.stable = sample.stable;
                             s.port_up = true;
                         }
+                        Err(drivers_api::DriverError::Timeout) => {
+                            // Пустая платформа / дрейф: устройство вправе молчать.
+                            // Порт жив — не переподключаемся, просто гасим «стабильно».
+                            let mut s = out.lock().expect("weight mutex");
+                            s.stable = false;
+                            s.port_up = true;
+                        }
                         Err(e) => {
                             log::warn!("опрос весов: {e}; переподключение");
                             break;

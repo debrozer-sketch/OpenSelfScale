@@ -67,7 +67,10 @@ pub fn build_poll_frame() -> [u8; 8] {
 /// −6 г = fa ff ff ff (срезается в 0); 1350 г = 46 05 00 00. Управляемые
 /// байты ACK/NAK приходят ДО кадра и в кадр не входят.
 pub fn parse_reply(frame: &[u8]) -> Result<ScaleReply, ShtrihError> {
-    if frame.len() < 4 {
+    // Порядок проверок: длина → STX → ':' → LRC → парсинг. Иначе обрезанный
+    // кадр со случайно сошедшимся LRC на коротком диапазоне даёт невнятную
+    // ошибку вместо честной.
+    if frame.len() < 14 {
         return Err(ShtrihError::Protocol(frame.first().copied().unwrap_or(0)));
     }
     if frame[0] != STX {
@@ -80,22 +83,72 @@ pub fn parse_reply(frame: &[u8]) -> Result<ScaleReply, ShtrihError> {
     if expected != frame[frame.len() - 1] {
         return Err(ShtrihError::LrcMismatch { expected, got: frame[frame.len() - 1] });
     }
-    if frame.len() < 14 {
-        return Err(ShtrihError::Protocol(frame[2]));
-    }
     let status = frame[4];
     let raw = i32::from_le_bytes([frame[6], frame[7], frame[8], frame[9]]);
     Ok(ScaleReply { status, mass_g: raw.max(0) as u32 })
 }
 
+/// Чтение с таймаутом, платформенно-зависимое: unix требует AsRawFd (poll),
+/// хост-сборка обходится встроенным таймаутом serialport.
+trait PortPoll: Read + Write {
+    fn read_timeout(&mut self, buf: &mut [u8], timeout: Duration) -> std::io::Result<usize>;
+}
+
+#[cfg(unix)]
+impl<P: Read + Write + std::os::unix::io::AsRawFd> PortPoll for P {
+    fn read_timeout(&mut self, buf: &mut [u8], timeout: Duration) -> std::io::Result<usize> {
+        // VTIME порта фиксирован (0.5 с), а опросу нужен свой таймаут —
+        // ждём готовность через poll, затем одно чтение.
+        use std::os::unix::io::AsRawFd;
+        let mut fds = [libc::pollfd {
+            fd: self.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        }];
+        let ms = timeout.as_millis().min(i32::MAX as u128) as libc::c_int;
+        let rc = unsafe { libc::poll(fds.as_mut_ptr(), 1, ms) };
+        if rc < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if rc == 0 {
+            return Ok(0);
+        }
+        self.read(buf)
+    }
+}
+
+#[cfg(not(unix))]
+impl<P: Read + Write> PortPoll for P {
+    fn read_timeout(&mut self, buf: &mut [u8], timeout: Duration) -> std::io::Result<usize> {
+        // Хост-сборка: порт serialport с таймаутом; чтение ограничиваем
+        // дедлайном, чтобы не зависнуть дольше запрошенного.
+        let deadline = std::time::Instant::now() + timeout;
+        let mut total = 0;
+        loop {
+            match self.read(&mut buf[total..]) {
+                Ok(0) => break,
+                Ok(n) => {
+                    total += n;
+                    if total == buf.len() || std::time::Instant::now() >= deadline {
+                        break;
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(total)
+    }
+}
+
 /// Постоянный читатель порта: шлёт кадр опроса, собирает ответ (ACK и STX-кадр
 /// могут прийти раздельными чтениями), отвечает ACK-ом.
-pub struct ShtrihScales<P: Read + Write> {
+pub struct ShtrihScales<P: PortPoll> {
     port: P,
     buf: Vec<u8>,
 }
 
-impl<P: Read + Write> ShtrihScales<P> {
+impl<P: PortPoll> ShtrihScales<P> {
     pub fn new(port: P) -> Self {
         Self { port, buf: Vec::with_capacity(64) }
     }
@@ -131,7 +184,7 @@ impl<P: Read + Write> ShtrihScales<P> {
                 // Мусор без кадра — сбрасываем и начинаем заново.
                 self.buf.clear();
             }
-            let n = self.read_timeout(&mut scratch, timeout)?;
+            let n = self.port.read_timeout(&mut scratch, timeout)?;
             if n == 0 {
                 return Err(ShtrihError::Timeout);
             }
@@ -139,48 +192,18 @@ impl<P: Read + Write> ShtrihScales<P> {
         }
     }
 
-    #[cfg(not(unix))]
-    fn read_timeout(&mut self, buf: &mut [u8], timeout: Duration) -> std::io::Result<usize> {
-        // serialport::DataPort умеет таймауты; для обобщённого P делаем простой
-        // неблокирующий опрос через available-механизм, если он есть.
-        // В боевом коде порт оборачивается в serialport::SerialPort с таймаутом.
-        let _ = timeout;
-        let mut total = 0;
-        loop {
-            match self.port.read(&mut buf[total..]) {
-                Ok(0) => break,
-                Ok(n) => {
-                    total += n;
-                    if total == buf.len() {
-                        break;
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) => return Err(e),
-            }
-        }
-        Ok(total)
-    }
-
-    #[cfg(unix)]
-    fn read_timeout(&mut self, buf: &mut [u8], timeout: Duration) -> std::io::Result<usize> {
-        let _ = timeout;
-        self.port.read(buf)
-    }
 }
 
 impl<P> drivers_api::ScalesDriver for ShtrihScales<P>
 where
-    P: std::io::Read + std::io::Write,
+    P: PortPoll,
 {
     fn poll_once(&mut self, timeout: Duration) -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
         ShtrihScales::poll_once(self, timeout)
             .map(|r| r.as_sample())
             .map_err(|e| match e {
                 ShtrihError::Io(io) => drivers_api::DriverError::Io(io),
-                ShtrihError::Timeout => {
-                    drivers_api::DriverError::Protocol("timeout waiting for reply".into())
-                }
+                ShtrihError::Timeout => drivers_api::DriverError::Timeout,
                 other => drivers_api::DriverError::Protocol(other.to_string()),
             })
     }

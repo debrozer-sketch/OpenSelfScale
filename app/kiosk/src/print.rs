@@ -3,7 +3,7 @@
 //! зашита совместимая раскладка, снятая с живого дампа (PROTOCOL.md §2).
 
 use datastore::PluItem;
-use escpos::LabelJob;
+use escpos::{FieldStyle, LabelJob};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LabelLayout {
@@ -12,6 +12,7 @@ pub struct LabelLayout {
     pub date: (u16, u16),
     pub time: (u16, u16),
     pub plu_label: (u16, u16),
+    pub shelflife: (u16, u16),
     pub weight: (u16, u16),
     pub price: (u16, u16),
     pub sum: (u16, u16),
@@ -19,13 +20,14 @@ pub struct LabelLayout {
 }
 
 /// Раскладка, наблюдённая в дампе (область 448x232, направления и координаты
-/// GS $/ESC $ из реальной печати).
+/// GS $/ESC $ из реальной печати). Срок годности — под PLU, зеркально дате.
 pub const LIVE_LAYOUT: LabelLayout = LabelLayout {
     area: (448, 232),
     name: (0, 0),
     date: (25, 100),
     time: (25, 115),
     plu_label: (254, 100),
+    shelflife: (254, 115),
     weight: (170, 148),
     price: (79, 180),
     sum: (214, 180),
@@ -44,13 +46,22 @@ pub enum PrintError {
     Serial(#[from] serialport::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("PLU {0} не найден в базе")]
+    PluNotFound(String),
 }
 
 use thiserror::Error;
 
 /// Собрать байтовое задание печати для товара. Чистая функция — тестируется
-/// без порта и принтера.
-pub fn build_label(item: &PluItem, weight_g: u32, layout: LabelLayout) -> Result<Vec<u8>, PrintError> {
+/// без порта и принтера. `date`/`time` — фактические дата (ДД.ММ.ГГ) и время
+/// (ЧЧ:ММ:СС) печати; зашитые константы из дампа здесь недопустимы.
+pub fn build_label(
+    item: &PluItem,
+    weight_g: u32,
+    layout: LabelLayout,
+    date: &str,
+    time: &str,
+) -> Result<Vec<u8>, PrintError> {
     let mut job = LabelJob::begin(layout.area);
     let kg = format!("{},{}", weight_g / 1000, format!("{:03}", weight_g % 1000));
     let price_r = format!("{},{:02}", item.price / 100, item.price % 100);
@@ -58,13 +69,16 @@ pub fn build_label(item: &PluItem, weight_g: u32, layout: LabelLayout) -> Result
     // = 269,9865 → 269,99 (совпадает с дампом).
     let sum_k = (item.price as u64 * weight_g as u64 + 500) / 1000;
     let sum_r = format!("{},{:02}", sum_k / 100, sum_k % 100);
-    job.field(layout.name.0, layout.name.1, false, &item.namefirst)?
-        .field(layout.date.0, layout.date.1, false, "01.09.26")?
-        .field(layout.time.0, layout.time.1, false, "10:31:53")?
-        .field(layout.plu_label.0, layout.plu_label.1, false, &format!("PLU {}", item.plu))?
-        .field(layout.weight.0, layout.weight.1, false, &kg)?
-        .field(layout.price.0, layout.price.1, true, &price_r)?
-        .field(layout.sum.0, layout.sum.1, true, &sum_r)?
+    job.field(layout.name.0, layout.name.1, FieldStyle::Normal, &item.namefirst)?
+        .field(layout.date.0, layout.date.1, FieldStyle::FontB, date)?
+        .field(layout.time.0, layout.time.1, FieldStyle::FontB, time)?
+        .field(layout.plu_label.0, layout.plu_label.1, FieldStyle::FontB, &format!("PLU {}", item.plu))?;
+    if !item.shelflife.is_empty() {
+        job.field(layout.shelflife.0, layout.shelflife.1, FieldStyle::FontB, &item.shelflife)?;
+    }
+    job.field(layout.weight.0, layout.weight.1, FieldStyle::FontB, &kg)?
+        .field(layout.price.0, layout.price.1, FieldStyle::FontB, &price_r)?
+        .field(layout.sum.0, layout.sum.1, FieldStyle::DoubleH, &sum_r)?
         .barcode_ean13(layout.barcode.0, layout.barcode.1, &ean13_payload(item, weight_g))?;
     Ok(job.finish())
 }
@@ -83,6 +97,53 @@ pub fn ean13_payload(item: &PluItem, weight_g: u32) -> String {
     format!("21{}{}", code5, format!("{:05}", weight_g.min(99_999)))
 }
 
+/// Локальные дата (ДД.ММ.ГГ) и время (ЧЧ:ММ:СС) момента печати.
+/// unix — localtime_r; прочее (хост-сборка/тесты) — UTC по алгоритму
+/// Ховарда Хиннанта, как в sync::stamp.
+pub fn now_stamp() -> (String, String) {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    #[cfg(unix)]
+    {
+        unsafe {
+            let mut tm: libc::tm = std::mem::zeroed();
+            let t: libc::time_t = secs as libc::time_t;
+            if libc::localtime_r(&t, &mut tm).is_null() {
+                return utc_stamp(secs);
+            }
+            (
+                format!("{:02}.{:02}.{:02}", tm.tm_mday, tm.tm_mon + 1, (tm.tm_year + 1900) % 100),
+                format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec),
+            )
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        utc_stamp(secs)
+    }
+}
+
+fn utc_stamp(secs: i64) -> (String, String) {
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (
+        format!("{:02}.{:02}.{:02}", d, m, (y % 100) as i64),
+        format!("{:02}:{:02}:{:02}", rem / 3600, (rem % 3600) / 60, rem % 60),
+    )
+}
+
 /// Печать по товару из базы: открыть порт, собрать, отправить, спросить статус.
 /// `weight_g` — текущее показание весов из WeightSource.
 pub fn print_for_plu(
@@ -91,9 +152,9 @@ pub fn print_for_plu(
     plu: &str,
 ) -> Result<(), PrintError> {
     let conn = datastore::open(&cfg.db_path)?;
-    let item = lookup(&conn, plu)?
-        .ok_or(PrintError::Db(rusqlite::Error::QueryReturnedNoRows))?;
-    let bytes = build_label(&item, weight_g, LIVE_LAYOUT)?;
+    let item = datastore::get_item(&conn, plu)?.ok_or_else(|| PrintError::PluNotFound(plu.into()))?;
+    let (date, time) = now_stamp();
+    let bytes = build_label(&item, weight_g, LIVE_LAYOUT, &date, &time)?;
     let mut port = serialport::new(&cfg.printer.port, cfg.printer.baud)
         .timeout(std::time::Duration::from_millis(1500))
         .open()?;
@@ -102,27 +163,6 @@ pub fn print_for_plu(
     let st = escpos::EscPosPrinter::new(port).status()?;
     log::info!("статус принтера после печати: {:?}", st);
     Ok(())
-}
-
-fn lookup(conn: &rusqlite::Connection, plu: &str) -> Result<Option<PluItem>, PrintError> {
-    let mut stmt = conn.prepare(
-        "SELECT plu, price, card_price, itemcode, groupcode, namefirst, namesecond, shelflife
-         FROM plucodes WHERE plu = ?1",
-    )?;
-    let mut rows = stmt.query([plu])?;
-    let map_row = |r: &rusqlite::Row| -> Result<PluItem, rusqlite::Error> {
-        Ok(PluItem {
-            plu: r.get(0)?,
-            price: r.get(1)?,
-            card_price: r.get(2)?,
-            itemcode: r.get(3)?,
-            groupcode: r.get(4)?,
-            namefirst: r.get(5)?,
-            namesecond: r.get(6)?,
-            shelflife: r.get(7)?,
-        })
-    };
-    Ok(rows.next()?.map(map_row).transpose()?)
 }
 
 #[cfg(test)]
@@ -144,17 +184,31 @@ mod tests {
 
     #[test]
     fn label_contains_weight_price_sum_from_dump() {
-        let bytes = build_label(&sample(), 1350, LIVE_LAYOUT).unwrap();
+        let bytes = build_label(&sample(), 1350, LIVE_LAYOUT, "13.10.26", "18:40:00").unwrap();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("1,350"), "вес: {text:?}");
         assert!(text.contains("199,99"), "цена: {text:?}");
         // 19999 коп * 1350 г / 1000 = 26 998 коп = 269,99 (совпадает с дампом!)
         assert!(text.contains("269,99"), "сумма: {text:?}");
+        // Дата и время печати — фактические, не константы из дампа.
+        assert!(text.contains("13.10.26"), "дата: {text:?}");
+        assert!(text.contains("18:40:00"), "время: {text:?}");
+        // Срок годности из выгрузки печатается как есть.
+        assert!(text.contains("20/09/2026 18:25:45"), "срок: {text:?}");
+    }
+
+    #[test]
+    fn empty_shelflife_is_not_printed() {
+        let mut item = sample();
+        item.shelflife = String::new();
+        let bytes = build_label(&item, 1350, LIVE_LAYOUT, "13.10.26", "18:40:00").unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains("20/09"), "пустой срок не должен печататься: {text:?}");
     }
 
     #[test]
     fn label_barcode_from_itemcode() {
-        let bytes = build_label(&sample(), 500, LIVE_LAYOUT).unwrap();
+        let bytes = build_label(&sample(), 500, LIVE_LAYOUT, "01.09.26", "10:31:53").unwrap();
         let needle = b"\x1dk\x02";
         let pos = bytes.windows(needle.len()).position(|w| w == needle).unwrap();
         assert_eq!(&bytes[pos + 3..pos + 15], b"210213600500");
