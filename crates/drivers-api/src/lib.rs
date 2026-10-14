@@ -8,8 +8,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum DriverError {
-    #[error("port open failed: {0}")]
-    PortOpen(String),
     #[error("protocol: {0}")]
     Protocol(String),
     #[error("timeout waiting for reply")]
@@ -56,11 +54,14 @@ pub struct PrinterProfile {
     pub kind: String,
     pub port: String,
     pub baud: u32,
+    /// Принтер установлен на платформе. false — стенд без принтера:
+    /// не опрашивать статус и не краснить полосу.
+    pub enabled: bool,
 }
 
 impl Default for PrinterProfile {
     fn default() -> Self {
-        Self { kind: "escpos".into(), port: "/dev/ttyS3".into(), baud: 19_200 }
+        Self { kind: "escpos".into(), port: "/dev/ttyS3".into(), baud: 19_200, enabled: true }
     }
 }
 

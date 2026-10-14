@@ -10,7 +10,6 @@ use thiserror::Error;
 
 pub const STX: u8 = 0x02;
 pub const ACK: u8 = 0x06;
-pub const NAK: u8 = 0x15;
 
 /// Ошибки драйвера весов.
 #[derive(Debug, Error)]
@@ -90,7 +89,7 @@ pub fn parse_reply(frame: &[u8]) -> Result<ScaleReply, ShtrihError> {
 
 /// Чтение с таймаутом, платформенно-зависимое: unix требует AsRawFd (poll),
 /// хост-сборка обходится встроенным таймаутом serialport.
-trait PortPoll: Read + Write {
+pub trait PortPoll: Read + Write {
     fn read_timeout(&mut self, buf: &mut [u8], timeout: Duration) -> std::io::Result<usize>;
 }
 

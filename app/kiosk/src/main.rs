@@ -7,17 +7,23 @@
 //! CLI: `kiosk [--config <путь>] [--diag | --weight | --calibrate |
 //! --import <plu.xml> | --version]`.
 
+mod admin;
 mod calib;
 mod config;
+mod depts_cli;
 mod diag;
 mod print;
+mod session;
 mod sync;
+mod tiles;
 mod weight;
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-slint::include_modules!();
+use session::{
+    sum_kopecks, sum_str, weight_state, Kiosk, DONE_TIMEOUT, ERROR_TIMEOUT, IDLE_TIMEOUT,
+};slint::include_modules!();
 
 enum Mode {
     Kiosk,
@@ -46,6 +52,14 @@ struct Cli {
     config_path: PathBuf,
 }
 
+/// Аргумент CLI без значения — не паника: печатное сообщение и код 2.
+fn req_arg<I: Iterator<Item = String>>(args: &mut I, what: &str) -> String {
+    args.next().unwrap_or_else(|| {
+        eprintln!("kiosk: {what}: не указан аргумент (см. использование — kiosk без параметров)");
+        std::process::exit(2);
+    })
+}
+
 fn parse_cli() -> Cli {
     let mut cli =
         Cli { mode: Mode::Kiosk, config_path: PathBuf::from("/etc/scalefw/config.toml") };
@@ -56,13 +70,10 @@ fn parse_cli() -> Cli {
             "--calibrate" => cli.mode = Mode::Calibrate,
             "--weight" => cli.mode = Mode::Weight,
             "--import" => {
-                let p = args
-                    .next()
-                    .map(PathBuf::from)
-                    .expect("--import требует путь к plu.xml");
+                let p = PathBuf::from(req_arg(&mut args, "--import"));
                 // Необязательный --layout layout.xml: группировка старого ПО.
                 let layout = if args.next().as_deref() == Some("--layout") {
-                    Some(args.next().map(PathBuf::from).expect("--layout требует путь"))
+                    Some(PathBuf::from(req_arg(&mut args, "--layout")))
                 } else {
                     None
                 };
@@ -71,36 +82,39 @@ fn parse_cli() -> Cli {
             "--sync" => cli.mode = Mode::Sync,
             "--dept-list" => cli.mode = Mode::DeptList,
             "--dept-add" => {
-                let name = args.next().expect("--dept-add требует имя отдела");
+                let name = req_arg(&mut args, "--dept-add");
                 let img = args.next();
                 let bg = args.next();
                 let fg = args.next();
                 cli.mode = Mode::DeptAdd(name, img, bg, fg);
             }
             "--dept-style" => {
-                let name = args.next().expect("--dept-style требует имя отдела");
+                let name = req_arg(&mut args, "--dept-style");
                 let img = args.next();
                 let bg = args.next();
                 let fg = args.next();
                 cli.mode = Mode::DeptStyle(name, img, bg, fg);
             }
             "--dept-remove" => {
-                let name = args.next().expect("--dept-remove требует имя отдела");
+                let name = req_arg(&mut args, "--dept-remove");
                 cli.mode = Mode::DeptRemove(name);
             }
             "--dept-move" => {
-                let name = args.next().expect("--dept-move требует имя отдела");
-                let pos = args.next().expect("--dept-move требует позицию N или alpha");
+                let name = req_arg(&mut args, "--dept-move");
+                let pos = req_arg(&mut args, "--dept-move");
                 let ord = if pos.eq_ignore_ascii_case("alpha") {
                     None
                 } else {
-                    Some(pos.parse::<i64>().expect("позиция: число или alpha"))
+                    Some(pos.parse::<i64>().unwrap_or_else(|_| {
+                        eprintln!("kiosk: --dept-move: позиция должна быть числом или alpha");
+                        std::process::exit(2);
+                    }))
                 };
                 cli.mode = Mode::DeptMove(name, ord);
             }
             "--group-assign" => {
-                let g = args.next().expect("--group-assign требует группу и отдел");
-                let d = args.next().expect("--group-assign требует группу и отдел");
+                let g = req_arg(&mut args, "--group-assign");
+                let d = req_arg(&mut args, "--group-assign");
                 cli.mode = Mode::GroupAssign(g, d);
             }
             "--version" => {
@@ -108,10 +122,7 @@ fn parse_cli() -> Cli {
                 std::process::exit(0);
             }
             "--config" => {
-                cli.config_path = args
-                    .next()
-                    .map(PathBuf::from)
-                    .expect("--config требует путь к файлу");
+                cli.config_path = PathBuf::from(req_arg(&mut args, "--config"));
             }
             _ => {
                 eprintln!("ScaleFW kiosk. Использование:");
@@ -261,344 +272,15 @@ fn main() {
                 }
             }
         }
-        Mode::DeptList => {
-            let conn = datastore::open(&cfg.db_path).unwrap_or_else(|e| {
-                eprintln!("база {}: {e}", cfg.db_path.display());
-                std::process::exit(1);
-            });
-            let depts = datastore::depts_list(&conn).unwrap_or_default();
-            let gd = datastore::group_depts(&conn).unwrap_or_default();
-            println!("Отделы (порядок экранный; «альф» = по алфавиту):");
-            for d in &depts {
-                let mut groups: Vec<&str> =
-                    gd.iter().filter(|(_, dep)| dep == &d.name).map(|(g, _)| g.as_str()).collect();
-                groups.sort_unstable();
-                println!(
-                    "  {:<14} [{}] {}",
-                    d.name,
-                    d.ord.map(|n| n.to_string()).unwrap_or_else(|| "альф".into()),
-                    d.img.clone().unwrap_or_else(|| "нет картинки".into())
-                );
-                if !groups.is_empty() {
-                    println!("    группы: {}", groups.join(", "));
-                }
-            }
-        }
+        Mode::DeptList => depts_cli::list(&cfg),
         Mode::DeptAdd(name, img, bg, fg) => {
-            let conn = datastore::open(&cfg.db_path).unwrap_or_else(|e| {
-                eprintln!("база {}: {e}", cfg.db_path.display());
-                std::process::exit(1);
-            });
-            datastore::dept_add(&conn, &name, img.as_deref(), bg.as_deref(), fg.as_deref())
-                .unwrap_or_else(|e| {
-                    eprintln!("добавление отдела: {e}");
-                    std::process::exit(1);
-                });
-            println!("отдел «{name}» добавлен (порядок — алфавит)");
+            depts_cli::add(&cfg, &name, img.as_deref(), bg.as_deref(), fg.as_deref())
         }
-        Mode::DeptStyle(name, img, bg, fg) => {
-            let conn = datastore::open(&cfg.db_path).unwrap_or_else(|e| {
-                eprintln!("база {}: {e}", cfg.db_path.display());
-                std::process::exit(1);
-            });
-            // "-" — не менять, "none" — сбросить (авто/заглушка), иначе значение.
-            let opt = |v: &Option<String>| match v.as_deref() {
-                None => None,
-                Some("-") | Some("none") => Some(None),
-                Some(s) => Some(Some(s.to_string())),
-            };
-            let opt_img = opt(&img);
-            let opt_bg = opt(&bg);
-            let opt_fg = opt(&fg);
-            let style_img = opt_img.as_ref().map(|o| o.as_deref());
-            let style_bg = opt_bg.as_ref().map(|o| o.as_deref());
-            let style_fg = opt_fg.as_ref().map(|o| o.as_deref());
-            datastore::dept_style(&conn, &name, style_img, style_bg, style_fg)
-            .unwrap_or_else(|e| {
-                eprintln!("стиль отдела: {e}");
-                std::process::exit(1);
-            });
-            println!("стиль отдела «{name}» обновлён");
-        }
-        Mode::DeptRemove(name) => {
-            let conn = datastore::open(&cfg.db_path).unwrap_or_else(|e| {
-                eprintln!("база {}: {e}", cfg.db_path.display());
-                std::process::exit(1);
-            });
-            datastore::dept_remove(&conn, &name).unwrap_or_else(|e| {
-                eprintln!("удаление отдела: {e}");
-                std::process::exit(1);
-            });
-            println!("отдел «{name}» удалён, привязки групп сняты");
-        }
-        Mode::DeptMove(name, ord) => {
-            let conn = datastore::open(&cfg.db_path).unwrap_or_else(|e| {
-                eprintln!("база {}: {e}", cfg.db_path.display());
-                std::process::exit(1);
-            });
-            datastore::dept_move(&conn, &name, ord).unwrap_or_else(|e| {
-                eprintln!("перестановка: {e}");
-                std::process::exit(1);
-            });
-            println!(
-                "отдел «{name}»: {}",
-                ord.map(|n| format!("позиция {n}")).unwrap_or_else(|| "по алфавиту".into())
-            );
-        }
-        Mode::GroupAssign(group, dept) => {
-            let conn = datastore::open(&cfg.db_path).unwrap_or_else(|e| {
-                eprintln!("база {}: {e}", cfg.db_path.display());
-                std::process::exit(1);
-            });
-            let depts: Vec<String> =
-                datastore::depts_list(&conn).unwrap_or_default().into_iter().map(|d| d.name).collect();
-            if !depts.iter().any(|d| *d == dept) {
-                eprintln!("нет отдела «{dept}» (есть: {})", depts.join(", "));
-                std::process::exit(1);
-            }
-            datastore::group_assign(&conn, &group, &dept).unwrap_or_else(|e| {
-                eprintln!("привязка: {e}");
-                std::process::exit(1);
-            });
-            println!("группа «{group}» → отдел «{dept}»");
-        }
+        Mode::DeptStyle(name, img, bg, fg) => depts_cli::style(&cfg, &name, img, bg, fg),
+        Mode::DeptRemove(name) => depts_cli::remove(&cfg, &name),
+        Mode::DeptMove(name, ord) => depts_cli::move_dept(&cfg, &name, ord),
+        Mode::GroupAssign(group, dept) => depts_cli::group_assign(&cfg, &group, &dept),
         Mode::Kiosk => run_kiosk(cfg),
-    }
-}
-
-/// Минимальная «наличная» масса, кг: ниже — платформа пуста.
-/// Пустая платформа стабильно показывает −6 г, товар ≥ 10 г.
-const MIN_MASS_KG: f64 = 0.010;
-/// Возврат из «Готово» без снятия товара (S5 → S2, var2.md §3).
-const DONE_TIMEOUT: Duration = Duration::from_secs(5);
-/// Авто-возврат из ошибки принтера.
-const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
-/// Простой без массы → сброс на главный экран.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Сумма в копейках: округление «вверх от 0.5» — как в старом ПО
-/// (проверено на живой этикетке).
-fn sum_kopecks(price: i64, weight_g: u32) -> i64 {
-    (price * weight_g as i64 + 500) / 1000
-}
-
-fn price_str(price: i64) -> String {
-    format!("{}.{:02} ₽/кг", price / 100, price % 100)
-}
-
-fn sum_str(sum_kop: i64) -> String {
-    format!("{}.{:02} ₽", sum_kop / 100, sum_kop % 100)
-}
-
-/// Состояние веса для UI: 0 пусто, 1 нестабилен, 2 стабилен.
-fn weight_state(snap: &weight::Snapshot) -> i32 {
-    if snap.mass_kg < MIN_MASS_KG {
-        0
-    } else if snap.stable {
-        2
-    } else {
-        1
-    }
-}
-
-/// Состояние операции покупателя (var2.md §3, фазы 0–4).
-struct Kiosk {
-    /// 0 покой, 1 ждём вес (S3), 2 печать (S4), 3 готово (S5), 4 ошибка (E1)
-    phase: i32,
-    selected: Option<datastore::PluEntry>,
-    /// Вес на момент запуска печати — по нему считается сумма на экране.
-    /// None = печать ещё не запущена (сентинел 0 в u32 нельзя: вес 0 г валиден
-    /// как сигнал «товар сняли», см. фазу 2 в тике).
-    print_weight_g: Option<u32>,
-    /// Момент перехода в фазу 3 (готово) — для таймаута возврата.
-    done_at: Option<Instant>,
-    /// Момент сообщения об ошибке принтера — авто-возврат.
-    error_at: Option<Instant>,
-    /// Простой без массы: сброс на главный экран.
-    idle_since: Option<Instant>,
-    /// Откуда пришли на экран групп отдела: 0 главный, 3 «ЕЩЁ».
-    dept_back: i32,
-    /// Текущая страница колонок отделов (пейджинг).
-    dept_page: usize,
-    /// Начало удержания в углу (вход в меню настроек).
-    admin_hold: Option<Instant>,
-    /// Текущая страница карточек товара (экран 2).
-    item_page: usize,
-    /// Товар в детальной карточке (экран 5) — до «ПЕЧАТЬ» или «ОТМЕНА».
-    pending: Option<datastore::PluEntry>,
-}
-
-impl Kiosk {
-    fn new() -> Self {
-        Kiosk {
-            phase: 0,
-            selected: None,
-            print_weight_g: None,
-            done_at: None,
-            error_at: None,
-            idle_since: None,
-            dept_back: 0,
-            dept_page: 0,
-            admin_hold: None,
-            item_page: 0,
-            pending: None,
-        }
-    }
-}
-
-// Сетка карточек 9×3: страница 0 — 26 товаров + «ДАЛЕЕ», остальные —
-// «← НАЗАД» + 25 товаров + «ДАЛЕЕ».
-fn items_pages(total: usize) -> usize {
-    if total <= 26 { 1 } else { 1 + (total - 26 + 24) / 25 }
-}
-
-/// Плитка товара: название и цена из выгрузки, скидочная цена (если есть),
-/// картинка — файл <img_dir>/plu/<PLU>.png или .jpg (как в старом ПО),
-/// нет файла — светлая плашка.
-fn tile_of(p: &datastore::PluEntry, img_dir: &std::path::Path) -> PluTile {
-    let dir = img_dir.join("plu");
-    let (has_img, img) = match slint::Image::load_from_path(&dir.join(format!("{}.png", p.plu))) {
-        Ok(i) => (true, i),
-        Err(_) => match slint::Image::load_from_path(&dir.join(format!("{}.jpg", p.plu))) {
-            Ok(i) => (true, i),
-            Err(_) => (false, slint::Image::default()),
-        },
-    };
-    PluTile {
-        id: p.plu.clone().into(),
-        name: p.name.clone().into(),
-        price: price_str(p.price).into(),
-        card_price: p.card_price.map(|v| price_str(v).into()).unwrap_or_default(),
-        has_img,
-        img,
-    }
-}
-
-/// Палитра светлой темы: пастель, ротируется по числу отделов.
-/// (bg, fg, bg-pressed) — только непрозрачные цвета (VNC/depth: без альфы).
-const DEPT_PALETTE: &[(u32, u32, u32)] = &[
-    (0xE4F0DC, 0x33512C, 0xD3E5C8), // зелёный
-    (0xFDEFD8, 0x6B4A1B, 0xF7E4C4), // янтарный
-    (0xF9E3EC, 0x6B2E47, 0xF2D0DE), // розовый
-    (0xDCEBF7, 0x274B66, 0xC9DEF0), // голубой
-    (0xDFF2EA, 0x2A5D4E, 0xC8E7DB), // мятный
-    (0xF3EBDD, 0x5C4A2E, 0xE9DDC8), // ореховый
-    (0xE8E4F5, 0x463B6B, 0xD8D2EC), // лавандовый
-    (0xF5E9E0, 0x6B4433, 0xECDBCE), // персиковый
-];
-
-/// Плитки отделов из БД: показываются только отделы, в которые отображается
-/// хотя бы одна непустая группа. Картинка — файл из колонки depts.img,
-/// нет файла/колонки — заглушка.
-fn dept_tiles(
-    depts: &[datastore::DeptRow],
-    group_dept: &std::collections::HashMap<String, String>,
-    counts: &[(String, i64)],
-    img_dir: &std::path::Path,
-) -> Vec<DeptDef> {
-    depts.iter()
-        .enumerate()
-        .filter(|(_, d)| {
-            counts.iter().any(|(g, n)| {
-                *n > 0
-                    && group_dept
-                        .get(g)
-                        .map(|dep| dep == &d.name)
-                        .unwrap_or(false)
-            })
-        })
-        .map(|(i, d)| {
-            // Цвет: из БД (bg/fg), иначе авто-палитра по позиции. Фон нажатия —
-            // фоновый цвет, затемнённый на 8% (вручную задан не будет: pastel
-            // + затемнение = стабильный pressed без ручного третьего цвета).
-            fn parse_hex(s: &str) -> Option<u32> {
-                u32::from_str_radix(s.trim_start_matches('#'), 16).ok().and_then(|v| {
-                    if v <= 0xFF_FFFF { Some(v) } else { None }
-                })
-            }
-            let auto = DEPT_PALETTE[i % DEPT_PALETTE.len()];
-            let bg = d.bg.as_deref().and_then(parse_hex).unwrap_or(auto.0);
-            let fg = d.fg.as_deref().and_then(parse_hex).unwrap_or(auto.1);
-            let darken = |c: u32| -> u32 {
-                let (r, g, b) = (c >> 16 & 0xFF, c >> 8 & 0xFF, c & 0xFF);
-                ((r * 92 / 100) << 16) | ((g * 92 / 100) << 8) | b * 92 / 100
-            };
-            let img = d
-                .img
-                .as_ref()
-                .and_then(|f| slint::Image::load_from_path(&img_dir.join(f)).ok());
-            log::info!(
-                "картинка отдела {}: {}",
-                d.name,
-                match &d.img {
-                    Some(f) if img.is_some() => img_dir.join(f).display().to_string(),
-                    Some(f) => format!("{f}: нет файла — заглушка"),
-                    None => "не задана — заглушка".into(),
-                }
-            );
-            let color = |hex: u32| slint::Color::from_argb_encoded(0xFF00_0000 | hex);
-            DeptDef {
-                id: d.name.clone().into(),
-                name: d.name.clone().into(),
-                bg: color(bg),
-                fg: color(fg),
-                bg_pressed: color(darken(bg)),
-                img: img.clone().unwrap_or_default(),
-                has_img: img.is_some(),
-            }
-        })
-        .collect()
-}
-
-/// Строки меню настроек: экранный порядок отделов + флаги краёв.
-fn admin_rows_set(ui: &MainWindow, conn: &rusqlite::Connection) {
-    let list = datastore::depts_list(conn).unwrap_or_default();
-    let n = list.len();
-    let rows: Vec<AdminRow> = list
-        .iter()
-        .enumerate()
-        .map(|(i, d)| AdminRow {
-            name: d.name.clone().into(),
-            first: i == 0,
-            last: i + 1 == n,
-        })
-        .collect();
-    ui.set_admin_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
-}
-
-/// Шаг отдела на одну позицию вверх (delta −1) или вниз (+1): своп соседей
-/// в экранном порядке, затем перезапись ord всем списком.
-fn admin_step(cfg: &config::Config, name: &str, delta: i64) {
-    let Ok(conn) = datastore::open(&cfg.db_path) else {
-        log::error!("меню: база недоступна");
-        return;
-    };
-    let list: Vec<String> = datastore::depts_list(&conn)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|d| d.name)
-        .collect();
-    let Some(i) = list.iter().position(|n| n == name) else { return };
-    let j = i as i64 + delta;
-    if j < 0 || j as usize >= list.len() {
-        return;
-    }
-    let mut names = list;
-    names.swap(i, j as usize);
-    if let Err(e) = datastore::dept_reorder(&conn, &names) {
-        log::error!("порядок отделов: {e}");
-    }
-}
-
-/// Убрать отдел (привязки групп снимаются вместе с ним).
-fn admin_delete(cfg: &config::Config, name: &str) {
-    match datastore::open(&cfg.db_path) {
-        Ok(conn) => {
-            if let Err(e) = datastore::dept_remove(&conn, name) {
-                log::error!("удаление отдела: {e}");
-            }
-        }
-        Err(e) => log::error!("меню: база: {e}"),
     }
 }
 
@@ -607,7 +289,6 @@ fn run_kiosk(cfg: config::Config) {
     let cfg = std::sync::Arc::new(cfg);
 
     let ui = MainWindow::new().expect("UI init");
-    ui.set_status_text("Весы · локальный каталог".into());
     // Экран из конфига: панель другого размера настраивается без правки кода.
     ui.set_screen_w(cfg.ui.screen_width as f32);
     ui.set_screen_h(cfg.ui.screen_height as f32);
@@ -670,7 +351,7 @@ fn run_kiosk(cfg: config::Config) {
     // Отделы одной строкой: страниц по max_cols колонок (из [ui] config),
     // переполнение — за пейджером под колонками. Пустые отделы не видны.
     let img_dir = cfg.ui.img_dir.clone();
-    let depts_all = std::rc::Rc::new(std::cell::RefCell::new(dept_tiles(
+    let depts_all = std::rc::Rc::new(std::cell::RefCell::new(tiles::dept_tiles(
         &depts,
         &group_dept.borrow(),
         &all_groups,
@@ -678,8 +359,6 @@ fn run_kiosk(cfg: config::Config) {
     )));
     let max_cols = (cfg.ui.max_cols as usize).max(1);
     let pages_total = depts_all.borrow().len().div_ceil(max_cols).max(1);
-    let cols = max_cols as i32;
-    ui.set_cols(cols);
     ui.set_page_no(0);
     ui.set_pages_total(pages_total as i32);
     // Шапка экрана товаров листает те же страницы отделов.
@@ -689,10 +368,10 @@ fn run_kiosk(cfg: config::Config) {
     let win_w = ui.get_screen_w() as i32;
     let win_h = ui.get_screen_h() as i32;
     let row_w = win_w - 16;
-    let colw = (row_w - (cols - 1) * 8) / cols.max(1);
     // Полоса пейджера резервируется, только если страниц больше одной.
     let pager_h: i32 = if pages_total > 1 { 64 } else { 0 };
     let tile_h = win_h - 160 - 16 - pager_h;
+    let colw = (row_w - (max_cols as i32 - 1) * 8) / max_cols as i32;
     ui.set_col_w(colw as f32);
     ui.set_tile_h(tile_h as f32);
     // Единый кегль подписи: самая длинная подпись должна влезать в самую
@@ -715,7 +394,7 @@ fn run_kiosk(cfg: config::Config) {
         }
         Err(_) => log::info!("логотип: файла нет, зона пустая"),
     }
-    log::info!("отделы: {cols} колонок × {colw} px, шрифт {font_px} px");
+    log::info!("отделы: {max_cols} колонок × {colw} px, шрифт {font_px} px");
     // Страница 0 при старте: колонки = срез depts_all.
     let visible: Vec<DeptDef> = depts_all.borrow().iter().take(max_cols).cloned().collect();
     ui.set_depts(slint::ModelRc::new(slint::VecModel::from(visible.clone())));
@@ -749,7 +428,7 @@ fn run_kiosk(cfg: config::Config) {
             };
             k.pending = Some(entry.clone());
             if let Some(ui) = ui_handle.upgrade() {
-                ui.set_popup_plu(tile_of(&entry, &img_dir));
+                ui.set_popup_plu(tiles::tile_of(&entry, &img_dir));
                 ui.set_popup_open(true);
             }
         });
@@ -763,22 +442,34 @@ fn run_kiosk(cfg: config::Config) {
         move || {
             let mut k = kiosk.borrow_mut();
             let Some(entry) = k.pending.take() else { return };
-            k.selected = Some(entry);
+            // Кнопка гаснет при нестабильном весе, но гонка возможна:
+            // подтверждаем только реальным весом, иначе ожидание висит
+            // после закрытия карточки.
             let ws = weight_state(&app_state.snapshot());
-            k.phase = if ws == 2 { 2 } else { 1 };
+            if ws != 2 {
+                return;
+            }
+            k.selected = Some(entry);
+            k.phase = 2;
             k.idle_since = None;
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_popup_open(false);
             }
         }
     });
-    // «ОТМЕНА» в детальной карточке: возврат к списку товаров.
+    // «ОТМЕНА» / закрытие карточки: гасим и ожидание веса, если оно шло —
+    // иначе киоск ждал бы взвешивания с закрытым окном.
     ui.on_plu_cancel({
         let kiosk = kiosk.clone();
         let ui_handle = ui.as_weak();
         move || {
-            kiosk.borrow_mut().pending = None;
-            kiosk.borrow_mut().idle_since = None;
+            let mut k = kiosk.borrow_mut();
+            k.pending = None;
+            if k.phase == 1 {
+                k.selected = None;
+                k.phase = 0;
+            }
+            k.idle_since = None;
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_popup_open(false);
             }
@@ -794,7 +485,7 @@ fn run_kiosk(cfg: config::Config) {
         let items_all = items_all.clone();
         move |page: usize| {
             let Some(ui) = ui_handle.upgrade() else { return };
-            let pages_total = items_pages(items_all.borrow().len());
+            let pages_total = tiles::items_pages(items_all.borrow().len());
             let page = page.min(pages_total - 1);
             // Страница 0: 26 товаров + «ДАЛЕЕ» (27-я ячейка). Остальные:
             // «← НАЗАД» + 25 товаров + «ДАЛЕЕ».
@@ -825,9 +516,11 @@ fn run_kiosk(cfg: config::Config) {
         let show = show_items_page.clone();
         let img_dir = img_dir.clone();
         move |dept| {
+            if kiosk.borrow().phase >= 2 {
+                return; // печать/готово/ошибка: касания игнорируются
+            }
             kiosk.borrow_mut().idle_since = None;
             let Some(ui) = ui_handle.upgrade() else { return };
-            kiosk.borrow_mut().dept_back = 0;
             let gd = group_dept.borrow();
             let mut items: Vec<PluTile> = catalog
                 .borrow()
@@ -836,7 +529,7 @@ fn run_kiosk(cfg: config::Config) {
                     let g = if p.group.is_empty() { "ПРОЧЕЕ" } else { p.group.as_str() };
                     gd.get(g).map(|d| d == dept.as_str()).unwrap_or(false)
                 })
-                .map(|p| tile_of(p, &img_dir))
+                .map(|p| tiles::tile_of(p, &img_dir))
                 .collect();
             items.sort_by(|a, b| a.name.cmp(&b.name));
             *items_all.borrow_mut() = items;
@@ -908,13 +601,8 @@ fn run_kiosk(cfg: config::Config) {
         let ui_handle = ui.as_weak();
         move || {
             kiosk.borrow_mut().idle_since = None;
-            let Some(ui) = ui_handle.upgrade() else { return };
-            match ui.get_screen() {
-                2 | 3 => ui.set_screen(0),
-                _ => {
-                    let target = kiosk.borrow().dept_back;
-                    ui.set_screen(target);
-                }
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_screen(0);
             }
         }
     });
@@ -935,7 +623,7 @@ fn run_kiosk(cfg: config::Config) {
                 catalog
                     .borrow()
                     .iter()
-                    .map(|p| tile_of(p, &img_dir))
+                    .map(|p| tiles::tile_of(p, &img_dir))
                     .filter(|t| t.name.to_uppercase().contains(q.as_str()))
                     .collect()
             };
@@ -1016,7 +704,7 @@ fn run_kiosk(cfg: config::Config) {
             let Some(ui) = ui_handle.upgrade() else { return };
             match ui.get_screen() {
                 2 => {
-                    let pages_total = items_pages(items_all.borrow().len());
+                    let pages_total = tiles::items_pages(items_all.borrow().len());
                     let page = (kiosk.borrow().item_page + 1).min(pages_total - 1);
                     show_items(page);
                 }
@@ -1070,7 +758,7 @@ fn run_kiosk(cfg: config::Config) {
                 .unwrap_or_default()
                 .into_iter()
                 .collect();
-            let tiles = dept_tiles(&depts, &gd, &all_groups, &img_dir);
+            let tiles = tiles::dept_tiles(&depts, &gd, &all_groups, &img_dir);
             let pages = tiles.len().div_ceil(max_cols).max(1);
             let win_w = ui.get_screen_w() as i32;
             let win_h = ui.get_screen_h() as i32;
@@ -1101,7 +789,7 @@ fn run_kiosk(cfg: config::Config) {
         move || {
             if let Some(ui) = ui_handle.upgrade() {
                 match datastore::open(&cfg.db_path) {
-                    Ok(conn) => admin_rows_set(&ui, &conn),
+                    Ok(conn) => admin::admin_rows_set(&ui, &conn),
                     Err(e) => log::error!("меню: база: {e}"),
                 }
             }
@@ -1121,7 +809,7 @@ fn run_kiosk(cfg: config::Config) {
         let cfg = cfg.clone();
         let admin_reload = admin_reload.clone();
         move |name| {
-            admin_step(&cfg, &name, -1);
+            admin::admin_step(&cfg, &name, -1);
             admin_reload();
         }
     });
@@ -1129,7 +817,7 @@ fn run_kiosk(cfg: config::Config) {
         let cfg = cfg.clone();
         let admin_reload = admin_reload.clone();
         move |name| {
-            admin_step(&cfg, &name, 1);
+            admin::admin_step(&cfg, &name, 1);
             admin_reload();
         }
     });
@@ -1138,7 +826,7 @@ fn run_kiosk(cfg: config::Config) {
         let admin_reload = admin_reload.clone();
         move |name| {
             log::info!("меню: удаление отдела {name}");
-            admin_delete(&cfg, &name);
+            admin::admin_delete(&cfg, &name);
             admin_reload();
         }
     });
@@ -1196,7 +884,7 @@ fn run_kiosk(cfg: config::Config) {
             let gd_map: std::collections::HashMap<String, String> =
                 gd_pairs.into_iter().collect();
             *depts_all.borrow_mut() =
-                dept_tiles(&depts, &gd_map, &all_groups, &img_dir);
+                tiles::dept_tiles(&depts, &gd_map, &all_groups, &img_dir);
             *group_dept.borrow_mut() = gd_map;
             let page = kiosk.borrow().dept_page;
             show_dept(&kiosk, page);
@@ -1211,7 +899,7 @@ fn run_kiosk(cfg: config::Config) {
                         let g = if p.group.is_empty() { "ПРОЧЕЕ" } else { p.group.as_str() };
                         gd.get(g).map(|d| d == title.as_str()).unwrap_or(false)
                     })
-                    .map(|p| tile_of(p, &img_dir))
+                    .map(|p| tiles::tile_of(p, &img_dir))
                     .collect();
                 tiles.sort_by(|a, b| a.name.cmp(&b.name));
                 *items_all.borrow_mut() = tiles;
@@ -1266,6 +954,19 @@ fn run_kiosk(cfg: config::Config) {
             "авто-синхронизация выключена ([center].host пуст или interval_secs = 0)"
         );
     }
+    // Наблюдатель принтера: короткие опросы статуса раз в 10 с. Печать и
+    // опрос делят один tty через print::port_lock — одновременного доступа нет.
+    let printer_health =
+        std::sync::Arc::new(std::sync::Mutex::new(print::PrinterHealth::default()));
+    {
+        let cfg_pr = cfg.clone();
+        let health = printer_health.clone();
+        std::thread::spawn(move || loop {
+            let h = print::probe_status(&cfg_pr);
+            *health.lock().expect("printer mutex") = h;
+            std::thread::sleep(Duration::from_secs(10));
+        });
+    }
     // Тик состояния: 100 мс — обновление веса, переходы, тексты статуса.
     let timer = slint::Timer::default();
     {
@@ -1275,6 +976,7 @@ fn run_kiosk(cfg: config::Config) {
         let ui_handle = ui.as_weak();
         let depts_all = depts_all.clone();
         let sync_rx = sync_rx;
+        let printer_health = printer_health.clone();
         let refresh_data = refresh_data;
         timer.start(
             slint::TimerMode::Repeated,
@@ -1285,6 +987,12 @@ fn run_kiosk(cfg: config::Config) {
                 let ws = weight_state(&snap);
                 ui.set_weight_text(format!("{:.3}", snap.mass_kg.max(0.0)).into());
                 ui.set_weight_state(ws);
+                ui.set_scales_ok(snap.port_up);
+                let ph = *printer_health.lock().expect("printer mutex");
+                ui.set_printer_fault(ph.fault);
+                ui.set_paper_state(
+                    if ph.paper_end { 2 } else if ph.paper_near_end { 1 } else { 0 }
+                );
 
                 // Пришла авто-синхронизация → перечитать каталог и отделы
                 // (до захвата kiosk: refresh_data сам берёт borrow).
@@ -1394,7 +1102,7 @@ fn run_kiosk(cfg: config::Config) {
                         k.admin_hold = None;
                         match datastore::open(&cfg.db_path) {
                             Ok(conn) => {
-                                admin_rows_set(&ui, &conn);
+                                admin::admin_rows_set(&ui, &conn);
                                 ui.set_screen(4);
                             }
                             Err(e) => log::error!("меню: база: {e}"),
@@ -1445,7 +1153,7 @@ fn run_kiosk(cfg: config::Config) {
                     },
                 };
                 if text.is_empty() {
-                    ui.set_status_text("Весы · выберите отдел".into());
+                    ui.set_status_text(String::new().into());
                     ui.set_status_level(0);
                 } else {
                     ui.set_status_text(text.into());
@@ -1463,22 +1171,12 @@ fn run_kiosk(cfg: config::Config) {
 mod tests {
     use super::*;
 
-    fn entry(price: i64) -> datastore::PluEntry {
-        datastore::PluEntry {
-            plu: "2502192".into(),
-            name: "ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ".into(),
-            price,
-            card_price: None,
-            group: "ВИНОГРАД".into(),
-        }
-    }
-
     #[test]
     fn sum_matches_legacy_rounding() {
         // 199.99 × 1.350 = 269.9865 → 269.99 (живая этикетка).
         assert_eq!(sum_kopecks(19999, 1350), 26999);
         assert_eq!(sum_str(26999), "269.99 ₽");
-        assert_eq!(price_str(19999), "199.99 ₽/кг");
+        assert_eq!(session::price_str(19999), "199.99 ₽/кг");
     }
 
     #[test]

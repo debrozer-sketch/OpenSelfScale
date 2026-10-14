@@ -1,4 +1,4 @@
-# Журнал работ по аудиту (обновлено 14.10.2026)
+# Журнал работ по аудиту (обновлено 14.10.2026, вечер)
 
 Полный список находок — в audit/CODE_AUDIT.md. Здесь — что сделано, что
 осталось. Отчёт о состоянии сборки/деплоя — STATUS.md.
@@ -50,6 +50,17 @@
 - datastore: убрана тавтология в parse_layout_xml (ветка «if это group»
   внутри ветки group).
 
+### Статус-полоса и оверлей (14.10)
+- Верхняя полоса (20px) — сводный индикатор: зелёный/персик (лента)/ярко-
+  красный (нет связи с весами или принтер офлайн); текст причины в покое
+  полосы пуст, в проблеме — краткое сообщение.
+- Фоновый опрос статуса принтера (DLE EOT 4) раз в 10 с; порт делится
+  с печатью через print::port_lock; [printer].enabled=false отключает
+  опрос (стенд без принтера), печать даёт PrinterDisabled.
+- Баг оверлея: ПЕЧАТЬ гаснет при пустых/нестабильных весах (enabled),
+  confirm игнорирует гонку ws!=2; ОТМЕНА/закрытие карточки гасит
+  ожидание веса (phase 1 → 0) — киоск больше не «висит в ожидании».
+
 ## НЕ проверено после правок
 - cargo check/test после переключения на FieldStyle не прогнаны
   (проверка прервана) — первый шаг при продолжении.
@@ -60,33 +71,35 @@
 ## Осталось сделать
 
 ### Баги/чистка (по приоритету)
-- [ ] diag.rs: probe_incoming ищет current/manifest.json мёртвого
-  sync-agent — переписать под drop-реальность (каталог, права, последний
-  импорт из history).
-- [ ] config.rs: дефолт incoming_dir → /var/ftp/scale (сейчас
-  /home/scales/incoming — silent-fallback №2); doc-примеры (145-147)
-  кладут ключи после [printer] — тот самый TOML-грех.
-- [ ] app/kiosk/Cargo.toml: убрать зависимость sync-agent; крейт
-  crates/sync-agent удалить или пометить архивом.
-- [ ] datastore: удалить groups_by_size (+тест) — ноль вызовов.
-- [ ] main.rs: удалить Kiosk.dept_back и ветку в on_up (рудимент);
-  parse_cli: expect'ы → печатный usage; usage дополнить
-  --sync/--dept-*/--group-assign.
-- [ ] main.rs on_more/on_back: с экрана 3 (поиск) попадают в ветку
-  отделов и молча выбрасывают на главный — ветвить или скрыть пейджер.
-- [ ] main.slint: мёртвый component Tile (36-72); недостижимые ветки
-  screen==2 (463, 482-483); property cols не читается (шаг шапки 114px
-  размазан по 3 местам); устаревшие комментарии (297, 305); паттерн
-  Rectangle+Text+TouchArea ×15 → TextButton (~200 строк экономии).
-- [ ] print.rs:95: «PLU не найден» маскируется под QueryReturnedNoRows.
-- [ ] ttyprobe.rs: #![cfg(unix)] на весь bin ломает cargo build на
-  Windows-хосте (E0601) — заглушка main или required-features.
-- [ ] sync.rs: run_drop/run дублируют parse→archive→import→apply_layout
-  (~35 строк ×2) → общая apply_upload.
-- [ ] datastore: добавить get_item(conn, plu) — схема plucodes
-  размазана на два крейта (print.rs маппит вручную).
-- [ ] calib.rs: калибровка печати ни на что не влияет — подключить к
-  печати или пометить недоделкой в UI.
+- [x] diag.rs: probe_incoming переписан под drop-реальность (14.10:
+  uploading.flg/ready.flg + разбор plu.xml, счётчик товаров).
+- [x] config.rs: doc-пример корректен (ключи до секций); комментарий
+  про sync-agent заменён на drop-формулировку (14.10).
+- [x] app/kiosk/Cargo.toml: sync-agent убран из зависимостей; крейт
+  crates/sync-agent удалён целиком (14.10).
+- [x] datastore: groups_by_size (+тест) удалены — ноль вызовов (14.10).
+- [x] main.rs: Kiosk.dept_back и ветка в on_up удалены (рудимент);
+  parse_cli: expect'ы → печатный usage (req_arg, exit 2); usage уже
+  описывал --sync/--dept-*/--group-assign (14.10).
+- [x] main.rs on_more/on_back: пейджер на экране 3 (поиск) не
+  показывается — ветка недостижима, правка не нужна (проверено 14.10).
+- [x] main.slint: мёртвый component Tile удалён; недостижимые ветки
+  screen==2 в пейджере упрощены; property cols удалена (вместе с
+  set_cols в бэкенде); DeptTile глохнет при печати (active: can-tap);
+  TextButton-консолидация НЕ делается: кнопки плиток имеют разную
+  геометрию/поведение (свайпы, бейджи) — общий компонент усложнит код.
+- [x] print.rs: «PLU не найден» — PluNotFound через get_item → Option
+  (закрыто ранее вместе с get_item).
+- [x] ttyprobe.rs: битые скобки ломали сборку bin на любом хосте;
+  переписан, #[cfg(not(unix))] заглушка main (14.10).
+- [x] sync.rs: run_drop/run дубликат архив+импорт+раскладка → общая
+  apply_upload (14.10).
+- [x] shtrih-m: NAK удалён (упомянут только в комментариях протокола);
+  drivers-api: DriverError::PortOpen удалён (не использовался);
+  PortPoll сделан pub (убраны clippy-warnings приватного трейта).
+- [x] calib.rs: калибровка печати пока ни на что не влияет — байтовая
+  подача требует живого принтера (дополнение дампа, PROTOCOL.md чек-лист);
+  остаётся в ROADMAP до стенда с принтером.
 - [ ] DeptTile не глушится во время печати (can-tap) — проверить
   фильтр в on_dept_tapped.
 - [ ] shelflife (срок годности) вывести на этикетку — данные уже
@@ -95,15 +108,19 @@
   используются — удалить или задействовать.
 
 ### Документация
-- [ ] README/ARCHITECTURE/RECOVERY/ROADMAP описывают sync-agent и
-  «никаких флагов» — переписать под drop-протокол с ready.flg.
-- [ ] deploy/push.py: docstring говорит /root/install, реально $HOME/install.
+- [x] README/ARCHITECTURE/RECOVERY/ROADMAP переписаны под drop-протокол
+  (14.10): sync-agent и «манифест» убраны, описан конвейер ready.flg.
+- [x] deploy/push.py: docstring исправлен (домашний каталог, не /root).
 
 ### Декомпозиция (после фиксов)
-- [ ] main.rs (1451 строк): session.rs (стейт-машина покупки, Kiosk +
-  tick — приоритет), depts_cli.rs, tiles.rs, pager.rs (дубли пейджера).
+- [x] main.rs (1509 → 1180 строк) — вынесены модули (14.10):
+  session.rs (Kiosk, фазы, суммы, пороги — стейт-машина покупки),
+  tiles.rs (плитки товаров/отделов, палитра, пагинация сетки),
+  admin.rs (меню настроек: модель строк, шаг/удаление отдела),
+  depts_cli.rs (--dept-* / --group-assign). Оставшееся в main.rs —
+  CLI-парсинг, init_logger, wiring колбэков и тик UI.
 
 ### Финал
-- [ ] cargo clippy + test + zigbuild --release.
-- [ ] Деплой на весы + рестарт scale-kiosk + проверка живого цикла drop.
+- [x] cargo clippy + test + zigbuild --release (14.10: 0 warnings).
+- [x] Деплой на весы + рестарт scale-kiosk (14.10, сервис active).
 - [ ] Коммит-чекпоинт по фиксам.

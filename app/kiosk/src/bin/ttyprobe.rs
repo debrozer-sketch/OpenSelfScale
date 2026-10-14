@@ -1,5 +1,7 @@
 //! Отладочный пробник: открывает tty как open_tty_raw из weight.rs,
 //! шлёт кадр опроса и печатает всё, что видит. Только для диагностики.
+//! Unix-only: на Windows-хосте собирается заглушка, чтобы cargo build
+//! не падал на E0601.
 #[cfg(unix)]
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| "/dev/scales".into());
@@ -46,8 +48,9 @@ fn main() {
                 t0.elapsed(),
                 buf[..n].iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
             );
-        if n == 0 {
-            std::thread::sleep(std::time::Duration::from_millis(400));
+            if n == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+            }
         }
     }
 }
@@ -55,5 +58,4 @@ fn main() {
 #[cfg(not(unix))]
 fn main() {
     eprintln!("ttyprobe: только Linux (нужен tty и libc termios)");
-}
 }

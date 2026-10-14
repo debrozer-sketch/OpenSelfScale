@@ -48,6 +48,8 @@ pub enum PrintError {
     Io(#[from] std::io::Error),
     #[error("PLU {0} не найден в базе")]
     PluNotFound(String),
+    #[error("принтер отключён в конфиге ([printer].enabled = false)")]
+    PrinterDisabled,
 }
 
 use thiserror::Error;
@@ -63,7 +65,7 @@ pub fn build_label(
     time: &str,
 ) -> Result<Vec<u8>, PrintError> {
     let mut job = LabelJob::begin(layout.area);
-    let kg = format!("{},{}", weight_g / 1000, format!("{:03}", weight_g % 1000));
+    let kg = format!("{},{:03}", weight_g / 1000, weight_g % 1000);
     let price_r = format!("{},{:02}", item.price / 100, item.price % 100);
     // Сумма с округлением до копейки, как в старом ПО: 199,99 ₽ × 1,350 кг
     // = 269,9865 → 269,99 (совпадает с дампом).
@@ -94,7 +96,7 @@ pub fn ean13_payload(item: &PluItem, weight_g: u32) -> String {
     } else {
         format!("{digits:0>5}")
     };
-    format!("21{}{}", code5, format!("{:05}", weight_g.min(99_999)))
+    format!("21{code5}{:05}", weight_g.min(99_999))
 }
 
 /// Локальные дата (ДД.ММ.ГГ) и время (ЧЧ:ММ:СС) момента печати.
@@ -139,9 +141,50 @@ fn utc_stamp(secs: i64) -> (String, String) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (
-        format!("{:02}.{:02}.{:02}", d, m, (y % 100) as i64),
+        format!("{:02}.{:02}.{:02}", d, m, y % 100),
         format!("{:02}:{:02}:{:02}", rem / 3600, (rem % 3600) / 60, rem % 60),
     )
+}
+
+/// Общая блокировка порта принтера: печать и фоновый опрос статуса
+/// открывают один и тот же tty — одновременный доступ перемешал бы байты.
+static PORT_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+pub fn port_lock() -> &'static std::sync::Mutex<()> {
+    PORT_LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// Состояние принтера для индикации: fault — не отвечает/офлайн,
+/// paper_* — расходник (этикет-лента). Дефолт — всё false: до первого
+/// опроса не пугаем продавца красным.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PrinterHealth {
+    pub fault: bool,
+    pub paper_end: bool,
+    pub paper_near_end: bool,
+}
+
+/// Короткая сессия опроса статуса (DLE EOT 4): захватить порт, спросить,
+/// закрыть. Любая ошибка порта/ответа — fault (принтер не отвечает).
+pub fn probe_status(cfg: &crate::config::Config) -> PrinterHealth {
+    if !cfg.printer.enabled {
+        return PrinterHealth::default();
+    }
+    let _guard = port_lock().lock().expect("printer lock");
+    let res = serialport::new(&cfg.printer.port, cfg.printer.baud)
+        .timeout(std::time::Duration::from_millis(1500))
+        .open()
+        .map_err(|e| e.to_string())
+        .and_then(|p| escpos::EscPosPrinter::new(p).status().map_err(|e| e.to_string()));
+    match res {
+        Ok(st) => {
+            PrinterHealth { fault: st.printer_offline, paper_end: st.paper_end, paper_near_end: st.paper_near_end }
+        }
+        Err(e) => {
+            log::warn!("опрос статуса принтера: {e}");
+            PrinterHealth { fault: true, paper_end: false, paper_near_end: false }
+        }
+    }
 }
 
 /// Печать по товару из базы: открыть порт, собрать, отправить, спросить статус.
@@ -151,10 +194,14 @@ pub fn print_for_plu(
     weight_g: u32,
     plu: &str,
 ) -> Result<(), PrintError> {
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
     let conn = datastore::open(&cfg.db_path)?;
     let item = datastore::get_item(&conn, plu)?.ok_or_else(|| PrintError::PluNotFound(plu.into()))?;
     let (date, time) = now_stamp();
     let bytes = build_label(&item, weight_g, LIVE_LAYOUT, &date, &time)?;
+    let _guard = port_lock().lock().expect("printer lock");
     let mut port = serialport::new(&cfg.printer.port, cfg.printer.baud)
         .timeout(std::time::Duration::from_millis(1500))
         .open()?;

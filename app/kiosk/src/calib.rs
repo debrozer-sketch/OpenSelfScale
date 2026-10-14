@@ -25,8 +25,10 @@ impl Default for FeedCalibration {
     }
 }
 
+type CalibField = fn(&mut FeedCalibration) -> &mut u16;
+
 impl FeedCalibration {
-    const KEYS: [(&'static str, fn(&mut Self) -> &mut u16); 3] = [
+    const KEYS: [(&'static str, CalibField); 3] = [
         ("backward_space", |c| &mut c.backward_space),
         ("opto_thermo_space", |c| &mut c.opto_thermo_space),
         ("extra_feed", |c| &mut c.extra_feed),

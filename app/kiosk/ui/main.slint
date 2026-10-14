@@ -32,45 +32,6 @@ export struct AdminRow {
     last: bool,
 }
 
-// Светлая плитка (группы/товары): белый фон, мягкое нажатие.
-component Tile inherits Rectangle {
-    in property <string> title;
-    in property <string> subtitle;
-    in property <bool> active: true;
-
-    callback tapped;
-
-    border-radius: 16px;
-    background: !active ? #EDEFF2 : ta.pressed ? #E4E8ED : #FFFFFF;
-
-    VerticalLayout {
-        padding: 8px;
-        alignment: center;
-        spacing: 2px;
-        Text {
-            text: root.title;
-            font-size: 22px;
-            font-weight: 700;
-            wrap: word-wrap;
-            overflow: elide;
-            max-height: 56px;
-            horizontal-alignment: center;
-            color: !root.active ? #A6ADB8 : #1A1E24;
-        }
-        if root.subtitle != "" : Text {
-            text: root.subtitle;
-            font-size: 20px;
-            horizontal-alignment: center;
-            color: !root.active ? #A6ADB8 : #707A86;
-        }
-    }
-
-    ta := TouchArea {
-        enabled: root.active;
-        clicked => { root.tapped(); }
-    }
-}
-
 // Колонка отдела: ширина = равная доля строки; скругления сглаживает рендер,
 // рамка 2 px — светло-серый контур зоны нажатия.
 component DeptTile inherits Rectangle {
@@ -79,6 +40,8 @@ component DeptTile inherits Rectangle {
     in property <length> tile-h;
     in property <length> font;
     in property <DeptDef> d;
+    // false — во время печати: и тап, и свайп гасятся.
+    in property <bool> active: true;
 
     callback tapped(string);
     // Перелистывание страниц отделов свайпом (карусель).
@@ -138,6 +101,7 @@ component DeptTile inherits Rectangle {
     }
 
     ta := TouchArea {
+        enabled: root.active;
         // Свайп: горизонтальный сдвиг > 80 px листает страницу; тап — только
         // если палец почти не сместился (< 60 px), иначе клик подавляется.
         pointer-event(ev) => {
@@ -290,15 +254,20 @@ export component MainWindow inherits Window {
     in property <string> weight-text: "0.000";
     // 0 пусто, 1 нестабилен, 2 стабилен
     in property <int> weight-state: 0;
+    // Связь с весовым модулем: опросный поток отдаёт данные.
+    in property <bool> scales-ok: false;
+    // Принтер не отвечает/офлайн (фоновый опрос статуса).
+    in property <bool> printer-fault: false;
+    // Этикет-лента: 0 в норме, 1 заканчивается, 2 закончилась.
+    in property <int> paper-state: 0;
     // 0 покой, 1 ожидание стабилизации, 2 печать, 3 готово, 4 ошибка принтера
     in property <int> phase: 0;
-    in property <string> status-text: "Весы · локальный каталог";
+    in property <string> status-text: "";
     in property <int> status-level: 0; // 0 норма, 1 внимание, 2 ошибка
     // 0 отделы, 1 группы отдела, 2 товары группы, 4 настройки отделов
     in property <int> screen: 0;
     in property <string> screen-title: "";
-    in property <int> cols: 5;        // колонок в строке отделов
-    // Пейджинг отделов: страницы по cols колонок, кнопка перелистывания —
+    // Пейджинг отделов: страницы по колонкам, кнопка перелистывания —
     // под колонками, по центру.
     in property <int> page-no: 0;
     in property <int> pages-total: 1;
@@ -371,22 +340,31 @@ export component MainWindow inherits Window {
     in property <bool> admin-pressed: admin-corner.pressed;
     in property <[AdminRow]> admin-rows;
 
-    // ---------- A. статус ----------
+    // ---------- A. статус = индикатор исправности ----------
+    // Вся полоса — сводное состояние кассы: светло-зелёная — всё работает;
+    // персиковая — расходник (этикет-лента); ярко-красная — критично
+    // (нет связи с весовым модулем или принтер не отвечает).
+    // Текст в полосе — активное сообщение печати либо причина цвета.
     Rectangle {
         x: 0; y: 0;
         width: 1024px;
-        height: 40px;
-        background: status-level == 2 ? #F3C6C6
-                  : status-level == 1 ? #F5E3BC : #EDF0F3;
+        height: 20px;
+        background: root.printer-fault || !root.scales-ok || status-level == 2 ? #E23B3B
+                  : root.paper-state != 0 ? #F6D9A0
+                  : status-level == 1 ? #F5E3BC : #D8EEDF;
         Text {
             x: 16px;
             width: 992px;
-            height: 40px;
-            text: root.status-text;
-            font-size: 20px;
+            height: 20px;
+            text: root.status-text != "" ? root.status-text
+                : !root.scales-ok ? "нет связи с весовым модулем"
+                : root.printer-fault ? "принтер не отвечает"
+                : root.paper-state == 2 ? "этикет-лента закончилась"
+                : root.paper-state == 1 ? "этикет-лента заканчивается" : "";
+            font-size: 13px;
             vertical-alignment: center;
-            color: status-level == 2 ? #7A2E2E
-                 : status-level == 1 ? #6B4A1B : #707A86;
+            color: root.printer-fault || !root.scales-ok || status-level == 2 ? #FFFFFF
+                 : root.paper-state != 0 || status-level == 1 ? #6B4A1B : #4E8A67;
         }
     }
 
@@ -447,6 +425,7 @@ export component MainWindow inherits Window {
             tile-h: root.tile-h;
             font: root.dept-font;
             d: d;
+            active: root.can-tap;
             tapped(dept) => { root.dept-tapped(dept); }
             next-page => { root.more(); }
             prev-page => { root.back(); }
@@ -460,7 +439,7 @@ export component MainWindow inherits Window {
         x: 0;
         width: root.width;
         height: 56px;
-        if (screen == 0 && page-no > 0) || (screen == 2 && items-page-no > 0) : Rectangle {
+        if page-no > 0 : Rectangle {
             x: 16px;
             y: 0;
             width: 200px;
@@ -479,8 +458,7 @@ export component MainWindow inherits Window {
                 clicked => { root.back(); }
             }
         }
-        if (screen == 0 && page-no < pages-total - 1)
-           || (screen == 2 && items-page-no < items-pages-total - 1) : Rectangle {
+        if page-no < pages-total - 1 : Rectangle {
             x: root.width - 216px;
             y: 0;
             width: 200px;
@@ -948,7 +926,10 @@ export component MainWindow inherits Window {
                 x: 496px; y: 392px;
                 width: 200px; height: 56px;
                 border-radius: 16px;
-                background: popup-ok-ta.pressed ? #268A5A : #2FA36B;
+                // Печать доступна только при стабильном весе: без товара
+                // и на дрожащей платформе кнопка гаснет.
+                background: !popup-ok-ta.enabled ? #C9CFD7
+                         : popup-ok-ta.pressed ? #268A5A : #2FA36B;
                 Text {
                     text: "ПЕЧАТЬ";
                     font-size: 22px;
@@ -956,6 +937,7 @@ export component MainWindow inherits Window {
                     color: #FFFFFF;
                 }
                 popup-ok-ta := TouchArea {
+                    enabled: !root.popup-empty && root.weight-state == 2;
                     clicked => { root.plu-confirm(); }
                 }
             }

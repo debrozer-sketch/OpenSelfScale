@@ -13,7 +13,6 @@ path = "src/main.rs"
 shtrih-m = { path = "../../crates/shtrih-m" }
 escpos = { path = "../../crates/escpos" }
 datastore = { path = "../../crates/datastore" }
-sync-agent = { path = "../../crates/sync-agent" }
 drivers-api = { path = "../../crates/drivers-api" }
 serialport = { workspace = true }
 rusqlite = { workspace = true }

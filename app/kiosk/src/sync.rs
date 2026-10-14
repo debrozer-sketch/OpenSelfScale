@@ -86,6 +86,41 @@ fn fetch_bytes(ftp: &mut FtpStream, path: &str) -> Result<Vec<u8>, String> {
 /// каталог приёма остаётся пустым, XML уходят в history. Внутри — без гонки
 /// старого ПО: флаг ставят до plu.xml, поэтому ждём файл и стабильность
 /// размера. Ok(None) — делать нечего (молча), Ok(Some) — отчёт.
+/// Архив исходников + применение к базе: импорт товаров и раскладки.
+/// Общий хвост run_drop (drop-режим) и run (pull-FTP). Возвращает
+/// (импортировано, заметка о раскладке) для итогового отчёта.
+fn apply_upload(
+    cfg: &Config,
+    items: &[datastore::PluItem],
+    groups: Option<&Vec<(String, Vec<String>)>>,
+    plu_data: &str,
+    ldata: &str,
+) -> Result<(usize, String), String> {
+    archive(
+        &cfg.center.history_dir,
+        &[("plu.xml", plu_data)]
+            .into_iter()
+            .chain(groups.map(|_| ("layout.xml", ldata)))
+            .collect::<Vec<_>>(),
+    );
+    let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
+    let imported = datastore::import_plu(&conn, items).map_err(|e| format!("импорт: {e}"))?;
+    let layout_note = match groups {
+        Some(g) => {
+            let (regrouped, orphans) =
+                datastore::apply_layout(&conn, g).map_err(|e| format!("раскладка: {e}"))?;
+            format!(
+                ", раскладка: {} групп / {} переназначено / {} без группы",
+                g.len(),
+                regrouped,
+                orphans
+            )
+        }
+        None => String::new(),
+    };
+    Ok((imported, layout_note))
+}
+
 pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     let dir = &cfg.incoming_dir;
     if dir.join("uploading.flg").exists() {
@@ -189,36 +224,10 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         }
         copied.push(p.clone());
     }
-    // Архив исходников — до удаления (материал для разбора инцидентов).
-    archive(
-        &cfg.center.history_dir,
-        &[("plu.xml", plu_data.as_str())]
-            .into_iter()
-            .chain(
-                groups
-                    .as_ref()
-                    .map(|_| ("layout.xml", ldata.as_str()))
-                    .into_iter(),
-            )
-            .collect::<Vec<_>>(),
-    );
-
-    // Применение к базе.
-    let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
-    let imported = datastore::import_plu(&conn, &items).map_err(|e| format!("импорт: {e}"))?;
-    let layout_note = match &groups {
-        Some(g) => {
-            let (regrouped, orphans) =
-                datastore::apply_layout(&conn, g).map_err(|e| format!("раскладка: {e}"))?;
-            format!(
-                ", раскладка: {} групп / {} переназначено / {} без группы",
-                g.len(),
-                regrouped,
-                orphans
-            )
-        }
-        None => String::new(),
-    };
+    // Архив исходников — до удаления (материал для разбора инцидентов) —
+    // и применение к базе.
+    let (imported, layout_note) =
+        apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata)?;
 
     // Подчистка каталога приёма: флаг, XML и забранные картинки. Неудачное
     // удаление — в лог: залипший ready.flg иначе даёт цикл ошибок в тишине.
@@ -295,28 +304,8 @@ pub fn run(cfg: &Config) -> Result<String, String> {
     let _ = ftp.quit();
 
     // Применение к базе — после успешной загрузки всего.
-    archive(
-        &cfg.center.history_dir,
-        &[("plu.xml", plu_data.as_str())]
-            .into_iter()
-            .chain(
-                groups
-                    .as_ref()
-                    .map(|_| ("layout.xml", ldata_str.as_str()))
-                    .into_iter(),
-            )
-            .collect::<Vec<_>>(),
-    );
-    let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
-    let imported = datastore::import_plu(&conn, &items).map_err(|e| format!("импорт: {e}"))?;
-    let layout_note = match &groups {
-        Some(g) => {
-            let (regrouped, orphans) =
-                datastore::apply_layout(&conn, g).map_err(|e| format!("раскладка: {e}"))?;
-            format!(", раскладка: {} групп / {} переназначено / {} без группы", g.len(), regrouped, orphans)
-        }
-        None => String::new(),
-    };
+    let (imported, layout_note) =
+        apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata_str)?;
 
     Ok(format!(
         "выгрузка: {} товаров в файле (обновлено {imported}), картинок: новых {imgs_new}, уже были {imgs_skip}{layout_note}",

@@ -28,7 +28,8 @@ pub enum EscPosError {
 /// - Normal:  ESC ! 0x00 + GS ! 0x00 — наименование;
 /// - FontB:   ESC ! 0x01 + GS ! 0x00 — дата/время/PLU/вес/цена (шрифт B);
 /// - DoubleH: ESC ! 0x00 + GS ! 0x01 — только «Итого» (высота ×2, ширина 1).
-/// Внимание: GS ! 0x11 (2×2) в дампе не встречается.
+///
+/// GS ! 0x11 (2×2) в дампе не встречается.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldStyle {
     Normal,

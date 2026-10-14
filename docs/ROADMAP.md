@@ -5,11 +5,10 @@
 - [x] Крейт shtrih-m: драйвер весов, тесты на байтах дампа
 - [x] Крейт escpos: драйвер принтера, тесты на байтах дампа
 - [x] Крейт datastore: SQLite + импорт plu.xml, идемпотентность
-- [x] Крейт sync-agent: манифест/verify/publish, тесты гонок
-- [x] app/kiosk: тонкий main, модули weight/print/diag/calib, Slint UI
+- [x] app/kiosk: модули weight/print/sync/diag/calib, Slint UI
 
 ## 1. Доводка контура (ближайшее)
-- [x] cargo test --workspace на Linux-тулчейне (WSL2 Ubuntu = целевая среда)
+- [x] cargo test --workspace (кросс-сборка cargo zigbuild → Debian 13)
 - [x] Профили периферии в config.toml: замена датчика/принтера/платформы без кода
 - [x] Логгер (simplelog: файл из конфига + stderr), конфиг config.toml (serde+toml),
       CLI-флаги (--diag, --calibrate, --config, --version)
@@ -17,7 +16,10 @@
       ошибки печати на экране киоска
 - [x] Калибровка: хранение в БД (таблица calibration), CLI-мастер
       (--calibrate), тестовая этикетка с текущими числами
-- [ ] Сборка Slint под Linux (проверка окна на реальном X/Wayland)
+- [x] Drop-синхронизация (протокол старого ПО): ready.flg → импорт →
+      архив → очистка; pull-FTP как запасной режим
+- [x] Статус-полоса: связь с весами / принтер / этикет-лента
+- [x] Сборка Slint под Linux: X11 на тестовых весах, deploys живые
 - [ ] Экран диагностики в UI (отчёт diag::collect)
 - [ ] Применение backward/opto-space в байтовом потоке принтера — нужна
       живая посылка команд подачи (дополнить дамп, см. PROTOCOL.md чек-лист)
@@ -28,16 +30,19 @@
       раскладка с центра), пути данных, проверка периферии — по итогам
       веса поднимается в рабочем режиме без ручного редактирования конфигов
 - [ ] TypeScript: редактор этикеток (canvas по схеме label.xml), раскладки кнопок
-- [ ] Выгрузка: сборка манифеста, HTTPS/SFTP-push на весы
+- [ ] Выгрузка: сборка набора (plu.xml/layout.xml/картинки) и push на весы
+      (FTP/drop — совместимо с сервером магазина)
 - [ ] Парк весов: heartbeat, статусы, сводки импорта (PROBLEMS Б4/В4)
 
 ## 3. Образ и парк
-- [ ] Debian 13 base-image + our stack: preseed/mkosi, проверка в QEMU
-- [ ] kexec-установка на живую весы из этой сессии (без флешки/PXE)
+- [x] Debian 13 base-image: preseed-установка проверена на тестовых весах
+      (deploy/: preseed.cfg, make_initrd.py, make_packages.py, локальное зеркало)
+- [ ] kexec-установка на живую весы без флешки/PXE
 - [ ] Удалённое восстановление, уровни 0–2 (см. docs/RECOVERY.md):
-      scalectl app deploy / os reinstall по SSH / PXE-самолечение при мёртвой ОС
+      deploy по SSH / kexec-reinstall / PXE-самолечение при мёртвой ОС
 - [ ] Золотой образ: clonezilla/dd + раскатка по парку по SSH
-- [ ] systemd-юниты, ротация логов, NTP от центра, SSH-ключи
+- [x] systemd-юниты (scale-kiosk, x11vnc), ротация логов
+      (/etc/logrotate.d/scalefw), NTP — по месту
 
 ## 4. Приёмка
 - [ ] Прогон полного цикла на тестовой весы: синк → выбор товара → печать

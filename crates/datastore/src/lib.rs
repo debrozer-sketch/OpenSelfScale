@@ -184,16 +184,6 @@ pub fn get_item(conn: &Connection, plu: &str) -> Result<Option<PluItem>, StoreEr
         .transpose()
 }
 
-/// Топ-N групп по числу товаров (для главного экрана).
-pub fn groups_by_size(conn: &Connection, n: usize) -> Result<Vec<(String, i64)>, StoreError> {
-    let mut stmt = conn.prepare(
-        "SELECT COALESCE(NULLIF(\"group\", ''), 'ПРОЧЕЕ') AS g, COUNT(*) AS n
-         FROM plucodes GROUP BY g ORDER BY n DESC, g LIMIT ?1",
-    )?;
-    let rows = stmt.query_map([n as i64], |r| Ok((r.get(0)?, r.get(1)?)))?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
-}
-
 /// Все группы по алфавиту (экран «Ещё» — визуальный поиск по алфавиту).
 pub fn groups_alpha(conn: &Connection) -> Result<Vec<(String, i64)>, StoreError> {
     let mut stmt = conn.prepare(
@@ -725,21 +715,11 @@ mod tests {
         import_plu(&conn, &parse_plu_xml(SAMPLE).unwrap()).unwrap();
         let all = load_all(&conn).unwrap();
         assert_eq!(all[1].group, "ВИНОГРАД");
-        let groups = groups_by_size(&conn, 23).unwrap();
-        assert_eq!(groups, vec![("АВОКАДО".to_string(), 1), ("ВИНОГРАД".to_string(), 1)]);
         let alpha = groups_alpha(&conn).unwrap();
         assert_eq!(
             alpha,
             vec![("АВОКАДО".to_string(), 1), ("ВИНОГРАД".to_string(), 1)]
         );
-    }
-
-    #[test]
-    fn groups_by_size_limits_and_keeps_all_in_alpha() {
-        let conn = open(":memory:".as_ref()).unwrap();
-        import_plu(&conn, &parse_plu_xml(SAMPLE).unwrap()).unwrap();
-        assert_eq!(groups_by_size(&conn, 1).unwrap(), vec![("АВОКАДО".to_string(), 1)]);
-        assert_eq!(groups_alpha(&conn).unwrap().len(), 2);
     }
 
     #[test]

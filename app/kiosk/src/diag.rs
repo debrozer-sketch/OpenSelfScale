@@ -58,10 +58,19 @@ fn probe_db(path: &Path) -> String {
 }
 
 fn probe_incoming(dir: &Path) -> String {
-    let current = dir.join("current");
-    match std::fs::read_to_string(current.join("manifest.json")) {
-        Ok(m) => format!("ок, манифест {} байт", m.len()),
-        Err(_) => "нет опубликованного набора".into(),
+    // Drop-протокол: источник льёт набор в каталог, триггер — ready.flg.
+    let has_ready = dir.join("ready.flg").exists();
+    let has_uploading = dir.join("uploading.flg").exists();
+    let plu = dir.join("plu.xml");
+    let items: Option<usize> = std::fs::read_to_string(&plu)
+        .ok()
+        .map(|s| datastore::parse_plu_xml(&s).map(|v| v.len()).unwrap_or(0));
+    match (has_uploading, has_ready, items) {
+        (true, _, _) => "источник льёт выгрузку (uploading.flg)".into(),
+        (_, true, Some(n)) => format!("набор готов, plu.xml: {n} товаров"),
+        (_, true, None) => "ready.flg стоит, plu.xml не читается".into(),
+        (_, false, Some(n)) => format!("жду триггера, plu.xml: {n} товаров"),
+        (_, false, None) => "выгрузок не было (plu.xml нет)".into(),
     }
 }
 
