@@ -58,7 +58,40 @@ pub fn tile_of(p: &datastore::PluEntry, img_dir: &Path) -> crate::PluTile {
         card_price: p.card_price.map(|v| price_str(v).into()).unwrap_or_default(),
         has_img,
         img,
+        hl_before: Default::default(),
+        hl_match: Default::default(),
+        hl_after: Default::default(),
     }
+}
+
+/// Разрез имени для подсветки совпадения (регистронезависимо): (до, совпадение,
+/// после). Совпадение нет — имя целиком в «до». Позиция ищется в uppercase,
+/// а разрез делается по исходной строке через счётчик символов: у кириллицы
+/// регистр меняет байты, не число символов.
+pub fn hl_parts(name: &str, q: &str) -> (String, String, String) {
+    let (mut before, mut matched, mut after) = (String::new(), String::new(), String::new());
+    let start = if q.is_empty() {
+        None
+    } else {
+        name.to_uppercase().find(q)
+    };
+    match start {
+        None => before.push_str(name),
+        Some(byte) => {
+            let skip = name.to_uppercase()[..byte].chars().count();
+            let take = q.chars().count();
+            for (i, ch) in name.chars().enumerate() {
+                if i < skip {
+                    before.push(ch);
+                } else if i < skip + take {
+                    matched.push(ch);
+                } else {
+                    after.push(ch);
+                }
+            }
+        }
+    }
+    (before, matched, after)
 }
 
 /// Палитра светлой темы: пастель, ротируется по числу отделов.
@@ -153,6 +186,19 @@ mod tests {
         assert_eq!(items_pages(27), 2);
         assert_eq!(items_pages(51), 2);
         assert_eq!(items_pages(52), 3);
+    }
+
+    #[test]
+    fn hl_parts_cuts_by_chars_not_bytes() {
+        // Кириллица: байтовая позиция в uppercase ≠ индекс символа.
+        let (b, m, a) = hl_parts("ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ", "КИШ");
+        assert_eq!((b.as_str(), m.as_str(), a.as_str()), ("ВИНОГРАД ", "КИШ", "МИШ ЧЕРНЫЙ КГ"));
+        // Совпадения нет — имя целиком в «до», рендер идёт обычной строкой.
+        assert_eq!(hl_parts("ЯБЛОКО", "ГРУША").0, "ЯБЛОКО");
+        assert_eq!(hl_parts("ЯБЛОКО", "ГРУША").1, "");
+        // Совпадение в начале и точное по длине.
+        assert_eq!(hl_parts("АНАНАС", "АНА"), ("".to_string(), "АНА".to_string(), "НАС".to_string()));
+        assert_eq!(hl_parts("АНАНАС", "АНАНАС"), ("".to_string(), "АНАНАС".to_string(), "".to_string()));
     }
 
     #[test]

@@ -22,6 +22,11 @@ export struct PluTile {
     card-price: string,
     has-img: bool,
     img: image,
+    // Подсветка совпадения в поиске: «до / совпадение / после».
+    // hl-match == "" — обычный каталог, имя рисуется целиком.
+    hl-before: string,
+    hl-match: string,
+    hl-after: string,
 }
 
 // Строка меню настроек: имя отдела + флаги краёв списка (стрелки видны
@@ -249,6 +254,13 @@ component KbKey inherits Rectangle {
     k-ta := TouchArea {
         clicked => { root.key-tapped(root.key); }
     }
+    // Удержание «←» = автозабой: 250 мс и далее по такту, пока палец
+    // на клавише. Отпускание останавливает таймер (running = pressed).
+    Timer {
+        interval: 250ms;
+        running: k-ta.pressed && root.key == "←";
+        triggered => { root.key-tapped("ЗАБОЙ"); }
+    }
 }
 
 export component MainWindow inherits Window {
@@ -376,6 +388,8 @@ export component MainWindow inherits Window {
     callback net-popup-close();
     // Режим главного адреса: false — ручной, true — DHCP (поля только чтение).
     in property <bool> net-dhcp;
+    // Данные сети заполнены и корректны — кнопка ПРИМЕНИТЬ активна.
+    in property <bool> net-valid: false;
     callback net-mode(bool);
     callback net-tap(int);
     callback net-key(string);
@@ -761,7 +775,7 @@ export component MainWindow inherits Window {
             }
         }
 
-        // Выдача: до 5 строк «название — цены».
+        // Выдача: до 5 строк «название — цены». Совпадение подсвечено.
         for p[i] in root.items : Rectangle {
             x: 8px;
             y: 72px + i * 64px;
@@ -769,7 +783,7 @@ export component MainWindow inherits Window {
             height: 56px;
             border-radius: 12px;
             background: res-ta.pressed ? #E4E8ED : #FFFFFF;
-            Text {
+            if p.hl-match == "" : Text {
                 x: 16px;
                 width: 560px;
                 height: parent.height;
@@ -779,6 +793,36 @@ export component MainWindow inherits Window {
                 overflow: elide;
                 vertical-alignment: center;
                 color: #1A1E24;
+            }
+            if p.hl-match != "" : HorizontalLayout {
+                x: 16px;
+                width: 560px;
+                height: parent.height;
+                Text {
+                    text: p.hl-before;
+                    font-size: 20px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 0;
+                    color: #1A1E24;
+                }
+                Text {
+                    text: p.hl-match;
+                    font-size: 20px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    color: #2F6FED;
+                }
+                Text {
+                    text: p.hl-after;
+                    font-size: 20px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    color: #1A1E24;
+                }
             }
             Text {
                 x: 584px;
@@ -1374,14 +1418,17 @@ export component MainWindow inherits Window {
                 width: parent.width - 196px;
                 height: 50px;
                 border-radius: 12px;
-                background: net-apply-ta.pressed ? #2456C4 : #2F6FED;
+                // Серая = данные неполные/неверные (живая валидация net-valid).
+                background: root.net-valid
+                    ? (net-apply-ta.pressed ? #2456C4 : #2F6FED)
+                    : (net-apply-ta.pressed ? #9AA5B1 : #C3CAD3);
                 Text {
                     text: root.net-dhcp ? "ПРИМЕНИТЬ DHCP" : "ПРИМЕНИТЬ";
                     font-size: 24px;
                     font-weight: 700;
                     color: #FFFFFF;
                 }
-                net-apply-ta := TouchArea { clicked => { root.net-apply(); } }
+                net-apply-ta := TouchArea { enabled: root.net-valid; clicked => { root.net-apply(); } }
             }
             // Модальное окно результата: затемнение, сообщение, ОК.
             if root.net-popup-open : Rectangle {

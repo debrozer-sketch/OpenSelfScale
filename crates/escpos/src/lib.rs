@@ -277,6 +277,11 @@ impl<P: Read + Write> EscPosPrinter<P> {
         Self { port }
     }
 
+    /// Прямой доступ к порту: сырые байты вне LabelJob (recovery, подача).
+    pub fn port_mut(&mut self) -> &mut P {
+        &mut self.port
+    }
+
     pub fn print(&mut self, job: LabelJob) -> Result<(), EscPosError> {
         self.port.write_all(&job.finish())?;
         self.port.flush()?;

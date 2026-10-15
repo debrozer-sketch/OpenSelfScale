@@ -676,7 +676,17 @@ fn run_kiosk(cfg: config::Config) {
                     .collect();
                 matched.sort_by(|a, b| a.name.cmp(&b.name));
                 matched.truncate(5);
-                matched.iter().map(|p| tiles::tile_of(p, &img_dir)).collect()
+                matched
+                    .iter()
+                    .map(|p| {
+                        let mut t = tiles::tile_of(p, &img_dir);
+                        let (b, m, a) = tiles::hl_parts(&p.name, &q);
+                        t.hl_before = b.into();
+                        t.hl_match = m.into();
+                        t.hl_after = a.into();
+                        t
+                    })
+                    .collect()
             };
             items.sort_by(|a, b| a.name.cmp(&b.name));
             ui.set_items(slint::ModelRc::new(slint::VecModel::from(items)));
@@ -1341,19 +1351,10 @@ fn run_kiosk(cfg: config::Config) {
             "авто-синхронизация выключена ([center].host пуст или interval_secs = 0)"
         );
     }
-    // Наблюдатель принтера: короткие опросы статуса раз в 10 с. Печать и
-    // опрос делят один tty через print::port_lock — одновременного доступа нет.
-    let printer_health =
-        std::sync::Arc::new(std::sync::Mutex::new(print::PrinterHealth::default()));
-    {
-        let cfg_pr = cfg.clone();
-        let health = printer_health.clone();
-        std::thread::spawn(move || loop {
-            let h = print::probe_status(&cfg_pr);
-            *health.lock().expect("printer mutex") = h;
-            std::thread::sleep(Duration::from_secs(10));
-        });
-    }
+    // Демон принтера: единственный владелец порта. Печать/подача/тест —
+    // через канал запросов, на простое — фоновый опрос статуса с детектом
+    // заправки бумаги. Здоровье читается тиком через print::health().
+    print::spawn_daemon(&cfg);
     // Тик состояния: 100 мс — обновление веса, переходы, тексты статуса.
     let timer = slint::Timer::default();
     {
@@ -1362,7 +1363,6 @@ fn run_kiosk(cfg: config::Config) {
         let cfg = cfg.clone();
         let ui_handle = ui.as_weak();
         let sync_rx = sync_rx;
-        let printer_health = printer_health.clone();
         let refresh_data = refresh_data;
         let go_root = go_root.clone();
         timer.start(
@@ -1375,7 +1375,7 @@ fn run_kiosk(cfg: config::Config) {
                 ui.set_weight_text(format!("{:.3}", snap.mass_kg).into());
                 ui.set_weight_state(ws);
                 ui.set_scales_ok(snap.port_up);
-                let ph = *printer_health.lock().expect("printer mutex");
+                let ph = print::health();
                 ui.set_printer_fault(ph.fault);
                 ui.set_paper_state(
                     if ph.paper_end { 2 } else if ph.paper_near_end { 1 } else { 0 }

@@ -152,6 +152,8 @@ fn apply_helper(args: &[&str]) -> Result<(), String> {
 }
 
 /// Модель полей экрана: подпись + значение из экранных буферов.
+/// Живая валидация: кнопка ПРИМЕНИТЬ активна только на корректных данных
+/// (DHCP — всегда «корректно»).
 pub fn net_rows_set(ui: &crate::MainWindow, kiosk: &crate::session::Kiosk) {
     let labels = ["IP", "МАСКА", "ШЛЮЗ", "DNS"];
     let rows: Vec<crate::NetworkField> = labels
@@ -161,6 +163,16 @@ pub fn net_rows_set(ui: &crate::MainWindow, kiosk: &crate::session::Kiosk) {
         .collect();
     ui.set_net_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
     ui.set_net_focus(kiosk.net_focus as i32);
+    ui.set_net_valid(
+        kiosk.net_dhcp
+            || validate(
+                &kiosk.net_buf[0],
+                &kiosk.net_buf[1],
+                &kiosk.net_buf[2],
+                &kiosk.net_buf[3],
+            )
+            .is_ok(),
+    );
 }
 
 #[cfg(test)]
