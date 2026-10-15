@@ -1113,6 +1113,17 @@ fn run_kiosk(cfg: config::Config) {
             admin_reload();
         }
     });
+    // Эффективный таймаут простоя: из БД (меню «Простой до сброса»),
+    // записи нет — из конфига ([kiosk] idle_timeout_secs, дефолт 60).
+    let idle_secs: std::rc::Rc<std::cell::Cell<u64>> = std::rc::Rc::new(
+        std::cell::Cell::new(
+            datastore::open(&cfg.db_path)
+                .ok()
+                .and_then(|c| datastore::get_calibration(&c, "idle_timeout_secs").ok().flatten())
+                .map(|v| v.clamp(10, 600) as u64)
+                .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 600)),
+        ),
+    );
     // Пункты меню: диспетчеризация по id строки MenuRow. Печать/подача —
     // в фоновом потоке: открытие tty и передача занимают секунды, в потоке
     // колбэка они замораживали UI; результат виден в логе. Обнуление уходит
@@ -1124,8 +1135,19 @@ fn run_kiosk(cfg: config::Config) {
         let kiosk = kiosk.clone();
         let ui_handle = ui.as_weak();
         let admin_reload = admin_reload.clone();
+        let idle_secs = idle_secs.clone();
         move |id: slint::SharedString| {
             match id.as_str() {
+                "idletimeout" => {
+                    let mut k = kiosk.borrow_mut();
+                    k.net_buf[0] = idle_secs.get().to_string();
+                    k.net_focus = 0;
+                    k.admin_stage = 10;
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_idle_value(k.net_buf[0].clone().into());
+                        ui.set_idle_valid(true);
+                    }
+                }
                 "equip" => {
                     kiosk.borrow_mut().admin_stage = 6;
                 }
@@ -1242,6 +1264,28 @@ fn run_kiosk(cfg: config::Config) {
         let ui_handle = ui.as_weak();
         move |key: slint::SharedString| {
             let mut k = kiosk.borrow_mut();
+            // Экран «Простой до сброса»: то же поле 0, только цифры до 3 знаков.
+            if k.admin_stage == 10 {
+                let buf = &mut k.net_buf[0];
+                match key.as_str() {
+                    "←" => { buf.pop(); }
+                    "C" => buf.clear(),
+                    ch if ch.bytes().all(|b| b.is_ascii_digit()) && buf.len() < 3 => {
+                        buf.push_str(ch);
+                    }
+                    _ => {}
+                }
+                if let Some(ui) = ui_handle.upgrade() {
+                    ui.set_idle_value(k.net_buf[0].clone().into());
+                    ui.set_idle_valid(
+                        k.net_buf[0]
+                            .parse::<u64>()
+                            .map(|v| (10..=600).contains(&v))
+                            .unwrap_or(false),
+                    );
+                }
+                return;
+            }
             let focus = k.net_focus;
             let buf = &mut k.net_buf[focus];
             match key.as_str() {
@@ -1254,6 +1298,32 @@ fn run_kiosk(cfg: config::Config) {
             }
             if let Some(ui) = ui_handle.upgrade() {
                 net_rows_set(&ui, &k);
+            }
+        }
+    });
+    // Сохранение таймаута простоя: в БД (calibration), действует сразу.
+    ui.on_idle_save({
+        let kiosk = kiosk.clone();
+        let cfg = cfg.clone();
+        let idle_secs = idle_secs.clone();
+        move || {
+            let mut k = kiosk.borrow_mut();
+            match k.net_buf[0].parse::<u64>() {
+                Ok(v) if (10..=600).contains(&v) => {
+                    let saved = datastore::open(&cfg.db_path).map(|c| {
+                        datastore::set_calibration(&c, "idle_timeout_secs", v as i64)
+                    });
+                    match saved {
+                        Ok(Ok(())) => {
+                            idle_secs.set(v);
+                            log::info!("меню: таймаут простоя {v} с (сохранён в базу)");
+                            k.admin_stage = 2;
+                        }
+                        Ok(Err(e)) => log::error!("меню: таймаут простоя: запись: {e}"),
+                        Err(e) => log::error!("меню: таймаут простоя: база: {e}"),
+                    }
+                }
+                _ => log::warn!("меню: таймаут простоя вне 10..600"),
             }
         }
     });
@@ -1552,6 +1622,7 @@ fn run_kiosk(cfg: config::Config) {
         let ui_handle = ui.as_weak();
         let sync_rx = sync_rx;
         let lock_db = lock_db;
+        let idle_secs = idle_secs.clone();
         let refresh_data = refresh_data;
         let tick_cache = tick_cache.clone();
         let go_root = go_root.clone();
@@ -1709,8 +1780,7 @@ fn run_kiosk(cfg: config::Config) {
                 }
                 // Простой без активной операции → сброс на главный экран
                 // (независимо от того, стоит ли что-то на весах).
-                let idle_timeout =
-                    Duration::from_secs(cfg.kiosk.idle_timeout_secs.max(10));
+                let idle_timeout = Duration::from_secs(idle_secs.get().max(10));
                 if k.phase < 2 {
                     if k.idle_since.is_none() {
                         k.idle_since = Some(Instant::now());
@@ -1732,7 +1802,7 @@ fn run_kiosk(cfg: config::Config) {
                 // в main.slint). Маппинг stage -> screen: 1 (PIN) -> 5,
                 // 2 (меню) -> 6, 3 (отделы) -> 4, 4 (диагностика) -> 7,
                 // 5 (сеть) -> 8, 6 (оборудование) -> 9, 7/8/9 (смена
-                // пароля) -> 10.
+                // пароля) -> 10, 10 (простой) -> 11.
                 if k.admin_open {
                     let screen = match k.admin_stage {
                         1 => 5,
@@ -1742,6 +1812,7 @@ fn run_kiosk(cfg: config::Config) {
                         5 => 8,
                         6 => 9,
                         7 | 8 | 9 => 10,
+                        10 => 11,
                         _ => 7,
                     };
                     if ui.get_screen() != screen {
