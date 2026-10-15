@@ -86,6 +86,13 @@ pub struct Kiosk {
 }
 
 impl Kiosk {
+    /// Сброс недобранной серии тапов входа: возврат на главный экран
+    /// начинает серию заново, а не продолжает со старого счётчика.
+    pub fn reset_admin_taps(&mut self) {
+        self.admin_taps = 0;
+        self.admin_tap_last = None;
+    }
+
     /// Очередной тап по индикатору веса. true — серия набрана, меню открыть.
     pub fn admin_tap(&mut self, now: Instant) -> bool {
         const WINDOW: Duration = Duration::from_secs(3);

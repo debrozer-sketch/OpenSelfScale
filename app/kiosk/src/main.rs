@@ -180,6 +180,14 @@ fn main() {
         }
     };
     init_logger(&cfg);
+    // Паники любого потока — в kiosk.log: без хука падение процесса видно
+    // только по перезапуску в логе, без места и причины.
+    std::panic::set_hook(Box::new(|info| {
+        log::error!("ПАНИКА: {info}");
+        if let Some(loc) = info.location() {
+            log::error!("  место: {}:{}:{}", loc.file(), loc.line(), loc.column());
+        }
+    }));
     log::info!("ScaleFW старт: cfg={:?}", cfg.summary());
 
     match cli.mode {
@@ -1178,12 +1186,11 @@ fn run_kiosk(cfg: config::Config) {
         let kiosk = kiosk.clone();
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
-            // Недобранная серия тапов входа сбрасывается: следующая должна
-            // начаться заново, а не продолжиться со старого счётчика.
-            {
-                let mut k = kiosk.borrow_mut();
-                k.admin_taps = 0;
-                k.admin_tap_last = None;
+            // Недобранная серия тапов входа сбрасывается. try_borrow: тик
+            // вызывает go_root, уже держа borrow_mut на сессии, — двойной
+            // borrow здесь убил бы процесс (черный экран после печати).
+            if let Ok(mut k) = kiosk.try_borrow_mut() {
+                k.reset_admin_taps();
             }
             ui.set_screen(0);
             ui.set_page_no(0);
@@ -1411,6 +1418,7 @@ fn run_kiosk(cfg: config::Config) {
                             log::info!("этикетка напечатана: {g} г");
                             k.phase = 3;
                             k.done_at = Some(Instant::now());
+                            k.reset_admin_taps();
                             if cfg.kiosk.return_to_root_after_print {
                                 go_root();
                             }
@@ -1472,6 +1480,7 @@ fn run_kiosk(cfg: config::Config) {
                         // Иначе таймер будет пересоздавать модель отделов
                         // каждые 100 мс и «глотать» первый тап.
                         k.idle_since = None;
+                        k.reset_admin_taps();
                         go_root();
                     }
                 } else {
@@ -1505,6 +1514,7 @@ fn run_kiosk(cfg: config::Config) {
                     }
                 } else if ui.get_screen() >= 4 {
                     // Меню закрыто: возврат к каталогу (страница 0, попап закрыт).
+                    k.reset_admin_taps();
                     go_root();
                 }
                 if k.phase != 2 {
