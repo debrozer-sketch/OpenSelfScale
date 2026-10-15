@@ -19,7 +19,17 @@ deploy/vnc_passwd
 # Тестовые данные магазина
 testdata/
 
+# Рабочие заметки с инфраструктурными деталями - не в git
+STATUS.md
+
+# SSH к боевым весам (логин jump-хоста, адреса) - не в git
+deploy/prod_ssh.py
+
+# Слитый бандл исходников для аудита - дубликат, не в git
+audit/src-bundle/
+
 # Мусор
 __pycache__/
 *.exe
 ready.flg
+audit/prod-backup/

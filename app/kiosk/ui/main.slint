@@ -32,6 +32,17 @@ export struct AdminRow {
     last: bool,
 }
 
+export struct MenuRow {
+    label: string,
+    id: string,
+    admin: bool,
+}
+
+export struct NetworkField {
+    label: string,
+    value: string,
+}
+
 // Колонка отдела: ширина = равная доля строки; скругления сглаживает рендер,
 // рамка 2 px — светло-серый контур зоны нажатия.
 component DeptTile inherits Rectangle {
@@ -311,11 +322,8 @@ export component MainWindow inherits Window {
     callback dept-prev();
     // Выход на уровень выше: товары → отделы (кнопка в шапке).
     callback up();
-    // Меню настроек (экран 4): вход — удержание в углу, выход — «ГОТОВО».
-    callback admin-close();
-    callback admin-up(string);
-    callback admin-down(string);
-    callback admin-del(string);
+    // Тап по индикатору веса: 5 подряд за 3 с открывают меню настроек.
+    callback admin-tap();
 
     // Поиск (экран 3): открытие зоны поиска, нажатие клавиши, сброс.
     callback search-open();
@@ -328,17 +336,54 @@ export component MainWindow inherits Window {
 
     property <bool> can-tap: phase != 2 && phase != 3 && phase != 4;
 
-    // Скрытый вход в настройки: невидимая зона в правом верхнем углу,
-    // активна только на главном экране. Удержание распознаёт бэкенд.
-    admin-corner := TouchArea {
-        x: root.width - 96px;
-        y: 0;
-        width: 96px;
-        height: 40px;
-        enabled: root.screen == 0;
-    }
-    in property <bool> admin-pressed: admin-corner.pressed;
+    // Скрытый вход в настройки: 5 быстрых тапов по полосе статуса.
+    // Распознаёт бэкенд (5 тапов за 3 с), тапы ловит полоса.
+
+    // ---- меню настроек (экраны 4-7, оверлей поверх каталога) ----
+    // Экран: 4 = редактор отделов, 5 = вход по паролю, 6 = меню, 7 = диагностика.
     in property <[AdminRow]> admin-rows;
+    // Маска введённого пароля (точки), чистит бэкенд.
+    in property <string> pin-mask;
+    // Остаток паузы после перебора, с; 0 — ввод разрешён.
+    in property <int> lock-left;
+    // Роль вошедшего: 1 = администратор (полный доступ), 0 = персонал.
+    in property <int> role: 0;
+
+    callback pin-digit(string);
+    callback pin-clear();
+    callback pin-back();
+    callback pin-try();
+    // Пункт «Настройки весов»: редактор отделов.
+    callback open-depts();
+    // Из редактора отделов назад в меню.
+    callback depts-close();
+    // Полный выход: назад к каталогу, вход по паролю заново.
+    callback admin-close();
+    callback admin-up(string);
+    callback admin-down(string);
+    callback admin-del(string);
+    // Пункт меню (id из MenuRow): диспетчеризация в бэкенде.
+    callback menu-tap(string);
+
+    // Экран «Сеть»: поля IP/маска/шлюз/DNS, тап по полю = фокус,
+    // клавиатура цифр и точек, ПРИМЕНИТЬ живо меняет адрес.
+    in property <[NetworkField]> net-rows;
+    in property <int> net-focus;
+    // Итог применения сети: модальное окно с сообщением и кнопкой ОК.
+    in property <string> net-popup-text;
+    in property <bool> net-popup-ok: true;
+    in property <bool> net-popup-open;
+    callback net-popup-close();
+    // Режим главного адреса: false — ручной, true — DHCP (поля только чтение).
+    in property <bool> net-dhcp;
+    callback net-mode(bool);
+    callback net-tap(int);
+    callback net-key(string);
+    callback net-apply();
+    // IP весов в углу экрана входа по паролю (для персонала).
+    in property <string> ip-note;
+    // Отчёт диагностики (экран 7).
+    in property <string> diag-text;
 
     // ---------- A. статус = индикатор исправности ----------
     // Вся полоса — сводное состояние кассы: светло-зелёная — всё работает;
@@ -356,11 +401,11 @@ export component MainWindow inherits Window {
             x: 16px;
             width: 992px;
             height: 20px;
-            text: root.status-text != "" ? root.status-text
-                : !root.scales-ok ? "нет связи с весовым модулем"
-                : root.printer-fault ? "принтер не отвечает"
-                : root.paper-state == 2 ? "этикет-лента закончилась"
-                : root.paper-state == 1 ? "этикет-лента заканчивается" : "";
+                        text: root.status-text != "" ? root.status-text
+                : !root.scales-ok ? "Ошибка весов. Позовите сотрудника"
+                : root.printer-fault ? "Ошибка печати. Позовите сотрудника"
+                : root.paper-state == 2 ? "Лента закончилась. Позовите сотрудника"
+                : root.paper-state == 1 ? "Лента заканчивается" : "";
             font-size: 13px;
             vertical-alignment: center;
             color: root.printer-fault || !root.scales-ok || status-level == 2 ? #FFFFFF
@@ -369,6 +414,16 @@ export component MainWindow inherits Window {
     }
 
     // ---------- B1. вес ----------
+    // Скрытый вход в настройки: 5 быстрых тапов по индикатору веса
+    // (за 3 с после первого). Обрабатывает бэкенд, здесь только счёт.
+    admin-tap-zone := TouchArea {
+        x: 0;
+        y: 24px;
+        width: 420px;
+        height: 152px;
+        enabled: root.screen == 0;
+        clicked => { root.admin-tap(); }
+    }
     Text {
         x: 16px; y: 44px;
         width: 380px;
@@ -399,16 +454,19 @@ export component MainWindow inherits Window {
         background: weight-state == 2 ? #2FA36B : #E0A100;
     }
 
-    // Логотип компании: невидимая зона справа от блока веса, картинка
-    // вписывается целиком (contain). Нет файла — пустое место.
+    // Логотип компании: невидимая зона справа от блока веса. Пропорция зоны
+    // равна пропорции logo.png (480x88): ширина всей полосы, высота по ней.
+    // Нет файла — пустое место.
+    property <length> logo-h: (root.width - 496px) * (88px / 480px);
     if root.logo-has : Rectangle {
-        x: 480px; y: 44px;
+        x: 480px;
+        y: 44px + (112px - root.logo-h) / 2;
         width: root.width - 496px;
-        height: 112px;
+        height: root.logo-h;
         Image {
             width: 100%;
             height: 100%;
-            image-fit: contain;
+            image-fit: fill;
             source: root.logo-img;
         }
     }
@@ -948,14 +1006,19 @@ export component MainWindow inherits Window {
     // Центральных всплывашек нет: покупатель может перекладывать товар и
     // листать каталог одновременно.
 
-    // ---------- D. меню настроек отделов (экран 4) ----------
-    if screen == 4 : Rectangle {
+    // ---------- Меню настроек: оверлей поверх каталога ----------
+    // Одно окно: вход по паролю, меню, редактор отделов и диагностика —
+    // экраны главного окна (второе X-окно на этом железе с winit 0.30 без
+    // WM нестабильно по размеру). Полноэкранный прямоугольник + гасящий
+    // TouchArea: клики каталога под оверлеем не проходят.
+    if root.screen >= 4 : Rectangle {
         x: 0; y: 0;
-        width: root.width;
-        height: root.height;
+        width: root.screen-w;
+        height: root.screen-h;
         background: #F6F7F9;
+        admin-block-ta := TouchArea { }
 
-        // Шапка: заголовок слева, «ГОТОВО» справа.
+        // Шапка: заголовок по экрану, справа «НАЗАД» (редактор) и «ГОТОВО»/«ВЫХОД».
         Rectangle {
             x: 8px; y: 8px;
             width: parent.width - 16px;
@@ -966,13 +1029,35 @@ export component MainWindow inherits Window {
             background: #FFFFFF;
             Text {
                 x: 16px;
-                width: parent.width - 32px;
+                width: parent.width - 440px;
                 height: parent.height;
-                text: "НАСТРОЙКИ · ОТДЕЛЫ";
+                text: root.screen == 5 ? "ВХОД ПЕРСОНАЛА"
+                    : root.screen == 4 ? "НАСТРОЙКИ · ОТДЕЛЫ"
+                    : root.screen == 7 ? "ДИАГНОСТИКА"
+                    : root.screen == 8 ? "НАСТРОЙКИ · СЕТЬ"
+                    : "МЕНЮ НАСТРОЕК";
                 font-size: 26px;
                 font-weight: 700;
                 color: #1A1E24;
                 vertical-alignment: center;
+                overflow: elide;
+            }
+            if root.screen == 4 || root.screen == 8 : Rectangle {
+                x: parent.width - 336px;
+                y: 8px;
+                width: 160px;
+                height: 48px;
+                border-radius: 12px;
+                background: admin-back-ta.pressed ? #E4E8ED : #EDF0F3;
+                Text {
+                    text: "НАЗАД";
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                }
+                admin-back-ta := TouchArea {
+                    clicked => { root.depts-close(); }
+                }
             }
             Rectangle {
                 x: parent.width - 176px;
@@ -982,7 +1067,7 @@ export component MainWindow inherits Window {
                 border-radius: 12px;
                 background: admin-done-ta.pressed ? #E4E8ED : #EDF0F3;
                 Text {
-                    text: "ГОТОВО";
+                    text: root.screen == 4 ? "ГОТОВО" : "ВЫХОД";
                     font-size: 24px;
                     font-weight: 700;
                     color: #1A1E24;
@@ -993,56 +1078,405 @@ export component MainWindow inherits Window {
             }
         }
 
-        // Строки отделов: имя + «вверх» / «вниз» / «убрать».
-        for r[i] in root.admin-rows : Rectangle {
-            x: 8px;
-            y: 84px + i * 72px;
-            width: parent.width - 16px;
-            height: 64px;
-            border-radius: 12px;
-            border-width: 2px;
-            border-color: #C9CFD7;
-            background: #FFFFFF;
-            Text {
-                x: 16px;
-                width: parent.width - 260px;
-                height: parent.height;
-                text: r.name;
+        // ---------- Экран 5: вход по паролю ----------
+        if root.screen == 5 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            // Маска: точка на каждую введённую цифру.
+            Rectangle {
+                x: 262px;
+                y: 12px;
+                width: 500px;
+                height: 72px;
+                border-radius: 14px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: #FFFFFF;
+                Text {
+                    text: root.pin-mask == "" ? "пароль" : root.pin-mask;
+                    font-size: 34px;
+                    font-weight: 700;
+                    color: root.pin-mask == "" ? #A6ADB8 : #1A1E24;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            if root.lock-left > 0 : Text {
+                x: 0; y: 96px;
+                width: parent.width;
+                height: 36px;
+                text: "Слишком много попыток. Повтор через " + root.lock-left + " с";
                 font-size: 24px;
                 font-weight: 700;
-                color: #1A1E24;
-                vertical-alignment: center;
-                overflow: elide;
+                color: #B3261E;
+                horizontal-alignment: center;
             }
-            if !r.first : Rectangle {
-                x: parent.width - 232px;
-                y: 8px;
-                width: 64px;
-                height: 48px;
-                border-radius: 10px;
-                background: admin-up-ta.pressed ? #E4E8ED : #EDF0F3;
-                Text { text: "↑"; font-size: 26px; font-weight: 700; color: #4A5460; }
-                admin-up-ta := TouchArea { clicked => { root.admin-up(r.name); } }
+
+            // Цифровая клавиатура: 3×4. «С» чистит поле, «←» стирает цифру.
+            property <[string]> keys: ["1","2","3","4","5","6","7","8","9","C","0","←"];
+            for k[i] in keys : Rectangle {
+                x: 262px + mod(i, 3) * 170px;
+                y: 140px + floor(i / 3) * 116px;
+                width: 160px;
+                height: 106px;
+                border-radius: 14px;
+                background: kb-ta.pressed ? #DDE3EA : #FFFFFF;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                Text {
+                    text: k;
+                    font-size: 40px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                }
+                kb-ta := TouchArea {
+                    clicked => {
+                        k == "C" ? root.pin-clear()
+                        : k == "←" ? root.pin-back()
+                        : root.pin-digit(k);
+                    }
+                }
             }
-            if !r.last : Rectangle {
-                x: parent.width - 156px;
-                y: 8px;
-                width: 64px;
-                height: 48px;
-                border-radius: 10px;
-                background: admin-down-ta.pressed ? #E4E8ED : #EDF0F3;
-                Text { text: "↓"; font-size: 26px; font-weight: 700; color: #4A5460; }
-                admin-down-ta := TouchArea { clicked => { root.admin-down(r.name); } }
+
+            // Проверка на бэкенде; при активной паузе кнопка неактивна.
+            Rectangle {
+                x: 262px;
+                y: 608px;
+                width: 500px;
+                height: 64px;
+                border-radius: 14px;
+                background: root.lock-left > 0 || root.pin-mask == ""
+                    ? #DDE1E6
+                    : (pin-ok-ta.pressed ? #1E4D3A : #2E7D57);
+                Text {
+                    text: "ВОЙТИ";
+                    font-size: 28px;
+                    font-weight: 700;
+                    color: #FFFFFF;
+                }
+                pin-ok-ta := TouchArea {
+                    enabled: root.lock-left == 0 && root.pin-mask != "";
+                    clicked => { root.pin-try(); }
+                }
+            }
+
+            // Адрес весов для персонала: мелко в правом нижнем углу.
+            Text {
+                x: parent.width - 360px;
+                y: parent.height - 30px;
+                width: 350px;
+                height: 26px;
+                text: root.ip-note;
+                font-size: 18px;
+                color: #7A828C;
+                horizontal-alignment: right;
+            }
+        }
+
+        // ---------- Экран 6: главное меню ----------
+        // Обслуживание доступно персоналу, настройка — только администратору
+        // (роль приходит от бэкенда после входа).
+        if root.screen == 6 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            property <[MenuRow]> rows: [
+                { label: "Настройки весов", id: "depts", admin: true },
+                { label: "Оборудование", id: "equip", admin: true },
+                { label: "Сеть", id: "net", admin: true },
+                { label: "Диагностика", id: "diag", admin: false },
+                { label: "Протяжка ленты", id: "feed", admin: false },
+                { label: "Тестовая печать", id: "testprint", admin: false },
+                { label: "Выставить 0 / тарировать", id: "zero", admin: false },
+                { label: "Перезагрузка весов", id: "restart", admin: true },
+            ];
+            for r[i] in rows : Rectangle {
+                x: 8px;
+                y: 12px + i * 82px;
+                width: parent.width - 16px;
+                height: 74px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: menu-ta.pressed && root.role == 1 ? #E4E8ED : #FFFFFF;
+                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
+                Text {
+                    x: 24px;
+                    width: parent.width - 48px;
+                    height: parent.height;
+                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                menu-ta := TouchArea {
+                    clicked => {
+                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
+                    }
+                }
+            }
+        }
+
+        // ---------- Экран 7: диагностика ----------
+        if root.screen == 7 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            Rectangle {
+                x: 8px; y: 12px;
+                width: parent.width - 16px;
+                height: parent.height - 24px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: #FFFFFF;
+                clip: true;
+
+                Flickable {
+                    x: 16px; y: 16px;
+                    width: parent.width - 32px;
+                    height: parent.height - 32px;
+                    viewport-height: diag-t.preferred-height;
+                    diag-t := Text {
+                        width: parent.width;
+                        text: root.diag-text;
+                        font-size: 20px;
+                        font-family: "monospace";
+                        color: #1A1E24;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+
+        // ---------- Экран 8: сеть (IP/маска/шлюз/DNS) ----------
+        if root.screen == 8 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            // Переключатель режима: в DHCP поля только чтение.
+            Rectangle {
+                x: 8px;
+                y: 12px;
+                width: parent.width - 16px;
+                height: 52px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: #FFFFFF;
+                Rectangle {
+                    x: 4px;
+                    y: 4px;
+                    width: (parent.width - 16px) / 2;
+                    height: parent.height - 8px;
+                    border-radius: 10px;
+                    background: !root.net-dhcp ? #2F6FED : #EDF0F3;
+                    Text {
+                        text: "РУЧНОЙ";
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: !root.net-dhcp ? #FFFFFF : #1A1E24;
+                    }
+                    TouchArea { clicked => { root.net-mode(false); } }
+                }
+                Rectangle {
+                    x: parent.width - 4px - (parent.width - 16px) / 2;
+                    y: 4px;
+                    width: (parent.width - 16px) / 2;
+                    height: parent.height - 8px;
+                    border-radius: 10px;
+                    background: root.net-dhcp ? #2F6FED : #EDF0F3;
+                    Text {
+                        text: "DHCP";
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: root.net-dhcp ? #FFFFFF : #1A1E24;
+                    }
+                    TouchArea { clicked => { root.net-mode(true); } }
+                }
+            }
+
+            // Поля: тап по строке — фокус (только в ручном режиме); в DHCP
+            // строки серые и не нажимаются, показывают полученные значения.
+            for f[i] in root.net-rows : Rectangle {
+                x: 8px;
+                y: 72px + i * 58px;
+                width: parent.width - 16px;
+                height: 52px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: !root.net-dhcp && root.net-focus == i ? #2F6FED : #C9CFD7;
+                background: #FFFFFF;
+                opacity: root.net-dhcp ? 0.55 : 1.0;
+                Text {
+                    x: 16px;
+                    width: 140px;
+                    height: parent.height;
+                    text: f.label;
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: #4A5460;
+                    vertical-alignment: center;
+                }
+                Text {
+                    x: 170px;
+                    width: parent.width - 186px;
+                    height: parent.height;
+                    text: f.value;
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                TouchArea {
+                    enabled: !root.net-dhcp;
+                    clicked => { root.net-tap(i); }
+                }
+            }
+
+            // Клавиатура: цифры, точка, забой (три ряда) + C рядом с ПРИМЕНИТЬ.
+            property <[string]> net-keys: ["7","8","9","4","5","6","1","2","3",".","0","←"];
+            for k[j] in net-keys : Rectangle {
+                x: 8px + Math.mod(j, 3) * ((parent.width - 32px) / 3);
+                y: 310px + Math.floor(j / 3) * 76px;
+                width: (parent.width - 32px) / 3 - 12px;
+                height: 70px;
+                border-radius: 12px;
+                background: net-key-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                opacity: root.net-dhcp ? 0.45 : 1.0;
+                Text { text: k; font-size: 30px; font-weight: 700; color: #1A1E24; }
+                net-key-ta := TouchArea { enabled: !root.net-dhcp; clicked => { root.net-key(k); } }
+            }
+
+            Rectangle {
+                x: 8px;
+                y: 614px;
+                width: 160px;
+                height: 50px;
+                border-radius: 12px;
+                background: net-clear-ta.pressed ? #E4E8ED : #EDF0F3;
+                Text { text: "C"; font-size: 26px; font-weight: 700; color: #1A1E24; }
+                net-clear-ta := TouchArea { clicked => { root.net-key("C"); } }
             }
             Rectangle {
-                x: parent.width - 80px;
-                y: 8px;
-                width: 64px;
-                height: 48px;
-                border-radius: 10px;
-                background: admin-del-ta.pressed ? #F2B8B5 : #F6DEDD;
-                Text { text: "✕"; font-size: 26px; font-weight: 700; color: #7A2E2E; }
-                admin-del-ta := TouchArea { clicked => { root.admin-del(r.name); } }
+                x: 188px;
+                y: 614px;
+                width: parent.width - 196px;
+                height: 50px;
+                border-radius: 12px;
+                background: net-apply-ta.pressed ? #2456C4 : #2F6FED;
+                Text {
+                    text: root.net-dhcp ? "ПРИМЕНИТЬ DHCP" : "ПРИМЕНИТЬ";
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #FFFFFF;
+                }
+                net-apply-ta := TouchArea { clicked => { root.net-apply(); } }
+            }
+            // Модальное окно результата: затемнение, сообщение, ОК.
+            if root.net-popup-open : Rectangle {
+                x: 0; y: 0;
+                width: parent.width;
+                height: parent.height;
+                background: rgba(10, 14, 20, 0.45);
+                popup-net-ta := TouchArea { }
+                Rectangle {
+                    x: (parent.width - 560px) / 2;
+                    y: (parent.height - 260px) / 2;
+                    width: 560px;
+                    height: 260px;
+                    border-radius: 18px;
+                    background: #FFFFFF;
+                    Text {
+                        x: 32px;
+                        y: 28px;
+                        width: parent.width - 64px;
+                        text: root.net-popup-text;
+                        font-size: 22px;
+                        font-weight: 700;
+                        color: root.net-popup-ok ? #1E7A3C : #C0392B;
+                        wrap: word-wrap;
+                    }
+                    Rectangle {
+                        x: (parent.width - 220px) / 2;
+                        y: parent.height - 88px;
+                        width: 220px;
+                        height: 60px;
+                        border-radius: 14px;
+                        background: net-popup-ta.pressed ? #1E4D3A : #2E7D57;
+                        Text { text: "ОК"; font-size: 26px; font-weight: 700; color: #FFFFFF; }
+                        net-popup-ta := TouchArea { clicked => { root.net-popup-close(); } }
+                    }
+                }
+            }
+        }
+
+        // ---------- Экран 4: редактор отделов ----------
+        if root.screen == 4 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            for r[i] in root.admin-rows : Rectangle {
+                x: 8px;
+                y: 12px + i * 72px;
+                width: parent.width - 16px;
+                height: 64px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: #FFFFFF;
+                Text {
+                    x: 16px;
+                    width: parent.width - 260px;
+                    height: parent.height;
+                    text: r.name;
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                if !r.first : Rectangle {
+                    x: parent.width - 232px;
+                    y: 8px;
+                    width: 64px;
+                    height: 48px;
+                    border-radius: 10px;
+                    background: admin-up-ta.pressed ? #E4E8ED : #EDF0F3;
+                    Text { text: "↑"; font-size: 26px; font-weight: 700; color: #4A5460; }
+                    admin-up-ta := TouchArea { clicked => { root.admin-up(r.name); } }
+                }
+                if !r.last : Rectangle {
+                    x: parent.width - 156px;
+                    y: 8px;
+                    width: 64px;
+                    height: 48px;
+                    border-radius: 10px;
+                    background: admin-down-ta.pressed ? #E4E8ED : #EDF0F3;
+                    Text { text: "↓"; font-size: 26px; font-weight: 700; color: #4A5460; }
+                    admin-down-ta := TouchArea { clicked => { root.admin-down(r.name); } }
+                }
+                Rectangle {
+                    x: parent.width - 80px;
+                    y: 8px;
+                    width: 64px;
+                    height: 48px;
+                    border-radius: 10px;
+                    background: admin-del-ta.pressed ? #F2B8B5 : #F6DEDD;
+                    Text { text: "✕"; font-size: 26px; font-weight: 700; color: #7A2E2E; }
+                    admin-del-ta := TouchArea { clicked => { root.admin-del(r.name); } }
+                }
             }
         }
     }

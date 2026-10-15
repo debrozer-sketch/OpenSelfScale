@@ -100,12 +100,28 @@ impl CenterProfile {
     }
 }
 
+/// Поведение экрана после печати этикетки.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct KioskProfile {
+    /// true — сразу после печати вернуться на главный экран;
+    /// false — остаться в выбранном разделе.
+    pub return_to_root_after_print: bool,
+}
+
+impl Default for KioskProfile {
+    fn default() -> Self {
+        Self { return_to_root_after_print: true }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub scales: ScalesProfile,
     pub printer: PrinterProfile,
     pub ui: UiProfile,
+    pub kiosk: KioskProfile,
     /// Источник выгрузки (FTP и т.п.).
     pub center: CenterProfile,
     /// Каталог приёма выгрузки (drop-протокол, ready.flg — триггер).
@@ -123,6 +139,7 @@ impl Default for Config {
             scales: ScalesProfile::default(),
             printer: PrinterProfile::default(),
             ui: UiProfile::default(),
+            kiosk: KioskProfile::default(),
             center: CenterProfile::default(),
             incoming_dir: PathBuf::from("/var/ftp/scale"),
             db_path: PathBuf::from("/home/scales/plu.db"),
@@ -220,5 +237,11 @@ baud = 115200
     fn broken_config_falls_back_to_defaults() {
         assert!(Config::load(Path::new("/nonexistent/config.toml")).is_err());
         assert_eq!(Config::default().scales.baud, 115_200);
+    }
+
+    #[test]
+    fn kiosk_profile_defaults_to_root_return() {
+        let c = Config::default();
+        assert!(c.kiosk.return_to_root_after_print);
     }
 }

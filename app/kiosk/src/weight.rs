@@ -20,6 +20,7 @@ pub struct Snapshot {
 pub struct WeightSource {
     inner: Arc<Mutex<Snapshot>>,
     stop: Arc<AtomicBool>,
+    zero: Arc<AtomicBool>,
 }
 
 impl WeightSource {
@@ -32,18 +33,26 @@ impl WeightSource {
             port_up: false,
         }));
         let stop = Arc::new(AtomicBool::new(false));
+        let zero = Arc::new(AtomicBool::new(false));
         let profile = profile.clone();
         let inner_t = inner.clone();
         let stop_t = stop.clone();
+        let zero_t = zero.clone();
         std::thread::Builder::new()
             .name("weight-poll".into())
-            .spawn(move || poll_loop(&profile, inner_t, stop_t))
+            .spawn(move || poll_loop(&profile, inner_t, stop_t, zero_t))
             .expect("spawn weight thread");
-        Self { inner, stop }
+        Self { inner, stop, zero }
     }
 
     pub fn snapshot(&self) -> Snapshot {
         *self.inner.lock().expect("weight mutex")
+    }
+
+    /// Обнуление/тарирование: флаг читает поток опроса, команда уходит с
+    /// порта, которым владеет только он.
+    pub fn request_zero(&self) {
+        self.zero.store(true, Ordering::Relaxed);
     }
 }
 
@@ -136,13 +145,24 @@ fn open_tty_raw(path: &str, baud: u32) -> Result<std::fs::File, String> {
     Ok(unsafe { std::fs::File::from_raw_fd(fd) })
 }
 
-fn poll_loop(profile: &ScalesProfile, out: Arc<Mutex<Snapshot>>, stop: Arc<AtomicBool>) {
+fn poll_loop(
+    profile: &ScalesProfile,
+    out: Arc<Mutex<Snapshot>>,
+    stop: Arc<AtomicBool>,
+    zero: Arc<AtomicBool>,
+) {
     while !stop.load(Ordering::Relaxed) {
         match open_driver(profile) {
             Ok(mut driver) => {
                 loop {
                     if stop.load(Ordering::Relaxed) {
                         return;
+                    }
+                    if zero.swap(false, Ordering::Relaxed) {
+                        match driver.zero() {
+                            Ok(()) => log::info!("весы: обнулено по запросу"),
+                            Err(e) => log::warn!("весы: обнуление не удалось: {e}"),
+                        }
                     }
                     match driver.poll_once(Duration::from_millis(900)) {
                         Ok(sample) => {

@@ -20,6 +20,8 @@ pub enum ShtrihError {
     LrcMismatch { expected: u8, got: u8 },
     #[error("unexpected frame byte {0:#04x}")]
     Protocol(u8),
+    #[error("scale rejected command {cmd:#04x} with error {code:#04x}")]
+    Device { cmd: u8, code: u8 },
     #[error("timed out waiting for scale reply")]
     Timeout,
 }
@@ -28,9 +30,9 @@ pub enum ShtrihError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScaleReply {
     pub status: u8,
-    /// Масса в граммах (32 бита little-endian из кадра, знаковая; отрицательные
-    /// значения (дрейф пустой платформы) срезаются в 0).
-    pub mass_g: u32,
+    /// Масса в граммах (32 бита little-endian из кадра, знаковая): после
+    /// фиксации нуля под тарой снятие тары даёт отрицательные показания.
+    pub mass_g: i32,
 }
 
 impl ScaleReply {
@@ -54,8 +56,17 @@ pub fn lrc(bytes: &[u8]) -> u8 {
 /// Снят с живых весов: `\x02\x05:0030<`.
 pub fn build_poll_frame() -> [u8; 8] {
     let mut f = [0u8; 8];
-    f[0] = STX;
     f[1..7].copy_from_slice(b"\x05:0030");
+    f[0] = STX;
+    f[7] = lrc(&f[1..7]);
+    f
+}
+
+/// Кадр обнуления/тарирования: STX '5' '0' "0030" LRC (PROTOCOL.md §1).
+pub fn build_zero_frame() -> [u8; 8] {
+    let mut f = [0u8; 8];
+    f[1..7].copy_from_slice(b"\x05\x30\x30\x30\x33\x30");
+    f[0] = STX;
     f[7] = lrc(&f[1..7]);
     f
 }
@@ -84,7 +95,7 @@ pub fn parse_reply(frame: &[u8]) -> Result<ScaleReply, ShtrihError> {
     }
     let status = frame[4];
     let raw = i32::from_le_bytes([frame[6], frame[7], frame[8], frame[9]]);
-    Ok(ScaleReply { status, mass_g: raw.max(0) as u32 })
+    Ok(ScaleReply { status, mass_g: raw })
 }
 
 /// Чтение с таймаутом, платформенно-зависимое: unix требует AsRawFd (poll),
@@ -191,6 +202,64 @@ impl<P: PortPoll> ShtrihScales<P> {
         }
     }
 
+    /// Обнуление: шлём setZero и дочитываем ответ до полного кадра —
+    /// ACK и STX-кадр приходят раздельными чтениями, и если оставить кадр
+    /// в буфере порта, следующий опрос примет его за мусор и уйдёт в
+    /// переподключение (наблюдалось 2026-10-16). Ответ проверяем на байт
+    /// ошибки: `STX 02 <cmd> <err> LRC`, err != 0 — отказ устройства.
+    pub fn zero(&mut self, timeout: Duration) -> Result<(), ShtrihError> {
+        self.drain_command_reply(&build_zero_frame(), 0x30, timeout)
+    }
+
+    /// Общий цикл «команда → дождаться кадра → ACK → проверить ошибку».
+    fn drain_command_reply(
+        &mut self,
+        frame: &[u8],
+        cmd: u8,
+        timeout: Duration,
+    ) -> Result<(), ShtrihError> {
+        self.buf.clear();
+        self.port.write_all(frame)?;
+        self.port.flush()?;
+        let mut scratch = [0u8; 64];
+        loop {
+            if let Some(start) = self.buf.iter().position(|&b| b == STX) {
+                if self.buf.len() > start + 1 {
+                    let need = 2 + self.buf[start + 1] as usize + 1;
+                    if self.buf.len() >= start + need {
+                        let reply: Vec<u8> = self.buf[start..start + need].to_vec();
+                        self.port.write_all(&[ACK])?;
+                        self.port.flush()?;
+                        if reply.len() < 4 || reply[2] != cmd {
+                            return Err(ShtrihError::Protocol(
+                                reply.get(2).copied().unwrap_or(0),
+                            ));
+                        }
+                        let expected = lrc(&reply[1..reply.len() - 1]);
+                        if expected != reply[reply.len() - 1] {
+                            return Err(ShtrihError::LrcMismatch {
+                                expected,
+                                got: reply[reply.len() - 1],
+                            });
+                        }
+                        let code = reply[3];
+                        if code != 0 {
+                            return Err(ShtrihError::Device { cmd, code });
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+            if self.buf.len() > 64 {
+                self.buf.clear();
+            }
+            let n = self.port.read_timeout(&mut scratch, timeout)?;
+            if n == 0 {
+                return Err(ShtrihError::Timeout);
+            }
+            self.buf.extend_from_slice(&scratch[..n]);
+        }
+    }
 }
 
 impl<P> drivers_api::ScalesDriver for ShtrihScales<P>
@@ -206,6 +275,14 @@ where
                 other => drivers_api::DriverError::Protocol(other.to_string()),
             })
     }
+
+    fn zero(&mut self) -> Result<(), drivers_api::DriverError> {
+        ShtrihScales::zero(self, Duration::from_millis(900)).map_err(|e| match e {
+            ShtrihError::Io(io) => drivers_api::DriverError::Io(io),
+            ShtrihError::Timeout => drivers_api::DriverError::Timeout,
+            other => drivers_api::DriverError::Protocol(other.to_string()),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -216,6 +293,12 @@ mod tests {
     fn poll_frame_matches_live_dump() {
         // Кадр снят strace-ом с работающих весов.
         assert_eq!(build_poll_frame(), *b"\x02\x05:0030<");
+    }
+
+    #[test]
+    fn zero_frame_matches_protocol_doc() {
+        // Кадр обнуления из PROTOCOL.md §1, подтверждён дизасмом SelfServiceScales.
+        assert_eq!(build_zero_frame(), *b"\x02\x05\x30\x30\x30\x33\x30\x36");
     }
 
     #[test]
@@ -243,12 +326,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_negative_mass_clamps_to_zero() {
+    fn parse_negative_mass_stays_negative() {
         // Живой замер на железе (Debian 13, 2026-10): пустая платформа с
         // дрейфом −6 г; кадр пришёл после отдельных байтов NAK и ACK.
+        // Знаковую массу не срезаем: после «0» под тарой снятие тары
+        // обязано показывать минус (порожняя платформа = −вес тары).
         let frame = b"\x02\x0b:\x00\x14\x00\xfa\xff\xff\xff\x00\x00\x00\x20";
         let r = parse_reply(frame).unwrap();
-        assert_eq!(r.mass_g, 0);
+        assert_eq!(r.mass_g, -6);
         assert!(!r.is_stable());
     }
 
@@ -260,5 +345,78 @@ mod tests {
             parse_reply(&frame),
             Err(ShtrihError::LrcMismatch { .. })
         ));
+    }
+
+    /// Фейковый порт: отдаёт заготовленные куски по одному на чтение и
+    /// копит записанное — воспроизводит раздельный приход ACK и кадра.
+    struct SplitReplyPort {
+        chunks: Vec<Vec<u8>>,
+        written: Vec<u8>,
+    }
+    impl SplitReplyPort {
+        fn new(chunks: Vec<Vec<u8>>) -> Self {
+            Self { chunks, written: Vec::new() }
+        }
+    }
+    impl Read for SplitReplyPort {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.chunks.is_empty() {
+                return Ok(0);
+            }
+            let c = self.chunks.remove(0);
+            let n = c.len().min(buf.len());
+            buf[..n].copy_from_slice(&c[..n]);
+            Ok(n)
+        }
+    }
+    impl Write for SplitReplyPort {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    // PortPoll для мока не нужен: на хосте действует blanket-impl
+    // (cfg(not(unix))) поверх Read + Write.
+
+    #[test]
+    fn zero_drains_split_ack_and_frame() {
+        // Живой расклад: устройство отвечает ACK отдельным чтением, кадр —
+        // следующим. zero() обязан дочитать кадр, иначе он останется в порте
+        // и сломает следующий опрос (баг 2026-10-16).
+        let mut port = SplitReplyPort::new(vec![
+            vec![0x06],
+            vec![0x02, 0x02, 0x30, 0x00],
+            vec![0x32],
+        ]);
+        ShtrihScales::zero(&mut ShtrihScales::new(&mut port), Duration::from_millis(50))
+            .expect("zero should succeed on split reply");
+        // После ответа устройству уходит ACK.
+        assert!(port.written.last() == Some(&0x06));
+    }
+
+    #[test]
+    fn zero_reports_device_error() {
+        // Отказ: error-байт != 0 в кадре подтверждения.
+        let mut frame = vec![0x02, 0x02, 0x30, 0x05];
+        frame.push(lrc(&frame[1..]));
+        let mut port = SplitReplyPort::new(vec![vec![0x06], frame]);
+        let err = ShtrihScales::zero(&mut ShtrihScales::new(&mut port), Duration::from_millis(50))
+            .expect_err("nonzero error byte must fail");
+        assert!(matches!(err, ShtrihError::Device { cmd: 0x30, code: 0x05 }));
+    }
+
+    #[test]
+    fn zero_tolerates_ack_before_frame_in_single_read() {
+        // ACK и кадр в одном чтении — обычный расклад, тоже должен работать.
+        let mut frame = vec![0x02, 0x02, 0x30, 0x00];
+        frame.push(lrc(&frame[1..]));
+        let mut chunks = vec![vec![0x06]];
+        chunks.push(frame);
+        let mut port = SplitReplyPort::new(chunks);
+        ShtrihScales::zero(&mut ShtrihScales::new(&mut port), Duration::from_millis(50))
+            .expect("zero should succeed when ACK and frame arrive together");
     }
 }

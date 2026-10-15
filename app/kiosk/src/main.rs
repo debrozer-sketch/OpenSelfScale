@@ -1,4 +1,4 @@
-//! Точка входа киоска: сборка модулей, CLI, машина состояний экрана.
+﻿//! Точка входа киоска: сборка модулей, CLI, машина состояний экрана.
 //!
 //! Модули: config, weight (поток опроса весов), print, diag, calib.
 //! UI в ui/main.slint по прототипу var2.md: зоны A/B1/B2/C, печать
@@ -8,6 +8,8 @@
 //! --import <plu.xml> | --version]`.
 
 mod admin;
+mod net;
+use net::net_rows_set;
 mod calib;
 mod config;
 mod depts_cli;
@@ -288,15 +290,39 @@ fn run_kiosk(cfg: config::Config) {
     let app_state = std::sync::Arc::new(weight::WeightSource::spawn(&cfg.scales));
     let cfg = std::sync::Arc::new(cfg);
 
+    // Вход персонала: при первом запуске заводской пароль хэшируется с
+    // случайной солью и пишется в БД; дальше — только смена через меню.
+    // Заводское значение — как пин по умолчанию на весовом терминале.
+    match datastore::open(&cfg.db_path) {
+        Ok(conn) => {
+            if let Err(e) = datastore::auth::seed(&conn, "12345") {
+                log::error!("вход: инициализация: {e}");
+            }
+        }
+        Err(e) => log::error!("вход: база недоступна: {e}"),
+    }
+
     let ui = MainWindow::new().expect("UI init");
     // Экран из конфига: панель другого размера настраивается без правки кода.
     ui.set_screen_w(cfg.ui.screen_width as f32);
     ui.set_screen_h(cfg.ui.screen_height as f32);
+    // Размер — физическими пикселями, явным вызовом: разметочный width/height
+    // winit на X без оконного менеджера может не применить (окно схлопывается
+    // в дефолт ~600×600 после пересоздания X-сессии).
+    ui.window().set_size(slint::WindowSize::Physical(slint::PhysicalSize::new(
+        cfg.ui.screen_width,
+        cfg.ui.screen_height,
+    )));
     if cfg.ui.fullscreen {
         // Боевой режим: на весь физический экран, без рамок окна.
         // Размер уже задан явно — fullscreen только убирает декорации.
         ui.window().set_fullscreen(true);
     }
+
+    // Окно настроек паркинговать больше не нужно: меню настроек — экраны
+    // (4-7) главного окна, см. оверлей в main.slint. Одно X-окно снимает
+    // проблему winit 0.30 на X без WM: у второго окна размер после
+    // пересоздания X-сессии схлопывался в ~600×600.
 
     // Каталог + справочник групп по отделам. Состав отдела — из БД-карты
     // group_dept (правится CLI/центром); dept_of (сид) не используется
@@ -506,8 +532,9 @@ fn run_kiosk(cfg: config::Config) {
         }
     };
     // Отдел → сразу его товары (все группы отдела), экран 2. Алфавит,
-    // страницы по 27 карточек (9×3).
-    ui.on_dept_tapped({
+    // без перезапуска киоска (старое ПО рестартило приложение на каждую
+    // раскладку; покупатель терял экран).
+    let open_dept = {
         let kiosk = kiosk.clone();
         let catalog = catalog.clone();
         let group_dept = group_dept.clone();
@@ -515,7 +542,7 @@ fn run_kiosk(cfg: config::Config) {
         let items_all = items_all.clone();
         let show = show_items_page.clone();
         let img_dir = img_dir.clone();
-        move |dept| {
+        move |dept: &str| {
             if kiosk.borrow().phase >= 2 {
                 return; // печать/готово/ошибка: касания игнорируются
             }
@@ -527,15 +554,26 @@ fn run_kiosk(cfg: config::Config) {
                 .iter()
                 .filter(|p| {
                     let g = if p.group.is_empty() { "ПРОЧЕЕ" } else { p.group.as_str() };
-                    gd.get(g).map(|d| d == dept.as_str()).unwrap_or(false)
+                    gd.get(g).map(|d| d == dept).unwrap_or(false)
                 })
                 .map(|p| tiles::tile_of(p, &img_dir))
                 .collect();
             items.sort_by(|a, b| a.name.cmp(&b.name));
             *items_all.borrow_mut() = items;
-            ui.set_screen_title(dept.clone());
+            ui.set_screen_title(dept.into());
             show(0);
             ui.set_screen(2);
+        }
+    };
+    ui.on_dept_tapped({
+        let kiosk = kiosk.clone();
+        let open_dept = open_dept.clone();
+        move |dept| {
+            if kiosk.borrow().phase >= 2 {
+                return; // печать/готово/ошибка: касания игнорируются
+            }
+            kiosk.borrow_mut().idle_since = None;
+            open_dept(&dept);
         }
     });
     // Срез отделов: колонки главного экрана + кнопки в шапке экрана товаров.
@@ -738,51 +776,8 @@ fn run_kiosk(cfg: config::Config) {
             }
         }
     });
-    // ---- Меню настроек (экран 4): порядок и состав отделов ----
-    // Правки пишутся в БД сразу; главный экран перестраивается при выходе.
-    let refresh_depts = {
-        let ui_handle = ui.as_weak();
-        let kiosk = kiosk.clone();
-        let cfg = cfg.clone();
-        let all_groups = all_groups.clone();
-        let depts_all = depts_all.clone();
-        let img_dir = img_dir.clone();
-        move || {
-            let Some(ui) = ui_handle.upgrade() else { return };
-            let Ok(conn) = datastore::open(&cfg.db_path) else {
-                log::error!("меню: база недоступна");
-                return;
-            };
-            let depts = datastore::depts_list(&conn).unwrap_or_default();
-            let gd: std::collections::HashMap<String, String> = datastore::group_depts(&conn)
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
-            let tiles = tiles::dept_tiles(&depts, &gd, &all_groups, &img_dir);
-            let pages = tiles.len().div_ceil(max_cols).max(1);
-            let win_w = ui.get_screen_w() as i32;
-            let win_h = ui.get_screen_h() as i32;
-            let colw = (win_w - 16 - (max_cols as i32 - 1) * 8) / max_cols as i32;
-            let pager_h: i32 = if pages > 1 { 64 } else { 0 };
-            let tile_h = win_h - 160 - 16 - pager_h;
-            let maxlen = tiles
-                .iter()
-                .map(|d| d.name.chars().count())
-                .max()
-                .unwrap_or(4) as f32;
-            let font_px = ((colw - 32) as f32 / (maxlen * 0.82)).floor().max(18.0);
-            ui.set_col_w(colw as f32);
-            ui.set_tile_h(tile_h as f32);
-            ui.set_dept_font(font_px);
-            ui.set_pages_total(pages as i32);
-            ui.set_dept_pages_total(pages as i32);
-            let visible: Vec<DeptDef> = tiles.iter().take(max_cols).cloned().collect();
-            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(visible)));
-            ui.set_page_no(0);
-            *depts_all.borrow_mut() = tiles;
-            kiosk.borrow_mut().dept_page = 0;
-        }
-    };
+    // Строки меню настроек (редактор отделов): правки пишутся в БД сразу,
+    // главный экран перестраивается при закрытии меню (refresh_data).
     let admin_reload = {
         let ui_handle = ui.as_weak();
         let cfg = cfg.clone();
@@ -796,13 +791,147 @@ fn run_kiosk(cfg: config::Config) {
         }
     };
     ui.on_admin_close({
+        let kiosk = kiosk.clone();
         let ui_handle = ui.as_weak();
-        let refresh = refresh_depts.clone();
         move || {
-            refresh();
-            if let Some(ui) = ui_handle.upgrade() {
-                ui.set_screen(0);
+            let mut k = kiosk.borrow_mut();
+            // Экран диагностики — «ВЫХОД» возвращает в меню, не наружу.
+            if k.admin_stage == 4 {
+                k.admin_stage = 2;
+                return;
             }
+            // подтверждаем только реальным весом, иначе ожидание висит
+            k.admin_open = false;
+            k.admin_stage = 1;
+            k.admin_pin_buf.clear();
+            // Роль сбрасывается вместе с сеансом меню: повторный вход —
+            // только через пароль.
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_role(0);
+                ui.set_pin_mask("".into());
+            }
+        }
+    });
+    // Вход в меню настроек: 5 тапов по индикатору веса за 3 с. Серия живёт,
+    // пока пауза между тапами не больше 3 с; открытие — только из главного
+    // экрана при покое. Дальше — экран пароля: меню не откроется без него.
+    ui.on_admin_tap({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui.as_weak();
+        move || {
+            let mut k = kiosk.borrow_mut();
+            if k.phase >= 2 {
+                k.admin_taps = 0;
+                k.admin_tap_last = None;
+                return;
+            }
+            if k.admin_tap(Instant::now()) {
+                // Не экран меню, а вход по паролю; строки отделов читаются
+                // после успешной проверки (admin_reload в pin-try).
+                k.admin_stage = 1;
+                k.admin_open = true;
+                k.admin_pin_buf.clear();
+                if let Some(ui) = ui_handle.upgrade() {
+                    // Адрес весов в углу экрана входа — персонал смотрит IP
+                    // для подключения из центра/поддержки.
+                    ui.set_ip_note(format!("IP: {}", net::read_live().ip).into());
+                }
+                log::info!("вход в настройки: запрошен пароль");
+            }
+        }
+    });
+    // Набор пароля: цифры, максимум 8 (проверка формата — в datastore::auth).
+    ui.on_pin_digit({
+        let ui_handle = ui.as_weak();
+        let kiosk = kiosk.clone();
+        move |d| {
+            let mut k = kiosk.borrow_mut();
+            if k.admin_stage != 1 || k.admin_pin_buf.len() >= 8 || !d.bytes().all(|b| b.is_ascii_digit()) {
+                return;
+            }
+            k.admin_pin_buf.push_str(&d);
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_pin_mask("*".repeat(k.admin_pin_buf.chars().count()).into());
+            }
+        }
+    });
+    ui.on_pin_clear({
+        let ui_handle = ui.as_weak();
+        let kiosk = kiosk.clone();
+        move || {
+            kiosk.borrow_mut().admin_pin_buf.clear();
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_pin_mask("".into());
+            }
+        }
+    });
+    ui.on_pin_back({
+        let ui_handle = ui.as_weak();
+        let kiosk = kiosk.clone();
+        move || {
+            let mut k = kiosk.borrow_mut();
+            k.admin_pin_buf.pop();
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_pin_mask("*".repeat(k.admin_pin_buf.chars().count()).into());
+            }
+        }
+    });
+    // Проверка пароля: верный — меню (строки отделов читаются только здесь,
+    // после успеха); неверный — поле чистится, пауза перебора растёт и
+    // переживает перезапуск (счётчик в БД). PIN никуда не логируется.
+    ui.on_pin_try({
+        let ui_handle = ui.as_weak();
+        let kiosk = kiosk.clone();
+        let cfg = cfg.clone();
+        move || {
+            let mut k = kiosk.borrow_mut();
+            if k.admin_stage != 1 {
+                return;
+            }
+            let pin = std::mem::take(&mut k.admin_pin_buf);
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_pin_mask("".into());
+            }
+            let res = match datastore::open(&cfg.db_path) {
+                Ok(conn) => datastore::auth::verify(&conn, &pin),
+                Err(e) => {
+                    log::error!("вход: база: {e}");
+                    return;
+                }
+            };
+            match res {
+                Ok(datastore::auth::Auth::Granted(role)) => {
+                    log::info!(
+                        "вход: пароль принят, роль {}",
+                        if role == datastore::auth::Role::Admin { "admin" } else { "staff" }
+                    );
+                    k.admin_stage = 2;
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_role(if role == datastore::auth::Role::Admin { 1 } else { 0 });
+                    }
+                }
+                Ok(datastore::auth::Auth::Denied { wait_secs }) => {
+                    log::info!("вход: отказ, пауза {wait_secs} с");
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_lock_left(wait_secs as i32);
+                    }
+                }
+                Err(e) => log::error!("вход: проверка: {e}"),
+            }
+        }
+    });
+    ui.on_open_depts({
+        let admin_reload = admin_reload.clone();
+        let kiosk = kiosk.clone();
+        move || {
+            admin_reload();
+            kiosk.borrow_mut().admin_stage = 3;
+        }
+    });
+    ui.on_depts_close({
+        let kiosk = kiosk.clone();
+        move || {
+            kiosk.borrow_mut().admin_stage = 2;
         }
     });
     ui.on_admin_up({
@@ -830,6 +959,246 @@ fn run_kiosk(cfg: config::Config) {
             admin_reload();
         }
     });
+    // Пункты меню: диспетчеризация по id строки MenuRow. Печать/подача —
+    // в фоновом потоке: открытие tty и передача занимают секунды, в потоке
+    // колбэка они замораживали UI; результат виден в логе. Обнуление уходит
+    // во владеющий портом поток весов; диагностика — отдельный экран;
+    // перезапуск — через флаг, тик завершает процесс, systemd перезапускает.
+    ui.on_menu_tap({
+        let cfg = cfg.clone();
+        let app_state = app_state.clone();
+        let kiosk = kiosk.clone();
+        let ui_handle = ui.as_weak();
+        let admin_reload = admin_reload.clone();
+        move |id: slint::SharedString| {
+            match id.as_str() {
+                "depts" => {
+                    admin_reload();
+                    kiosk.borrow_mut().admin_stage = 3;
+                }
+                "net" => {
+                    let (ui, mut k) = (ui_handle.upgrade(), kiosk.borrow_mut());
+                    if let Some(ui) = ui {
+                        // Поля предзаполняются текущими настройками системы:
+                        // экранный буфер — черновик, применение только по кнопке.
+                        k.net_dhcp = net::read_mode();
+                        k.net_buf = net::read_live().fields();
+                        k.net_focus = 0;
+                        ui.set_net_dhcp(k.net_dhcp);
+                        ui.set_net_popup_open(false);
+                        net_rows_set(&ui, &k);
+                    }
+                    k.admin_stage = 5;
+                }
+                "feed" => {
+                    let cfg = cfg.clone();
+                    std::thread::spawn(move || match print::feed_label(&cfg) {
+                        Ok(()) => log::info!("меню: подача до метки"),
+                        Err(e) => log::warn!("меню: подача: {e}"),
+                    });
+                }
+                "testprint" => {
+                    let cfg = cfg.clone();
+                    std::thread::spawn(move || match print::print_test_label(&cfg) {
+                        Ok(()) => log::info!("меню: тестовая этикетка"),
+                        Err(e) => log::warn!("меню: тестовая печать: {e}"),
+                    });
+                }
+                "zero" => {
+                    app_state.request_zero();
+                    log::info!("меню: запрошено обнуление весов");
+                    let mut k = kiosk.borrow_mut();
+                    // Результат виден на индикаторе веса — меню закрываем.
+                    k.admin_open = false;
+                    k.admin_stage = 1;
+                    k.admin_pin_buf.clear();
+                }
+                "diag" => {
+                    let text = diag::collect(&cfg);
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_diag_text(text.into());
+                    }
+                    kiosk.borrow_mut().admin_stage = 4;
+                }
+                "restart" => {
+                    kiosk.borrow_mut().restart_requested = true;
+                }
+                other => log::warn!("меню: неизвестный пункт {other}"),
+            }
+        }
+    });
+    // Экран «Сеть»: клавиатура пишет в поле в фокусе (цифры и точка,
+    // «←» забой, «C» очистка), применение — через root-помощника.
+    ui.on_net_mode({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui.as_weak();
+        move |dhcp: bool| {
+            let mut k = kiosk.borrow_mut();
+            k.net_dhcp = dhcp;
+            // Ручной после DHCP: полученные автоматически значения остаются
+            // в полях как исходная точка для правки.
+            k.net_buf = net::read_live().fields();
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_net_dhcp(dhcp);
+                ui.set_net_popup_open(false);
+                net_rows_set(&ui, &k);
+            }
+        }
+    });
+    ui.on_net_tap({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui.as_weak();
+        move |i: i32| {
+            kiosk.borrow_mut().net_focus = (i as usize).min(3);
+            if let Some(ui) = ui_handle.upgrade() {
+                let k = kiosk.borrow();
+                net_rows_set(&ui, &k);
+            }
+        }
+    });
+    ui.on_net_key({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui.as_weak();
+        move |key: slint::SharedString| {
+            let mut k = kiosk.borrow_mut();
+            let focus = k.net_focus;
+            let buf = &mut k.net_buf[focus];
+            match key.as_str() {
+                "←" => { buf.pop(); }
+                "C" => buf.clear(),
+                ch if (ch.bytes().all(|b| b.is_ascii_digit()) || ch == ".") && buf.len() < 18 => {
+                    buf.push_str(ch);
+                }
+                _ => {}
+            }
+            if let Some(ui) = ui_handle.upgrade() {
+                net_rows_set(&ui, &k);
+            }
+        }
+    });
+    // Текст попапа после применения: фактические настройки с системы,
+    // каждый параметр на своей строке, маска — точечным видом.
+    fn net_popup_text(c: &net::NetConfig) -> String {
+        format!(
+            "Настройки применены:\nIP: {}\nМаска: {}\nШлюз: {}\nDNS: {}",
+            c.ip, c.mask, c.gateway, c.dns
+        )
+    }
+    // Применение сетевых настроек — в фоновом потоке: sudo + dhcpcd
+    // занимают до 30 с, UI-поток обязан продолжать рисовать. Результат
+    // возвращается через invoke_from_event_loop (Slint-компоненты не Send).
+    let show_net_result = {
+        let ui_handle = ui.as_weak();
+        move |ok: bool, text: String| {
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_handle.upgrade() {
+                    ui.set_net_popup_text(text.into());
+                    ui.set_net_popup_ok(ok);
+                    ui.set_net_popup_open(true);
+                }
+            });
+        }
+    };
+    ui.on_net_apply({
+        let kiosk = kiosk.clone();
+        let show_net_result = show_net_result.clone();
+        move || {
+            let (dhcp, buf) = {
+                let mut k = kiosk.borrow_mut();
+                // Экранные буферы больше не источник истины: применение
+                // перечитывает фактическое состояние после команды.
+                (k.net_dhcp, std::mem::take(&mut k.net_buf))
+            };
+            let show = show_net_result.clone();
+            std::thread::spawn(move || {
+                let (ok, text) = if dhcp {
+                    match net::apply_dhcp() {
+                        Ok(()) => {
+                            log::info!("сеть: DHCP применён");
+                            (true, net_popup_text(&net::read_live()))
+                        }
+                        Err(e) => {
+                            log::warn!("сеть: DHCP: {e}");
+                            (false, format!("DHCP не применён: {e}"))
+                        }
+                    }
+                } else {
+                    match net::validate(&buf[0], &buf[1], &buf[2], &buf[3]) {
+                        Ok((ip, pre, gw, dns)) => {
+                            // Живая смена адреса рвёт только соединения по
+                            // старому главному IP; dev-адрес не трогается.
+                            match net::apply(&ip.to_string(), pre, &gw.to_string(), &dns.to_string()) {
+                                Ok(()) => {
+                                    log::info!("сеть: применено {ip}/{pre} шлюз {gw} dns {dns}");
+                                    (true, net_popup_text(&net::read_live()))
+                                }
+                                Err(e) => {
+                                    log::warn!("сеть: применение: {e}");
+                                    (false, format!("Не применено: {e}"))
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("сеть: {e}");
+                            (false, e)
+                        }
+                    }
+                };
+                show(ok, text);
+            });
+            // Поля обновятся из фактического состояния при закрытии попапа —
+            // см. net-popup-close.
+        }
+    });
+    ui.on_net_popup_close({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui.as_weak();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_net_popup_open(false);
+                // После применения перечитываем фактическое состояние: попап
+                // закрывает продавец, к этому моменту сеть уже устаканилась.
+                kiosk.borrow_mut().net_buf = net::read_live().fields();
+                let k = kiosk.borrow();
+                net_rows_set(&ui, &k);
+            }
+        }
+    });
+    ui.on_net_popup_close({
+        let ui_handle = ui.as_weak();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_net_popup_open(false);
+            }
+        }
+    });
+    // Сброс UI на главный экран: страница отделов 0, попап закрыт. Фаза и
+    // selected не трогает — это забота вызывающего кода. Единственный отдел
+    // не показывается колонкой: сразу его товары (раздел один = сразу товар).
+    let go_root = {
+        let ui_handle = ui.as_weak();
+        let depts_all = depts_all.clone();
+        let open_dept = open_dept.clone();
+        move || {
+            let Some(ui) = ui_handle.upgrade() else { return };
+            ui.set_screen(0);
+            ui.set_page_no(0);
+            ui.set_popup_open(false);
+            let tiles: Vec<DeptDef> =
+                depts_all.borrow().iter().take(max_cols).cloned().collect();
+            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles.clone())));
+            ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+            if depts_all.borrow().len() == 1 {
+                let name = depts_all.borrow().first().map(|d| d.name.clone());
+                if let Some(n) = name {
+                    open_dept(&n);
+                }
+            }
+        }
+    };
+    if depts_all.borrow().len() == 1 {
+        go_root();
+    }
     // Живое обновление после синхронизации: каталог, отделы, текущий экран —
     // без перезапуска киоска (старое ПО рестартило приложение на каждую
     // раскладку; покупатель терял экран).
@@ -844,6 +1213,7 @@ fn run_kiosk(cfg: config::Config) {
         let kiosk = kiosk.clone();
         let show_dept = show_dept_page.clone();
         let show_items = show_items_page.clone();
+        let go_root = go_root.clone();
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
             let conn = match datastore::open(&cfg.db_path) {
@@ -888,6 +1258,10 @@ fn run_kiosk(cfg: config::Config) {
             *group_dept.borrow_mut() = gd_map;
             let page = kiosk.borrow().dept_page;
             show_dept(&kiosk, page);
+            // покупатель вправе перекладывать товар и листать каталог.
+            if depts_all.borrow().len() == 1 && ui.get_screen() == 0 {
+                go_root();
+            }
             // Открытый экран товаров: пересобрать карточки текущего отдела.
             if ui.get_screen() == 2 {
                 let title = ui.get_screen_title();
@@ -974,10 +1348,10 @@ fn run_kiosk(cfg: config::Config) {
         let app_state = app_state.clone();
         let cfg = cfg.clone();
         let ui_handle = ui.as_weak();
-        let depts_all = depts_all.clone();
         let sync_rx = sync_rx;
         let printer_health = printer_health.clone();
         let refresh_data = refresh_data;
+        let go_root = go_root.clone();
         timer.start(
             slint::TimerMode::Repeated,
             Duration::from_millis(100),
@@ -985,7 +1359,7 @@ fn run_kiosk(cfg: config::Config) {
                 let Some(ui) = ui_handle.upgrade() else { return };
                 let snap = app_state.snapshot();
                 let ws = weight_state(&snap);
-                ui.set_weight_text(format!("{:.3}", snap.mass_kg.max(0.0)).into());
+                ui.set_weight_text(format!("{:.3}", snap.mass_kg).into());
                 ui.set_weight_state(ws);
                 ui.set_scales_ok(snap.port_up);
                 let ph = *printer_health.lock().expect("printer mutex");
@@ -1001,11 +1375,19 @@ fn run_kiosk(cfg: config::Config) {
                 }
 
                 let mut k = kiosk.borrow_mut();
+                // Перезапуск из меню: тик завершает процесс, systemd
+                // перезапускает сервис (Restart=always).
+                if k.restart_requested {
+                    log::info!("меню: перезапуск программы по запросу");
+                    std::process::exit(0);
+                }
                 // Детальная карточка (оверлей поверх сетки): живой вес и стоимость.
+                // Вес показываем знаковым (минус после снятия тары), сумму
+                // считаем только от неотрицательного веса.
                 if ui.get_popup_open() {
                     if let Some(p) = k.pending.clone() {
                         ui.set_popup_empty(ws == 0);
-                        ui.set_popup_weight(format!("{:.3} кг", snap.mass_kg.max(0.0)).into());
+                        ui.set_popup_weight(format!("{:.3} кг", snap.mass_kg).into());
                         let g = (snap.mass_kg.max(0.0) * 1000.0).round() as u32;
                         ui.set_popup_sum(sum_str(sum_kopecks(p.price, g)).into());
                         ui.set_popup_card_sum(
@@ -1023,6 +1405,9 @@ fn run_kiosk(cfg: config::Config) {
                             log::info!("этикетка напечатана: {g} г");
                             k.phase = 3;
                             k.done_at = Some(Instant::now());
+                            if cfg.kiosk.return_to_root_after_print {
+                                go_root();
+                            }
                         }
                         Err(e) => {
                             log::error!("печать не удалась: {e}");
@@ -1037,13 +1422,16 @@ fn run_kiosk(cfg: config::Config) {
                 }
                 // Запуск печати: фаза 2 и печать ещё не запущена.
                 if k.phase == 2 && k.print_weight_g.is_none() {
-                    let weight_g = (snap.mass_kg * 1000.0).round() as u32;
-                    if weight_g == 0 {
+                    // Знаковый вес: после «0» под тарой снятие тары даёт минус —
+                    // печатать нечего, товар «снят» (см. комментарий ниже).
+                    let weight_g = (snap.mass_kg * 1000.0).round() as i64;
+                    if weight_g <= 0 {
                         // Товар сняли в момент подтверждения: печатать нечего —
                         // снова ждём вес (фаза 1). Иначе сентинел-гонка: каждый
                         // тик спавнил бы новый поток печати «0.000 кг».
                         k.phase = 1;
                     } else {
+                        let weight_g = weight_g as u32;
                         k.print_weight_g = Some(weight_g);
                         let cfg = cfg.clone();
                         let tx = tx.clone();
@@ -1078,38 +1466,40 @@ fn run_kiosk(cfg: config::Config) {
                         // Иначе таймер будет пересоздавать модель отделов
                         // каждые 100 мс и «глотать» первый тап.
                         k.idle_since = None;
-                        ui.set_screen(0);
-                        ui.set_page_no(0);
-                        ui.set_popup_open(false);
-                        // Страница 0: колонки и шапка с начала списка.
-                        let tiles: Vec<DeptDef> = depts_all
-                            .borrow()
-                            .iter()
-                            .take(max_cols)
-                            .cloned()
-                            .collect();
-                        ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles.clone())));
-                        ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+                        go_root();
                     }
                 } else {
                     k.idle_since = None;
                 }
-                // Вход в меню настроек: удержание 2 с в правом верхнем углу
-                // главного экрана при покое (не во время печати).
-                if ui.get_screen() == 0 && ui.get_admin_pressed() && k.phase < 2 {
-                    let t = k.admin_hold.get_or_insert_with(Instant::now);
-                    if t.elapsed() >= Duration::from_secs(2) {
-                        k.admin_hold = None;
-                        match datastore::open(&cfg.db_path) {
-                            Ok(conn) => {
-                                admin::admin_rows_set(&ui, &conn);
-                                ui.set_screen(4);
-                            }
-                            Err(e) => log::error!("меню: база: {e}"),
-                        }
+                // Одно окно: меню настроек — экраны главного окна (оверлей
+                // в main.slint). Маппинг stage -> screen: 1 (PIN) -> 5,
+                // 2 (меню) -> 6, 3 (отделы) -> 4, 4 (диагностика) -> 7,
+                // 5 (сеть) -> 8.
+                if k.admin_open {
+                    let screen = match k.admin_stage {
+                        1 => 5,
+                        2 => 6,
+                        3 => 4,
+                        4 => 7,
+                        5 => 8,
+                        _ => 7,
+                    };
+                    if ui.get_screen() != screen {
+                        ui.set_screen(screen);
                     }
-                } else {
-                    k.admin_hold = None;
+                    if k.admin_stage == 1 {
+                        let left = datastore::open(&cfg.db_path)
+                            .map(|c| datastore::auth::lock_left(&c))
+                            .unwrap_or(0) as i32;
+                        if ui.get_lock_left() != left {
+                            ui.set_lock_left(left);
+                        }
+                    } else if ui.get_lock_left() != 0 {
+                        ui.set_lock_left(0);
+                    }
+                } else if ui.get_screen() >= 4 {
+                    // Меню закрыто: возврат к каталогу (страница 0, попап закрыт).
+                    go_root();
                 }
                 if k.phase != 2 {
                     k.print_weight_g = None; // сброс для следующей операции
@@ -1134,9 +1524,10 @@ fn run_kiosk(cfg: config::Config) {
                             let sum = sum_str(sum_kopecks(sel.price, w));
                             (
                                 format!(
-                                    "{}: {:.3} кг = {} — печатаем…",
+                                    "Печать: {} · {},{:03} кг · {}",
                                     sel.name,
-                                    w as f64 / 1000.0,
+                                    w / 1000,
+                                    w % 1000,
                                     sum
                                 ),
                                 1,
@@ -1144,8 +1535,8 @@ fn run_kiosk(cfg: config::Config) {
                         }
                         None => (String::new(), 0),
                     },
-                    3 => ("Этикетка готова — заберите её у принтера".into(), 0),
-                    4 => ("Не удалось напечатать — позовите продавца".into(), 2),
+                    3 => ("Заберите этикетку".into(), 0),
+                    4 => ("Ошибка печати. Позовите сотрудника".into(), 2),
                     // Покой: подсказка только когда вес ещё не устаканился.
                     _ => match ws {
                         1 => ("Вес нестабилен…".into(), 1),

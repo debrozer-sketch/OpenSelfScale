@@ -19,7 +19,9 @@ pub enum DriverError {
 /// Одно показание весов.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WeightSample {
-    pub mass_g: u32,
+    /// Масса в граммах, знаковая: после фиксации нуля под тарой снятие
+    /// тары даёт отрицательные показания — киоск показывает их как есть.
+    pub mass_g: i32,
     pub stable: bool,
 }
 
@@ -27,6 +29,12 @@ pub struct WeightSample {
 pub trait ScalesDriver {
     /// Один цикл опроса; реализация сама собирает кадры и проверяет их.
     fn poll_once(&mut self, timeout: Duration) -> Result<WeightSample, DriverError>;
+
+    /// Обнуление/тарирование. Драйвер весов владеет портом, команда уходит
+    /// через него; порт-владелец вызывает это из своего потока опроса.
+    fn zero(&mut self) -> Result<(), DriverError> {
+        Err(DriverError::Protocol("zero не поддерживается драйвером".into()))
+    }
 }
 
 /// Профиль весового модуля из конфига устройства.

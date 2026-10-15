@@ -9,6 +9,8 @@ use std::path::Path;
 use rusqlite::Connection;
 use thiserror::Error;
 
+pub mod auth;
+
 #[derive(Debug, Error)]
 pub enum StoreError {
     #[error("sqlite: {0}")]

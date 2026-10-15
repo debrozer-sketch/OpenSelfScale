@@ -14,9 +14,8 @@ fn main() -> anyhow_free_result::Result<()> {
     for i in 0..10 {
         match scales.poll_once(Duration::from_millis(900)) {
             Ok(r) => println!(
-                "#{i}: {}.{:03} кг, status={:#04x}, stable={}",
-                r.mass_g / 1000,
-                r.mass_g % 1000,
+                "#{i}: {:.3} кг, status={:#04x}, stable={}",
+                r.mass_g as f64 / 1000.0,
                 r.status,
                 r.is_stable()
             ),

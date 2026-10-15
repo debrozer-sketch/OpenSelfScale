@@ -62,15 +62,36 @@ impl FeedCalibration {
 /// Один шаг калибровки: печать тестовой этикетки с текущими параметрами.
 /// Результат шага оценивает оператор на экране («хвост обрезан / всё ок /
 /// уехало далеко») — полуавтоматический цикл вместо слепых чисел.
-pub fn test_label_bytes(cal: &FeedCalibration) -> Vec<u8> {
+///
+/// Этикетка в page mode (как в дампе старого ПО), посадка от старта
+/// этикетки. Паттерн качества набран блочными глифами CP866, а не растром:
+/// полный растр листа — 13 КБ, на порте 19200 бод это ~7 с передачи и
+/// обрезание по буферу принтера, текстовые поля — ~0,5 КБ и мгновенно.
+pub fn test_label_bytes() -> Vec<u8> {
+    const COLS: usize = 37; // 37 колонок шрифта A (12 точек) на ширину 448
     let mut job = LabelJob::begin((448, 232));
-    let _ = job.field(0, 0, escpos::FieldStyle::Normal, "КАЛИБРОВКА");
-    let _ = job.field(
-        0,
-        32,
-        escpos::FieldStyle::Normal,
-        &format!("back={} opto={} extra={}", cal.backward_space, cal.opto_thermo_space, cal.extra_feed),
-    );
+    let _ = job.field(0, 0, escpos::FieldStyle::Normal, "ТЕСТОВАЯ ПЕЧАТЬ 12345");
+    // Шахматка 12×12 из полублоков: ▀ на чётных колонках (56..68), ▀ на
+    // нечётных (68..80), затем ▄ тем же порядком (80..104).
+    let solid = "█".repeat(COLS);
+    let even: String = (0..COLS).map(|i| if i % 2 == 0 { '█' } else { ' ' }).collect();
+    let odd: String = (0..COLS).map(|i| if i % 2 == 1 { '█' } else { ' ' }).collect();
+    let up_even: String = even.chars().map(|c| if c == '█' { '▀' } else { c }).collect();
+    let up_odd: String = odd.chars().map(|c| if c == '█' { '▀' } else { c }).collect();
+    let down_even: String = even.chars().map(|c| if c == '█' { '▄' } else { c }).collect();
+    let down_odd: String = odd.chars().map(|c| if c == '█' { '▄' } else { c }).collect();
+    let _ = job.field(0, 56, escpos::FieldStyle::Normal, &up_even);
+    let _ = job.field(0, 68, escpos::FieldStyle::Normal, &up_odd);
+    let _ = job.field(0, 80, escpos::FieldStyle::Normal, &down_even);
+    let _ = job.field(0, 92, escpos::FieldStyle::Normal, &down_odd);
+    // Вертикальные бары 12×24 через 12.
+    let _ = job.field(0, 104, escpos::FieldStyle::Normal, &even);
+    // Плотная заливка 75% и сплошная — равномерность прогрева по ширине.
+    let _ = job.field(0, 128, escpos::FieldStyle::Normal, &"▓".repeat(COLS));
+    let _ = job.field(0, 152, escpos::FieldStyle::Normal, &solid);
+    // Тонкая линия (подчёркивания, шрифт B) и жирная (нижние полублоки).
+    let _ = job.field(0, 184, escpos::FieldStyle::FontB, &"_".repeat(COLS));
+    let _ = job.field(0, 196, escpos::FieldStyle::Normal, &"▄".repeat(COLS));
     job.finish()
 }
 
@@ -113,14 +134,14 @@ pub fn run_cli(cfg: &Config) -> Result<(), String> {
 }
 
 /// Печать тестовой этикетки на принтер из конфига.
-fn send_test_label(cfg: &Config, cal: &FeedCalibration) -> Result<(), String> {
+fn send_test_label(cfg: &Config, _cal: &FeedCalibration) -> Result<(), String> {
     use std::io::Write;
     let port = serialport::new(&cfg.printer.port, cfg.printer.baud)
         .timeout(std::time::Duration::from_millis(1500))
         .open()
         .map_err(|e| format!("{}: {e}", cfg.printer.port))?;
     let mut port = port;
-    port.write_all(&test_label_bytes(cal)).map_err(|e| e.to_string())?;
+    port.write_all(&test_label_bytes()).map_err(|e| e.to_string())?;
     port.flush().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -136,11 +157,35 @@ mod tests {
     }
 
     #[test]
-    fn test_label_encodes_calibration_numbers() {
-        let bytes = test_label_bytes(&FeedCalibration::default());
-        let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains("back=75"));
-        assert!(text.contains("opto=362"));
+    fn test_label_is_compact_title_only() {
+        // На этикетке только заголовок и паттерн: технические значения
+        // калибровки живут в логе и выводе CLI-мастера, продавцу они шум.
+        let bytes = test_label_bytes();
+        let title = escpos::to_cp866("ТЕСТОВАЯ ПЕЧАТЬ 12345").unwrap();
+        assert!(bytes.windows(title.len()).any(|w| w == title.as_slice()));
+        assert!(!bytes.windows(5).any(|w| w == b"back="));
+    }
+
+    #[test]
+    fn test_label_pattern_is_glyph_based_and_compact() {
+        // Паттерн набран блочными глифами CP866 (не растр): задание должно
+        // оставаться компактным (<1 КБ), иначе печать на 19200 бод тянется
+        // секундами и рвётся на полосах.
+        let bytes = test_label_bytes();
+        assert!(bytes.len() < 1024, "размер задания {} байт", bytes.len());
+        // Полублоки шахматки и сплошные блоки присутствуют.
+        assert!(bytes.contains(&0xDE)); // ▀
+        assert!(bytes.contains(&0xDF)); // ▄
+        assert!(bytes.contains(&0xDB)); // █
+        assert!(bytes.contains(&0xB2)); // ▓
+    }
+
+    #[test]
+    fn raster_rejects_bad_size() {
+        let mut job = LabelJob::begin((448, 232));
+        assert!(job.raster(0, 0, 56, &[0u8; 100]).is_err());
+        assert!(job.raster(0, 0, 0, &[0u8; 16]).is_err());
+        assert!(job.raster(0, 0, 2, &[0u8; 16]).is_ok()); // 2 байта × 8 = 16
     }
 
     #[test]

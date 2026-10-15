@@ -1,0 +1,6 @@
+#!/bin/sh
+# Аренда DHCP для главного адреса при загрузке: ifupdown в Debian 13
+# умеет только dhclient (не установлен), поэтому метод dhcp доверяем
+# dhcpcd через этот хук. Служебный dev-адрес остаётся строкой up ip addr.
+[ "$METHOD" = "dhcp" ] && [ "$IFACE" = "enp3s0" ] || exit 0
+exec /usr/sbin/dhcpcd -1 "$IFACE"

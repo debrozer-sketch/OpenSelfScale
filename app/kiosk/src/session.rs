@@ -54,15 +54,55 @@ pub struct Kiosk {
     pub idle_since: Option<Instant>,
     /// Текущая страница колонок отделов (пейджинг).
     pub dept_page: usize,
-    /// Начало удержания в углу (вход в меню настроек).
-    pub admin_hold: Option<Instant>,
+    /// Тапы по индикатору веса: счётчик серии и момент последнего тапа.
+    /// 5 тапов за 3 с — вход в меню настроек; пауза дольше 3 с сбрасывает
+    /// серию.
+    pub admin_taps: u32,
+    pub admin_tap_last: Option<Instant>,
     /// Текущая страница карточек товара (экран 2).
     pub item_page: usize,
     /// Товар в детальной карточке — до «ПЕЧАТЬ» или «ОТМЕНА».
     pub pending: Option<datastore::PluEntry>,
+    /// Меню настроек открыто как оверлей главного окна (экраны 4-7).
+    pub admin_open: bool,
+    /// Сцена меню настроек: 1 = вход по паролю, 2 = меню, 3 = редактор
+    /// отделов, 4 = диагностика, 5 = сеть. Пароль проверяет
+    /// datastore::auth; без верного пароля дальше экрана входа не пройти.
+    pub admin_stage: u8,
+    /// Экран «Сеть»: поле в фокусе (0 IP, 1 маска, 2 шлюз, 3 DNS).
+    pub net_focus: usize,
+    /// Экран «Сеть»: режим главного адреса — true = DHCP (поля только
+    /// чтение, показывает полученные значения), false = ручной.
+    pub net_dhcp: bool,
+    /// Экран «Сеть»: буферы полей — черновик; предзаполняются текущими
+    /// настройками при входе, применяются только кнопкой ПРИМЕНИТЬ.
+    pub net_buf: [String; 4],
+    /// Набираемый пароль: только в памяти процесса, никогда не в логе;
+    /// очищается при проверке, выходе и превышении длины.
+    pub admin_pin_buf: String,
+    /// Запрошен перезапуск программы: тик завершает процесс, systemd
+    /// перезапускает сервис (Restart=always).
+    pub restart_requested: bool,
 }
 
 impl Kiosk {
+    /// Очередной тап по индикатору веса. true — серия набрана, меню открыть.
+    pub fn admin_tap(&mut self, now: Instant) -> bool {
+        const WINDOW: Duration = Duration::from_secs(3);
+        const NEEDED: u32 = 5;
+        match self.admin_tap_last {
+            Some(t) if now.duration_since(t) < WINDOW => self.admin_taps += 1,
+            _ => self.admin_taps = 1,
+        }
+        self.admin_tap_last = Some(now);
+        if self.admin_taps >= NEEDED {
+            self.admin_taps = 0;
+            self.admin_tap_last = None;
+            return true;
+        }
+        false
+    }
+
     pub fn new() -> Self {
         Kiosk {
             phase: 0,
@@ -72,9 +112,17 @@ impl Kiosk {
             error_at: None,
             idle_since: None,
             dept_page: 0,
-            admin_hold: None,
+            admin_taps: 0,
+            admin_tap_last: None,
             item_page: 0,
             pending: None,
+            admin_open: false,
+            admin_stage: 1,
+            net_focus: 0,
+            net_dhcp: false,
+            net_buf: Default::default(),
+            admin_pin_buf: String::new(),
+            restart_requested: false,
         }
     }
 }
@@ -89,6 +137,25 @@ mod tests {
         assert_eq!(sum_kopecks(19999, 1350), 26999);
         assert_eq!(sum_str(26999), "269.99 ₽");
         assert_eq!(price_str(19999), "199.99 ₽/кг");
+    }
+
+    #[test]
+    fn admin_tap_series_and_reset() {
+        let mut k = Kiosk::new();
+        let t0 = Instant::now();
+        // 4 тапа с шагом 0,5 с — меню ещё не открыто.
+        for i in 1..=4 {
+            assert!(!k.admin_tap(t0 + Duration::from_millis(500 * i)));
+        }
+        // Пауза ровно 3 с сбрасывает серию; тап начинает новую (тап 1).
+        assert!(!k.admin_tap(t0 + Duration::from_secs(5)));
+        // Ещё 3 тапа — пятый в серии даёт сигнал открыть меню.
+        for i in 1..=3 {
+            assert!(!k.admin_tap(t0 + Duration::from_secs(5) + Duration::from_millis(500 * i)));
+        }
+        assert!(k.admin_tap(t0 + Duration::from_secs(7)));
+        // Серия началась заново.
+        assert!(!k.admin_tap(t0 + Duration::from_secs(8)));
     }
 
     #[test]

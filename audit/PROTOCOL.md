@@ -141,3 +141,156 @@ RS G nL nH  (\x1E\x47, int16 LE, ≤400)  откат (backspace) после вы
 - [x] Обнуление (setZero): кадр см. §1 — третий байт 0x30.
 - [ ] Загрузка логотипов (loadLogos) — в старом ПО: defineNVBitImage(2, bmp) +
       printDownloadedBitImage; логотип грузится при старте (loadLogos).
+
+## 4. Полная карта команд старого ПО (реверс бэкапа боевых весов, 2026-10)
+
+Бинарник боевых (MD5 071657EB5BA8385B416AC5D7F3BA0ADA, дек 2017) идентичен
+изученному дизасму. Полная карта Printer/ESC-POS:
+
+| Функция Printer | Кадр | Назначение |
+|---|---|---|
+| initializePrinter | ESC @ | сброс (не используется в живом цикле) |
+| selectPageMode / selectStandardMode | FS L / FS S | у Custom page mode = FS L |
+| selectPrintDirectionInPageMode | FS T n | направление 2 |
+| setPrintingAreaInPageMode | FS W xL xH yL yH dxL dxH dyL dyH | область этикетки |
+| printDataInPageMode | ESC FF (1B 0C) | печать буфера страницы |
+| cancelPrintDataInPageMode | CAN (18) | отмена буфера |
+| printAndFeedPaper(c) | ESC J n | подача n точек |
+| marksheetPositioning | GS FF (1D 0C) | подача до gap-метки |
+| realTimeStatusTransmission(n) | DLE EOT n | статус реального времени |
+| realTimeRequestToPrinter(n) | DLE ENQ n (10 05 n) | восстановление/сброс ошибки |
+| defineNVBitImage(n, data) | FS q n <data> | лого в NV-память (loadLogos) |
+| executeTestPrint(paper, content) | GS ( A 02 00 p c | сервисный тест принтера |
+| setOptoelectronicToHeatingWireSpace | RS F nL nH (≤400) | зазор датчик-головка |
+| setLabelBackspaceUnderLabelMode | RS G nL nH (≤400) | откат после выдачи |
+| setCodePage / selectCharacterFont | ESC t n / ESC ! n | CP866, шрифт |
+| setLineSpacing / setLeftMargin | ESC 3 n / GS L nL nH | — |
+| turnOnOffUpsideDownPrintingMode | ESC { n | разворот 180° |
+| setWhiteBlackMode | GS B n | инверсия |
+| printBarcode | GS k m <digits> NUL | EAN-13, m=2 |
+| setAbsoluteVerticalPrintPositionInPageMode | GS $ yL yH | Y-позиция поля |
+| setHorizontalAbsolutePrintPosition | ESC $ xL xH | X-позиция поля |
+| selectPaperModel(m) | FS c 0 m | носитель: 1 = этикетка (gap) |
+| selectUserDefinedRAMBitImageNumber | FS ( вариант | RAM bit image |
+
+### Поведение/фичи старого ПО, отсутствующие в новом
+1. **Лого на этикетке**: loadLogos при старте грузит два NV-изображения
+   (FS q n <data>, буферы 288/384 байта в объекте драйвера); печать —
+   EmbeddedImage-элемент label.xml (printDownloadedBitImage, FS p).
+   → Бэклог нового ПО: печать лого магазина на этикетке.
+2. **DLE ENQ n** (realTimeRequestToPrinter): восстановление после ошибки
+   (n=1 recover / n=2 restart). У нового ПО нет — после paper-out принтер
+   может остаться в error до пересброса питания.
+   → Бэклог: после заправки бумаги слать DLE ENQ 1.
+3. **executeTestPrint** = GS ( A 02 00 paper content — сервисный тест
+   принтера (head/датчики), контент — gibberish «Варкалось…» для проверки
+   всех глифов. Экран «Тестовая печать» старого меню.
+4. **checkLabelState**: DLE EOT-опрос по таймеру 0.5 с после печати; paper=0
+   → labelIsTakenOff → «этикетка снята». У нового ПО — фиксированный
+   таймаут 5 с (DONE_TIMEOUT), снятие не ждём.
+5. Экраны старого ПО: «Закончилась бумага в принтере», «Нет информации о
+   товаре», «Версия» (ПО/прошивка), «Вес нестабилен», «Спасибо за покупку»,
+   «отпечатанная этикетка снята», «Устройство не найдено».
+
+### Данные старого ПО (формат выгрузки центра, подтверждён боевыми)
+- DB: plucodes(plu, price, actionprice, itemcode, groupcode, namefirst,
+  namesecond, description, shelflife) — совпадает с новой схемой.
+- Выгрузка: /var/ftp/scale/ready.flg → plu.xml + layout.xml + img/*.jpg;
+  uploading.flg — флаг «принято»; снимкиplu.xml в history/.
+- Конфиги боевых машин: 375/80 (боевая), 382/78 (конф.Lh2685 — вторая
+  машина). Калибровки индивидуальны — хранить на устройстве (в БД), не
+  в общем конфиге.
+
+### Зуммер/термобашня (эксперимент 2026-10-15)
+Датчик термобашни есть (прошивка модуля пищит при открытии на боевых и
+пищала на тестовых до замены образа), но в протокол он НЕ выставляется:
+кадры веса (оба статусных байта), DLE EOT 1–7, GS r 1/49/65, ESC u/v,
+DLE ENQ, unsolicited-кадры — одинаковые байты/тишина в обоих состояниях.
+Старый драйвер зуммером не управлял. Автокалибровка по открытию башни
+невозможна; решение — ручная подача (GS FF) из меню настроек.
+
+## 5. Расширенная карта POS2 весового модуля (источник: официальный
+## тест Shtrih-M 2015 + JavaPOS equipment.jar + живые замеры 2026-10-15)
+
+Источники: C-исходники официальной «Программы для проверки подключения»
+(`audit/legacy-docs/test_weightscale-src/test_weightscale.c`, 2015),
+JavaPOS-драйвер из боевой машины (`equipment.jar`, класс
+`pa.equipment.scale.Pos2Serial`), живые замеры на 172.32.0.5.
+
+### Формат кадра (общий, подтверждён C-кодом и живыми замерами)
+```
+STX(0x02) LEN <cmd> [данные...] LRC
+LRC = XOR байтов от LEN до последнего байта данных включительно.
+```
+Длина кадра = LEN + 3 байта. LEN считается по байтам `cmd + данные`.
+Ответ: ACK(0x06), затем `STX LEN <cmd-echo> <error=0 ok> [данные] LRC`.
+
+### Коды операций (byte cmd после LEN)
+| Код | Команда | Запрос | Ответ |
+|-----|---------|--------|-------|
+| 0x3A `:` | вес канала | `3A` + пароль (4 байта LE32) | state LE16 @4–5, масса LE32 signed @6–9, тара LE16 @10–11 |
+| 0x30 `0` | обнуление | `30` + пароль 4 байта | подтверждение |
+| 0x31 | тарирование | `31` + пароль | подтверждение (Java CMD_TARA) |
+| 0x32 | установка тары значением | `32` + пароль + параметр | подтверждение (Java CMD_TARA_SET) |
+| 0xFC | идентификация устройства | `FC` (пароль не нужен) | см. ниже |
+| 0xE8 | свойства канала взвешивания | `E8` + номер канала | НПВ/НмПВ/дискреты, см. ниже |
+
+Пароль: Java-драйвер берёт из параметра «Пароль»; в кадрах старого ПО —
+ASCII `0030` (вес/обнуление работают с ним), C-тест 2015 шлёт нулевой
+LE32. Оба варианта устройство принимает.
+
+### 0xFC — идентификация (живой замер 2026-10-15, тестовые весы)
+```
+→ 02 01 FC FD                                  (без пароля, формат теста 2015)
+← 06 02 29 FC 00 01 03 01 00 00 01 "SLIM   V5.0 20.06.2017 7 SHTRIH-M" FA
+```
+После `error=00`: 6 байтов полей (`01 03 01 00 00 01`), затем
+строка-идентификация (Cp1251, 33 байта, формат "%.33s" с offset 10):
+**прошивка весового модуля SLIM V5.0 от 20.06.2017**. Метод из
+ремонтной документации для перепрошивки: mass-storage режим NXP
+(перемычка J2 PRG → диск с firmware.bin) или FlashMagic по RS-232;
+сам файл прошивки в открытом доступе отсутствует (поиск 2026-10-15).
+
+### 0xE8 — свойства канала (карта ответа из test_weightscale.c)
+Ответ после `error`: `power_of_ten` @7, max LE16 @8–9, min LE16 @10–11,
+тара LE16 @12–13, range1 LE16 @14–15, range2 @16–17, range3 @18–19,
+дискреты e: disk1..4 @20–23 (LE16). Масса/дискреты в граммах через
+power_of_ten (−4 → г/10000 = кг при 0.1 г дискрете; −3, −2 аналогично).
+На тестовых весах ответ на 0xE8 в формате C-теста (без пароля) — тишина;
+с паролем — возврат блока идентификации (требует уточнения формата,
+см. бэклог).
+
+### Карта битов state в ответе 0x3A (из test_weightscale.c)
+```
+bit 0  — F (вес фиксирован/стабилен)
+bit 1  — Z (нулевой уровень)
+bit 3  — T (активна тара)
+bit 4  — E
+bit 5  — initial zero error (разгрузите платформу)
+bit 6  — перегруз (overload)
+bit 7  — ошибка калибровки
+bit 8  — недогруз (underload)
+bit 9  — аппаратная ошибка
+```
+Старший байт статуса (второй 0x00-байт кадра) — старшие биты этого LE16.
+
+### Коды ошибок JavaPOS (IScale) — семантика протокола
+ERROR_TARA_VALUE, ERROR_UNKNOWN_CMD, ERROR_DATA_LEN, ERROR_PASSWORD,
+ERROR_MODE, ERROR_PARAM_VALUE, ERROR_SET_ZERO, ERROR_SET_TARA,
+ERROR_WEIGHT_NOT_FIXED, ERROR_FAILURE_NVRAM,
+ERROR_CALIBRATION_MODE_BLOCKED_BY_SWITCH, ERROR_KEYBOARD_BLOCKED,
+ERROR_BAD_CHANNEL(_NUMBER), ERROR_NOT_REPLY_FROM_CP.
+
+### Сервисные материалы (сохранены в audit/legacy-docs/)
+- `Slim_sm_ed3-repair-doc.pdf`, `Slim-repair-doc-taxcom.pdf` — ремонтная
+  документация ШТРИХ-СЛИМ ред.3 (08.12.2015): плата NXP LPC11U24FBD48/301,
+  прошивка через mass-storage/J2 PRG/FlashMagic. Дилерские копии.
+- `Utilita-kalibrovki.zip` — CalibUtil.exe, MD5 97F29D043FC22E73E417E3466A99BECB
+  = идентичен архиву с боевой машины (temp/slim/prod/calib).
+- `Programma-dlya-proverki-podklyucheniya.zip` + распакованные исходники
+  `test_weightscale-src/` — официальный тест протокола POS2 (Shtrih-M, 2015),
+  первоисточник карты команд выше.
+- Прошивка модуля (firmware.bin), утилита обновления модуля и документация
+  зуммера в открытом доступе НЕ найдены (проверено 2026-10-15: shtrih-m.ru,
+  ftp, дилеры portkkm.ru/shtrih-m-nsk.ru/taxcom-kassa.ru/1sab.ru, archive.org,
+  форумы) — только через сервис-центр Штрих-М.

@@ -164,27 +164,96 @@ pub struct PrinterHealth {
     pub paper_near_end: bool,
 }
 
+/// Память прошлого опроса для детекта заправки бумаги
+/// (paper_end true → false): в этот момент принтеру нужен DLE ENQ 1.
+static PAPER_WAS_END: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Короткая сессия опроса статуса (DLE EOT 4): захватить порт, спросить,
 /// закрыть. Любая ошибка порта/ответа — fault (принтер не отвечает).
+/// Переход «кончилась бумага → бумага есть» трактуется как заправка рулона:
+/// принтеру уходит DLE ENQ 1 (realTimeRequestToPrinter старого ПО), иначе
+/// он остаётся в error до перезапуска.
 pub fn probe_status(cfg: &crate::config::Config) -> PrinterHealth {
     if !cfg.printer.enabled {
         return PrinterHealth::default();
     }
     let _guard = port_lock().lock().expect("printer lock");
-    let res = serialport::new(&cfg.printer.port, cfg.printer.baud)
+    let opened = serialport::new(&cfg.printer.port, cfg.printer.baud)
         .timeout(std::time::Duration::from_millis(1500))
         .open()
-        .map_err(|e| e.to_string())
-        .and_then(|p| escpos::EscPosPrinter::new(p).status().map_err(|e| e.to_string()));
-    match res {
-        Ok(st) => {
-            PrinterHealth { fault: st.printer_offline, paper_end: st.paper_end, paper_near_end: st.paper_near_end }
+        .map_err(|e| e.to_string());
+    let res = match opened {
+        Ok(p) => {
+            let mut prn = escpos::EscPosPrinter::new(p);
+            match prn.status().map_err(|e| e.to_string()) {
+                Ok(st) => {
+                    let was = PAPER_WAS_END.swap(st.paper_end, std::sync::atomic::Ordering::Relaxed);
+                    if was && !st.paper_end {
+                        match prn.recover(1).map_err(|e| e.to_string()) {
+                            Ok(()) => log::info!("принтер: заправка бумаги — послан DLE ENQ 1"),
+                            Err(e) => log::warn!("принтер: DLE ENQ 1 не прошёл: {e}"),
+                        }
+                    }
+                    Ok(PrinterHealth {
+                        fault: st.printer_offline,
+                        paper_end: st.paper_end,
+                        paper_near_end: st.paper_near_end,
+                    })
+                }
+                Err(e) => Err(e),
+            }
         }
+        Err(e) => Err(e),
+    };
+    match res {
+        Ok(h) => h,
         Err(e) => {
             log::warn!("опрос статуса принтера: {e}");
             PrinterHealth { fault: true, paper_end: false, paper_near_end: false }
         }
     }
+}
+
+/// Реалтайм-recovery перед ручными заданиями меню: если принтер сидит в
+/// устранимой ошибке (наблюдалось 2026-10-16: «этикетка выдана» + error-биты
+/// без видимой причины), любое задание молча игнорируется. DLE ENQ 1 без
+/// ошибки бездействует, с ошибкой — перезапускает печать.
+fn write_recover_first(port: &mut dyn std::io::Write) -> std::io::Result<()> {
+    port.write_all(&escpos::build_recover(1))?;
+    port.flush()
+}
+
+/// Подача до метки следующей этикетки (GS FF): после смены рулона/заправки.
+pub fn feed_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
+    let _guard = port_lock().lock().expect("printer lock");
+    let mut port = serialport::new(&cfg.printer.port, cfg.printer.baud)
+        .timeout(std::time::Duration::from_millis(1500))
+        .open()?;
+    write_recover_first(&mut port)?;
+    port.write_all(&[escpos::GS, escpos::FF])?;
+    port.flush()?;
+    log::info!("принтер: подача до метки");
+    Ok(())
+}
+
+/// Тестовая этикетка качества печати (паттерн — см. calib::test_label_bytes).
+pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
+    let bytes = crate::calib::test_label_bytes();
+    let _guard = port_lock().lock().expect("printer lock");
+    let mut port = serialport::new(&cfg.printer.port, cfg.printer.baud)
+        .timeout(std::time::Duration::from_millis(1500))
+        .open()?;
+    write_recover_first(&mut port)?;
+    port.write_all(&bytes)?;
+    port.flush()?;
+    log::info!("принтер: тестовая этикетка напечатана");
+    Ok(())
 }
 
 /// Печать по товару из базы: открыть порт, собрать, отправить, спросить статус.
@@ -207,8 +276,19 @@ pub fn print_for_plu(
         .open()?;
     port.write_all(&bytes)?;
     port.flush()?;
-    let st = escpos::EscPosPrinter::new(port).status()?;
+    let mut prn = escpos::EscPosPrinter::new(port);
+    let st = prn.status()?;
     log::info!("статус принтера после печати: {:?}", st);
+    // Ждём снятия этикетки (checkLabelState старого ПО, период 0.5 с):
+    // следующая печать при не снятой этикетке приклеивает её к головке.
+    match prn.wait_label_removed(
+        std::time::Duration::from_millis(500),
+        std::time::Duration::from_secs(15),
+    ) {
+        Ok(true) => {}
+        Ok(false) => log::warn!("принтер: этикетка не снята за 15 с — печать продолжится по факту"),
+        Err(e) => log::warn!("принтер: ожидание снятия этикетки прервано: {e}"),
+    }
     Ok(())
 }
 
