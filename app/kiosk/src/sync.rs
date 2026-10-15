@@ -355,3 +355,55 @@ pub fn run(cfg: &Config) -> Result<String, String> {
         items.len()
     ))
 }
+
+/// Фоновый поток авто-синхронизации по расписанию [center] (interval_secs,
+/// 0 — выключена; drop-режим — слежение за каталогом). Результат — в канал
+/// для таймера UI (живое обновление данных).
+pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receiver<String> {
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    if cfg.center.is_drop() {
+        // Приём «как старое ПО»: источник сам пушит выгрузку в incoming_dir,
+        // киоск следит за каталогом (ready.flg — триггер). Опрос каждые 5 с.
+        log::info!(
+            "режим приёма выгрузки: каталог {}, триггер ready.flg, опрос 5 с",
+            cfg.incoming_dir.display()
+        );
+        let cfg_sync = cfg.clone();
+        let tx = tx.clone();
+        std::thread::spawn(move || loop {
+            match run_drop(&cfg_sync) {
+                Ok(Some(r)) => {
+                    log::info!("{r}");
+                    let _ = tx.send(r);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    log::error!("выгрузка (drop): {e}");
+                    // Ошибку не молотим: пауза перед повторной попыткой.
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        });
+    } else if cfg.center.enabled() && cfg.center.interval_secs > 0 {
+        let cfg_sync = cfg.clone();
+        let tx = tx.clone();
+        let interval =
+            std::time::Duration::from_secs(cfg.center.interval_secs.max(30) as u64);
+        std::thread::spawn(move || loop {
+            std::thread::sleep(interval);
+            match run(&cfg_sync) {
+                Ok(r) => {
+                    log::info!("авто-синхронизация: {r}");
+                    let _ = tx.send(r);
+                }
+                Err(e) => log::error!("авто-синхронизация: {e}"),
+            }
+        });
+    } else {
+        log::info!(
+            "авто-синхронизация выключена ([center].host пуст или interval_secs = 0)"
+        );
+    }
+    rx
+}
