@@ -817,9 +817,10 @@ fn run_kiosk(cfg: config::Config) {
         let ui_handle = ui.as_weak();
         move || {
             let mut k = kiosk.borrow_mut();
-            // Экран диагностики — «ВЫХОД» возвращает в меню, не наружу.
+            // Экран диагностики — «ВЫХОД» возвращает в подменю оборудования,
+            // не в меню и не наружу.
             if k.admin_stage == 4 {
-                k.admin_stage = 2;
+                k.admin_stage = 6;
                 return;
             }
             // подтверждаем только реальным весом, иначе ожидание висит
@@ -994,6 +995,9 @@ fn run_kiosk(cfg: config::Config) {
         let admin_reload = admin_reload.clone();
         move |id: slint::SharedString| {
             match id.as_str() {
+                "equip" => {
+                    kiosk.borrow_mut().admin_stage = 6;
+                }
                 "depts" => {
                     admin_reload();
                     kiosk.borrow_mut().admin_stage = 3;
@@ -1489,7 +1493,7 @@ fn run_kiosk(cfg: config::Config) {
                 // Одно окно: меню настроек — экраны главного окна (оверлей
                 // в main.slint). Маппинг stage -> screen: 1 (PIN) -> 5,
                 // 2 (меню) -> 6, 3 (отделы) -> 4, 4 (диагностика) -> 7,
-                // 5 (сеть) -> 8.
+                // 5 (сеть) -> 8, 6 (оборудование) -> 9.
                 if k.admin_open {
                     let screen = match k.admin_stage {
                         1 => 5,
@@ -1497,6 +1501,7 @@ fn run_kiosk(cfg: config::Config) {
                         3 => 4,
                         4 => 7,
                         5 => 8,
+                        6 => 9,
                         _ => 7,
                     };
                     if ui.get_screen() != screen {
