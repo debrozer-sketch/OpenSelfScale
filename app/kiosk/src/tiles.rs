@@ -1,9 +1,37 @@
 //! Плитки каталога: карточка товара и колонка отдела. Чистое отображение
 //! БД-записей в Slint-структуры, картинки — файлы из img_dir.
 
-use std::path::Path;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::session::price_str;
+
+// Кэш картинок в UI-потоке: tile_of вызывается на каждую плитку при
+// листании и поиске, чтение с диска на каждый тап — микролаги на терминале.
+// Значение None = файла нет: повторные stat по отсутствующим картинкам
+// исключены. Инвалидация — clear_img_cache() после синхронизации (файлы
+// на диске заменяются под теми же именами).
+thread_local! {
+    static IMG_CACHE: RefCell<HashMap<PathBuf, Option<slint::Image>>> =
+        RefCell::new(HashMap::new());
+}
+
+fn load_img_cached(path: &Path) -> Option<slint::Image> {
+    IMG_CACHE.with(|c| {
+        if let Some(hit) = c.borrow().get(path) {
+            return hit.clone();
+        }
+        let loaded = slint::Image::load_from_path(path).ok();
+        c.borrow_mut().insert(path.to_path_buf(), loaded.clone());
+        loaded
+    })
+}
+
+/// Сброс кэша картинок: после синхронизации файлы на диске обновлены.
+pub fn clear_img_cache() {
+    IMG_CACHE.with(|c| c.borrow_mut().clear());
+}
 
 // Сетка карточек 9×3: страница 0 — 26 товаров + «ДАЛЕЕ», остальные —
 // «← НАЗАД» + 25 товаров + «ДАЛЕЕ».
@@ -16,11 +44,11 @@ pub fn items_pages(total: usize) -> usize {
 /// нет файла — светлая плашка.
 pub fn tile_of(p: &datastore::PluEntry, img_dir: &Path) -> crate::PluTile {
     let dir = img_dir.join("plu");
-    let (has_img, img) = match slint::Image::load_from_path(&dir.join(format!("{}.png", p.plu))) {
-        Ok(i) => (true, i),
-        Err(_) => match slint::Image::load_from_path(&dir.join(format!("{}.jpg", p.plu))) {
-            Ok(i) => (true, i),
-            Err(_) => (false, slint::Image::default()),
+    let (has_img, img) = match load_img_cached(&dir.join(format!("{}.png", p.plu))) {
+        Some(i) => (true, i),
+        None => match load_img_cached(&dir.join(format!("{}.jpg", p.plu))) {
+            Some(i) => (true, i),
+            None => (false, slint::Image::default()),
         },
     };
     crate::PluTile {
@@ -81,10 +109,7 @@ pub fn dept_tiles(
                 let (r, g, b) = (c >> 16 & 0xFF, c >> 8 & 0xFF, c & 0xFF);
                 ((r * 92 / 100) << 16) | ((g * 92 / 100) << 8) | (b * 92 / 100)
             };
-            let img = d
-                .img
-                .as_ref()
-                .and_then(|f| slint::Image::load_from_path(&img_dir.join(f)).ok());
+            let img = d.img.as_ref().and_then(|f| load_img_cached(&img_dir.join(f)));
             log::info!(
                 "картинка отдела {}: {}",
                 d.name,

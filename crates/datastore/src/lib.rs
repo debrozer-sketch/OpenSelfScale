@@ -5,6 +5,7 @@
 //! INSERT OR REPLACE по первичному ключу plu, ошибки — в отчёт, а не в лог.
 
 use std::path::Path;
+use std::sync::Mutex;
 
 use rusqlite::Connection;
 use thiserror::Error;
@@ -39,8 +40,21 @@ pub struct PluItem {
 }
 
 /// Схема: без шифрования, без пересозданий — миграции идемпотентны.
+/// Миграции и сидирование выполняются один раз на файл БД за время жизни
+/// процесса (киоск и CLI открывают одну и ту же базу десятки раз за сессию,
+/// в том числе в тике интерфейса) — повторное открытие пропускает их.
 pub fn open(path: &Path) -> Result<Connection, StoreError> {
     let conn = Connection::open(path)?;
+    let key = path.to_string_lossy().into_owned();
+    // БД в памяти живёт ровно одно соединение — миграции всегда нужны.
+    let already = key != ":memory:"
+        && migrated_paths()
+            .lock()
+            .unwrap()
+            .contains(&key);
+    if already {
+        return Ok(conn);
+    }
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          CREATE TABLE IF NOT EXISTS plucodes (
@@ -128,7 +142,15 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
             rusqlite::params![g, d],
         )?;
     }
+    migrated_paths().lock().unwrap().insert(key);
     Ok(conn)
+}
+
+/// Файлы БД, миграции для которых уже применены этим процессом.
+fn migrated_paths() -> &'static Mutex<std::collections::HashSet<String>> {
+    static M: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    M.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
 }
 
 /// Экранная запись товара для плитки.
@@ -559,6 +581,11 @@ pub fn apply_layout(
     conn: &Connection,
     groups: &[(String, Vec<String>)],
 ) -> Result<(usize, usize), StoreError> {
+    // Пустая раскладка — не «всё скрыть», а признак битого/недокачанного
+    // layout.xml: глобальный сброс групп оставил бы киоск с пустым экраном.
+    if groups.is_empty() {
+        return Ok((0, 0));
+    }
     let tx = conn.unchecked_transaction()?;
     tx.execute("UPDATE plucodes SET groupcode = ''", [])?;
     let mut regrouped = 0usize;

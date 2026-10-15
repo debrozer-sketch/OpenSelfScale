@@ -167,8 +167,13 @@ impl LabelJob {
         width_bytes: u16,
         data: &[u8],
     ) -> Result<&mut Self, EscPosError> {
+        // GS * кодирует ширину одним байтом: u16 больше 255 — тихое искажение
+        // команды, ловим его на границе.
+        if width_bytes == 0 || width_bytes > 255 {
+            return Err(EscPosError::RasterSize);
+        }
         let band = width_bytes as usize * 8;
-        if band == 0 || data.is_empty() || data.len() % band != 0 {
+        if data.is_empty() || data.len() % band != 0 {
             return Err(EscPosError::RasterSize);
         }
         let height_units = (data.len() / band) as u8;

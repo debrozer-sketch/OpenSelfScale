@@ -655,18 +655,22 @@ fn run_kiosk(cfg: config::Config) {
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
             let q = query.borrow().to_uppercase();
+            // Фильтр по записям БД, картинки только для показанных пяти:
+            // на каждый тап клавиатуры tile_of по всему каталогу — это сотни
+            // чтений диска в UI-потоке.
             let mut items: Vec<PluTile> = if q.is_empty() {
                 Vec::new()
             } else {
-                catalog
-                    .borrow()
+                let catalog = catalog.borrow();
+                let mut matched: Vec<&datastore::PluEntry> = catalog
                     .iter()
-                    .map(|p| tiles::tile_of(p, &img_dir))
-                    .filter(|t| t.name.to_uppercase().contains(q.as_str()))
-                    .collect()
+                    .filter(|p| p.name.to_uppercase().contains(q.as_str()))
+                    .collect();
+                matched.sort_by(|a, b| a.name.cmp(&b.name));
+                matched.truncate(5);
+                matched.iter().map(|p| tiles::tile_of(p, &img_dir)).collect()
             };
             items.sort_by(|a, b| a.name.cmp(&b.name));
-            items.truncate(5);
             ui.set_items(slint::ModelRc::new(slint::VecModel::from(items)));
             ui.set_items_page_no(0);
             ui.set_items_pages_total(1);
@@ -1164,14 +1168,6 @@ fn run_kiosk(cfg: config::Config) {
             }
         }
     });
-    ui.on_net_popup_close({
-        let ui_handle = ui.as_weak();
-        move || {
-            if let Some(ui) = ui_handle.upgrade() {
-                ui.set_net_popup_open(false);
-            }
-        }
-    });
     // Сброс UI на главный экран: страница отделов 0, попап закрыт. Фаза и
     // selected не трогает — это забота вызывающего кода. Единственный отдел
     // не показывается колонкой: сразу его товары (раздел один = сразу товар).
@@ -1179,8 +1175,16 @@ fn run_kiosk(cfg: config::Config) {
         let ui_handle = ui.as_weak();
         let depts_all = depts_all.clone();
         let open_dept = open_dept.clone();
+        let kiosk = kiosk.clone();
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
+            // Недобранная серия тапов входа сбрасывается: следующая должна
+            // начаться заново, а не продолжиться со старого счётчика.
+            {
+                let mut k = kiosk.borrow_mut();
+                k.admin_taps = 0;
+                k.admin_tap_last = None;
+            }
             ui.set_screen(0);
             ui.set_page_no(0);
             ui.set_popup_open(false);
@@ -1216,6 +1220,8 @@ fn run_kiosk(cfg: config::Config) {
         let go_root = go_root.clone();
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
+            // Картинки на диске заменены синхронизацией под теми же именами.
+            tiles::clear_img_cache();
             let conn = match datastore::open(&cfg.db_path) {
                 Ok(c) => c,
                 Err(e) => {

@@ -77,28 +77,40 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     diff == 0
 }
 
-/// Случайная соль: /dev/urandom, при недоступности — время процесса.
-/// Соль защищает от заранее посчитанных таблиц, не обязана быть
-/// криптостойкой сама по себе.
+/// Случайная соль: /dev/urandom, целевая платформа гарантирует его
+/// наличие (Debian). Без urandom — отказ: предсказуемая соль ослабляет
+/// защиту от заранее посчитанных таблиц. Не-Linux пути (разработка под
+/// Windows) допускают резерв из времени и pid — в продакшн не попадают.
+/// Случайная соль. Целевая платформа (Debian) гарантирует /dev/urandom;
+/// без него — отказ: предсказуемая соль ослабляет защиту от заранее
+/// посчитанных таблиц. Не-Linux резерв (разработка под Windows) — из
+/// времени и pid, в продакшн не попадает.
+#[cfg(target_os = "linux")]
 fn random_salt() -> String {
+    use std::io::Read;
     let mut buf = [0u8; 16];
-    match std::fs::File::open("/dev/urandom") {
-        Ok(mut f) => {
-            use std::io::Read;
-            if f.read_exact(&mut buf).is_err() {
-                fill_time_salt(&mut buf);
-            }
-        }
-        Err(_) => fill_time_salt(&mut buf),
-    }
+    let mut f = std::fs::File::open("/dev/urandom")
+        .expect("/dev/urandom открывается на целевой платформе");
+    f.read_exact(&mut buf)
+        .expect("/dev/urandom читается на целевой платформе");
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+#[cfg(not(target_os = "linux"))]
+fn random_salt() -> String {
+    let mut buf = [0u8; 16];
+    fill_time_salt(&mut buf);
+    buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(not(target_os = "linux"))]
 fn fill_time_salt(buf: &mut [u8; 16]) {
+    use std::time::{SystemTime, UNIX_EPOCH};
     let t = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
-        .unwrap_or(0);
+        .unwrap_or(0)
+        ^ (std::process::id() as u128) << 96;
     for (i, b) in buf.iter_mut().enumerate() {
         *b = (t >> (i * 8)) as u8;
     }
