@@ -346,6 +346,9 @@ export component MainWindow inherits Window {
     property <[string]> kb1: ["й","ц","у","к","е","н","г","ш","щ","з","х","ъ"];
     property <[string]> kb2: ["ф","ы","в","а","п","р","о","л","д","ж","э"];
     property <[string]> kb3: ["я","ч","с","м","и","т","ь","б","ю"];
+    // Четвёртый ряд: цифры, дефис и Ё — названия вида «ЧАЙ 100 ГР» и
+    // «ИЗЮМ С КОСТОЧКОЙ» ищутся по буквам и цифрам.
+    property <[string]> kb4: ["1","2","3","4","5","6","7","8","9","0","-","ё"];
 
     property <bool> can-tap: phase != 2 && phase != 3 && phase != 4;
 
@@ -372,7 +375,6 @@ export component MainWindow inherits Window {
     callback pin-back();
     callback pin-try();
     // Пункт «Настройки весов»: редактор отделов.
-    callback open-depts();
     // Из редактора отделов назад в меню.
     callback depts-close();
     // Полный выход: назад к каталогу, вход по паролю заново.
@@ -412,7 +414,7 @@ export component MainWindow inherits Window {
     // Текст в полосе — активное сообщение печати либо причина цвета.
     Rectangle {
         x: 0; y: 0;
-        width: 1024px;
+        width: root.width;
         height: 20px;
         background: root.printer-fault || !root.scales-ok || status-level == 2 ? #E23B3B
                   : root.paper-state != 0 ? #F6D9A0
@@ -494,8 +496,8 @@ export component MainWindow inherits Window {
     // ---------- C. главный экран: отделы одной строкой ----------
     if screen == 0 : Rectangle {
         x: 0; y: 160px;
-        width: 1024px;
-        height: 608px;
+        width: root.width;
+        height: root.height - 160px;
 
         for d[i] in root.depts : DeptTile {
             idx: i;
@@ -560,8 +562,8 @@ export component MainWindow inherits Window {
     // ---------- C. товары отдела ----------
     if screen == 2 : Rectangle {
         x: 0; y: 160px;
-        width: 1024px;
-        height: 608px;
+        width: root.width;
+        height: root.height - 160px;
 
         // Кнопки отделов в шапке: столько же, сколько колонок на главном.
         // Текущий отдел подсвечен; сверх колонок — кнопка промотки.
@@ -727,8 +729,8 @@ export component MainWindow inherits Window {
     // ---------- C. поиск: строка ввода, выдача, клавиатура (экран 3) ----------
     if screen == 3 : Rectangle {
         x: 0; y: 160px;
-        width: 1024px;
-        height: 608px;
+        width: root.width;
+        height: root.height - 160px;
 
         // Шапка: «← Назад», поле ввода, «ОЧИСТИТЬ».
         Rectangle {
@@ -857,7 +859,7 @@ export component MainWindow inherits Window {
         }
         if root.items.length == 0 && root.search-text == "" : Text {
             x: 0; y: 80px;
-            width: 1024px;
+            width: root.width;
             text: "Начните вводить название товара";
             font-size: 22px;
             horizontal-alignment: center;
@@ -865,7 +867,7 @@ export component MainWindow inherits Window {
         }
         if root.items.length == 0 && root.search-text != "" : Text {
             x: 0; y: 80px;
-            width: 1024px;
+            width: root.width;
             text: "Ничего не найдено";
             font-size: 22px;
             horizontal-alignment: center;
@@ -903,6 +905,12 @@ export component MainWindow inherits Window {
             y: 536px;
             kw: 118px;
             key: "ЗАБОЙ";
+            key-tapped(k) => { root.key-tapped(k); }
+        }
+        for k[i] in root.kb4 : KbKey {
+            kx: 8px + i * 78px;
+            y: 602px;
+            key: k;
             key-tapped(k) => { root.key-tapped(k); }
         }
     }
@@ -1345,7 +1353,9 @@ export component MainWindow inherits Window {
                 border-radius: 12px;
                 border-width: 2px;
                 border-color: #C9CFD7;
-                background: menu-ta.pressed && root.role == 1 ? #E4E8ED : #FFFFFF;
+                // pressed видит любой нажавший: это отрисовка, а не права
+                // (доступ пунктов ограничивается opacity и menu-tap).
+                background: menu-ta.pressed ? #E4E8ED : #FFFFFF;
                 opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
                 Text {
                     x: 24px;

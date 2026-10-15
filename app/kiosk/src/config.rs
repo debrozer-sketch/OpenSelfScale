@@ -37,8 +37,9 @@ impl Default for UiProfile {
 
 /// Источник выгрузки от центра: сервер, с которого киоск забирает
 /// plu.xml, layout.xml и картинки товаров. Всё — из конфига, без хардкода:
-/// другая компания правит только config.toml.
-#[derive(Debug, Clone, Deserialize)]
+/// другая компания правит только config.toml. Debug — ручной: password
+/// маскируется, любой "{cfg:?}" в лог не утекает FTP-паролем.
+#[derive(Clone, Deserialize)]
 #[serde(default)]
 pub struct CenterProfile {
     /// "ftp" (есть и "ftps"); другое — заглушка на будущее.
@@ -97,6 +98,26 @@ impl CenterProfile {
     /// incoming_dir (FTP/lftp), триггер — ready.flg. Киоск только наблюдает.
     pub fn is_drop(&self) -> bool {
         self.protocol == "drop"
+    }
+}
+
+impl std::fmt::Debug for CenterProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CenterProfile")
+            .field("protocol", &self.protocol)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("user", &self.user)
+            .field("password", &if self.password.is_empty() { "" } else { "***" })
+            .field("plu_path", &self.plu_path)
+            .field("layout_path", &self.layout_path)
+            .field("img_dir", &self.img_dir)
+            .field("img_local_dir", &self.img_local_dir)
+            .field("history_dir", &self.history_dir)
+            .field("interval_secs", &self.interval_secs)
+            .field("timeout_secs", &self.timeout_secs)
+            .field("passive", &self.passive)
+            .finish()
     }
 }
 
@@ -167,7 +188,9 @@ impl Config {
     /// port = "/dev/ttyS3"
     /// baud = 19200
     /// ```
-    /// Нет файла или битые поля — дефолты эталона; конфиг не может уронить киоск.
+    /// Нет файла или битые поля — ошибка с текстом причины: терминальный
+    /// режим обязан показать, что конфиг не читается, а не подставить
+    /// дефолты молча (молчаливый дефолт = киоск без весов/принтера).
     pub fn load(path: &Path) -> Result<Self, String> {
         let text =
             std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;

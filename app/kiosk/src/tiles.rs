@@ -129,17 +129,20 @@ pub fn dept_tiles(
     counts: &[(String, i64)],
     img_dir: &Path,
 ) -> Vec<crate::DeptDef> {
+    // Число видимых товаров по отделам за один проход (вместо O(D*G)).
+    let mut per_dept: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
+    for (g, n) in counts {
+        if *n > 0 {
+            if let Some(dep) = group_dept.get(g) {
+                *per_dept.entry(dep.as_str()).or_insert(0) += n;
+            }
+        }
+    }
+    // Индекс палитры — по отфильтрованному списку: скрытые пустые отделы
+    // не сдвигают цвета (иначе палитра «прыгает» между синхронизациями).
     depts.iter()
+        .filter(|d| per_dept.contains_key(d.name.as_str()))
         .enumerate()
-        .filter(|(_, d)| {
-            counts.iter().any(|(g, n)| {
-                *n > 0
-                    && group_dept
-                        .get(g)
-                        .map(|dep| dep == &d.name)
-                        .unwrap_or(false)
-            })
-        })
         .map(|(i, d)| {
             // Цвет: из БД (bg/fg), иначе авто-палитра по позиции. Фон нажатия —
             // фоновый цвет, затемнённый на 8% (вручную задан не будет: pastel

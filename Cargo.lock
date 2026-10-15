@@ -772,7 +772,6 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 name = "datastore"
 version = "0.1.0"
 dependencies = [
- "log",
  "quick-xml",
  "rusqlite",
  "sha2",
@@ -996,7 +995,6 @@ checksum = "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
 name = "escpos"
 version = "0.1.0"
 dependencies = [
- "log",
  "thiserror 2.0.21",
 ]
 
@@ -3596,7 +3594,6 @@ version = "0.1.0"
 dependencies = [
  "drivers-api",
  "libc",
- "log",
  "serialport",
  "thiserror 2.0.21",
 ]

@@ -17,10 +17,11 @@ baud = 19200
 # false — остаться в выбранном разделе.
 #[kiosk]
 #return_to_root_after_print = true
+#idle_timeout_secs = 60
 
 # Ключи БЕЗ секции — только до первого [заголовка], иначе TOML отнесёт их
 # к предыдущей таблице и киоск молча возьмёт дефолт.
-# Конвейер данных (sync-agent) и хранилище:
+# Приём данных и хранилище:
 incoming_dir = "/var/ftp/scale"
 db_path = "/home/scales/plu.db"
 log_file = "/var/log/scalefw/kiosk.log"

@@ -9,7 +9,6 @@ description = "Драйвер весов Штрих-М (Слим) по посл�
 drivers-api = { path = "../drivers-api" }
 serialport = { workspace = true }
 thiserror = { workspace = true }
-log = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -7,4 +7,3 @@ description = "Драйвер этикетного принтера ESC/POS (pag
 
 [dependencies]
 thiserror = { workspace = true }
-log = { workspace = true }

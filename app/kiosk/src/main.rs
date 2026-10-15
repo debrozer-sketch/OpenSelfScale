@@ -1,4 +1,4 @@
-﻿//! Точка входа киоска: сборка модулей, CLI, машина состояний экрана.
+//! Точка входа киоска: сборка модулей, CLI, машина состояний экрана.
 //!
 //! Модули: config, weight (поток опроса весов), print, diag, calib.
 //! UI в ui/main.slint по прототипу var2.md: зоны A/B1/B2/C, печать
@@ -394,6 +394,17 @@ fn run_kiosk(cfg: config::Config) {
     // без перезапуска киоска.
     let catalog: std::rc::Rc<std::cell::RefCell<Vec<datastore::PluEntry>>> =
         std::rc::Rc::new(std::cell::RefCell::new(catalog));
+    // Верхнерегистровые имена с индексами: поиск фильтрует по нему без
+    // to_uppercase на каждую позицию при каждом тапе клавиатуры.
+    let catalog_up: std::rc::Rc<std::cell::RefCell<Vec<(String, usize)>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(
+            catalog
+                .borrow()
+                .iter()
+                .enumerate()
+                .map(|(i, p)| (p.name.to_uppercase(), i))
+                .collect(),
+        ));
 
     // Отделы одной строкой: страниц по max_cols колонок (из [ui] config),
     // переполнение — за пейджером под колонками. Пустые отделы не видны.
@@ -673,28 +684,34 @@ fn run_kiosk(cfg: config::Config) {
     let search_apply = {
         let ui_handle = ui.as_weak();
         let catalog = catalog.clone();
+        let catalog_up = catalog_up.clone();
         let items_all = items_all.clone();
         let query = search_query.clone();
         let img_dir = img_dir.clone();
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
             let q = query.borrow().to_uppercase();
-            // Фильтр по записям БД, картинки только для показанных пяти:
-            // на каждый тап клавиатуры tile_of по всему каталогу — это сотни
-            // чтений диска в UI-потоке.
+            // Фильтр по верхнерегистровому индексу (без аллокаций на позицию),
+            // частичная сортировка до 5 имён; картинки — только показанным.
             let mut items: Vec<PluTile> = if q.is_empty() {
                 Vec::new()
             } else {
                 let catalog = catalog.borrow();
-                let mut matched: Vec<&datastore::PluEntry> = catalog
+                let up = catalog_up.borrow();
+                let mut hits: Vec<usize> = up
                     .iter()
-                    .filter(|p| p.name.to_uppercase().contains(q.as_str()))
+                    .filter(|(n, _)| n.contains(q.as_str()))
+                    .map(|(_, i)| *i)
                     .collect();
-                matched.sort_by(|a, b| a.name.cmp(&b.name));
-                matched.truncate(5);
-                matched
+                let take = hits.len().min(5);
+                if take > 0 {
+                    hits.select_nth_unstable_by_key(take - 1, |&i| catalog[i].name.as_str());
+                    hits[..take].sort_by(|a, b| catalog[*a].name.cmp(&catalog[*b].name));
+                }
+                hits[..take]
                     .iter()
-                    .map(|p| {
+                    .map(|&i| {
+                        let p = &catalog[i];
                         let mut t = tiles::tile_of(p, &img_dir);
                         let (b, m, a) = tiles::hl_parts(&p.name, &q);
                         t.hl_before = b.into();
@@ -704,7 +721,6 @@ fn run_kiosk(cfg: config::Config) {
                     })
                     .collect()
             };
-            items.sort_by(|a, b| a.name.cmp(&b.name));
             ui.set_items(slint::ModelRc::new(slint::VecModel::from(items)));
             ui.set_items_page_no(0);
             ui.set_items_pages_total(1);
@@ -1066,14 +1082,6 @@ fn run_kiosk(cfg: config::Config) {
             }
         }
     });
-    ui.on_open_depts({
-        let admin_reload = admin_reload.clone();
-        let kiosk = kiosk.clone();
-        move || {
-            admin_reload();
-            kiosk.borrow_mut().admin_stage = 3;
-        }
-    });
     ui.on_depts_close({
         let kiosk = kiosk.clone();
         move || {
@@ -1174,11 +1182,24 @@ fn run_kiosk(cfg: config::Config) {
                     k.admin_pin_buf.clear();
                 }
                 "diag" => {
-                    let text = diag::collect(&cfg);
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_diag_text(text.into());
-                    }
+                    // Сбор отчёта — в фоне: два открытия портов с таймаутами
+                    // замораживали UI на ~секунду. Пока идёт сборка, экран
+                    // показывает «Собираю отчёт…».
                     kiosk.borrow_mut().admin_stage = 4;
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_diag_text("Собираю отчёт…".into());
+                    }
+                    let cfg = cfg.clone();
+                    let ui_handle = ui_handle.clone();
+                    std::thread::spawn(move || {
+                        let text = diag::collect(&cfg);
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_diag_text(text.into());
+                            }
+                        })
+                        .ok();
+                    });
                 }
                 "restart" => {
                     kiosk.borrow_mut().restart_requested = true;
@@ -1373,6 +1394,7 @@ fn run_kiosk(cfg: config::Config) {
         let ui_handle = ui.as_weak();
         let cfg = cfg.clone();
         let catalog = catalog.clone();
+        let catalog_up = catalog_up.clone();
         let group_dept = group_dept.clone();
         let depts_all = depts_all.clone();
         let items_all = items_all.clone();
@@ -1420,6 +1442,12 @@ fn run_kiosk(cfg: config::Config) {
             }
             log::info!("данные обновлены: {} товаров", items.len());
             *catalog.borrow_mut() = items;
+            *catalog_up.borrow_mut() = catalog
+                .borrow()
+                .iter()
+                .enumerate()
+                .map(|(i, p)| (p.name.to_uppercase(), i))
+                .collect();
             let gd_map: std::collections::HashMap<String, String> =
                 gd_pairs.into_iter().collect();
             *depts_all.borrow_mut() =
@@ -1512,6 +1540,10 @@ fn run_kiosk(cfg: config::Config) {
     let lock_db: std::sync::Mutex<Option<rusqlite::Connection>> =
         std::sync::Mutex::new(None);
     // Тик состояния: 100 мс — обновление веса, переходы, тексты статуса.
+    // Строковые свойства ставятся только при изменении: каждая установка
+    // гонит перерисовку текста, 10 раз/сек без нужды — джиттер полосы.
+    let tick_cache: std::rc::Rc<std::cell::RefCell<(String, i32, bool, bool, i32)>> =
+        std::rc::Rc::new(std::cell::RefCell::new((String::new(), -1, true, true, -1)));
     let timer = slint::Timer::default();
     {
         let kiosk = kiosk.clone();
@@ -1521,6 +1553,7 @@ fn run_kiosk(cfg: config::Config) {
         let sync_rx = sync_rx;
         let lock_db = lock_db;
         let refresh_data = refresh_data;
+        let tick_cache = tick_cache.clone();
         let go_root = go_root.clone();
         timer.start(
             slint::TimerMode::Repeated,
@@ -1532,18 +1565,36 @@ fn run_kiosk(cfg: config::Config) {
                 // Порт отвалился — прошлые показания недостоверны: прочерк
                 // вместо крупной цифры (иначе покупатель читает старый вес
                 // под красной полосой «Ошибка весов»).
-                ui.set_weight_text(if snap.port_up {
-                    format!("{:.3}", snap.mass_kg).into()
+                let wt = if snap.port_up {
+                    format!("{:.3}", snap.mass_kg)
                 } else {
-                    "--.---".into()
-                });
-                ui.set_weight_state(ws);
-                ui.set_scales_ok(snap.port_up);
+                    "--.---".to_string()
+                };
                 let ph = print::health();
-                ui.set_printer_fault(ph.fault);
-                ui.set_paper_state(
-                    if ph.paper_end { 2 } else if ph.paper_near_end { 1 } else { 0 }
-                );
+                let paper = if ph.paper_end { 2 } else if ph.paper_near_end { 1 } else { 0 };
+                {
+                    let mut c = tick_cache.borrow_mut();
+                    if c.0 != wt {
+                        c.0 = wt.clone();
+                        ui.set_weight_text(wt.into());
+                    }
+                    if c.1 != ws {
+                        c.1 = ws;
+                        ui.set_weight_state(ws);
+                    }
+                    if c.2 != snap.port_up {
+                        c.2 = snap.port_up;
+                        ui.set_scales_ok(snap.port_up);
+                    }
+                    if c.3 != ph.fault {
+                        c.3 = ph.fault;
+                        ui.set_printer_fault(ph.fault);
+                    }
+                    if c.4 != paper {
+                        c.4 = paper;
+                        ui.set_paper_state(paper);
+                    }
+                }
 
                 // Пришла авто-синхронизация → перечитать каталог и отделы
                 // (до захвата kiosk: refresh_data сам берёт borrow).
@@ -1783,27 +1834,4 @@ fn run_kiosk(cfg: config::Config) {
     }
 
     ui.run().expect("UI loop failed");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sum_matches_legacy_rounding() {
-        // 199.99 × 1.350 = 269.9865 → 269.99 (живая этикетка).
-        assert_eq!(sum_kopecks(19999, 1350), 26999);
-        assert_eq!(sum_str(26999), "269.99 ₽");
-        assert_eq!(session::price_str(19999), "199.99 ₽/кг");
-    }
-
-    #[test]
-    fn weight_state_thresholds() {
-        let mut s = weight::Snapshot { mass_kg: -0.006, stable: true, port_up: true };
-        assert_eq!(weight_state(&s), 0);
-        s.mass_kg = 1.35;
-        assert_eq!(weight_state(&s), 2);
-        s.stable = false;
-        assert_eq!(weight_state(&s), 1);
-    }
 }

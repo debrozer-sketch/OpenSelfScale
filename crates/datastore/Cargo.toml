@@ -9,5 +9,4 @@ description = "SQLite-база PLU и импорт из XML старого фо�
 rusqlite = { workspace = true }
 thiserror = { workspace = true }
 quick-xml = { workspace = true }
-log = { workspace = true }
 sha2 = { workspace = true }

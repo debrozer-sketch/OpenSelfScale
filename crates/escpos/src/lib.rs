@@ -10,7 +10,6 @@ use thiserror::Error;
 
 pub const ESC: u8 = 0x1B;
 pub const GS: u8 = 0x1D;
-pub const FS: u8 = 0x1C;
 pub const FF: u8 = 0x0C;
 pub const CAN: u8 = 0x18;
 

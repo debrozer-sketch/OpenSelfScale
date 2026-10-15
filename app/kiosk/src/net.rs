@@ -87,7 +87,7 @@ pub fn read_live() -> NetConfig {
 /// false — ручной статический. Файл доступен на чтение без root.
 pub fn read_mode() -> bool {
     std::fs::read_to_string("/etc/network/interfaces")
-        .map(|s| s.contains("iface enp3s0 inet dhcp"))
+        .map(|s| s.contains(&format!("iface {IFACE} inet dhcp")))
         .unwrap_or(false)
 }
 
@@ -181,11 +181,12 @@ mod tests {
 
     #[test]
     fn mask_formats_are_accepted() {
-        assert_eq!(validate("172.18.105.249", "255.255.255.0", "172.18.105.1", "8.8.8.8").unwrap().1, 24);
-        assert_eq!(validate("172.18.105.249", "/24", "172.18.105.1", "8.8.8.8").unwrap().1, 24);
-        assert!(validate("172.18.105.249", "255.0.255.0", "172.18.105.1", "8.8.8.8").is_err());
-        assert!(validate("не ip", "255.255.255.0", "172.18.105.1", "8.8.8.8").is_err());
-        assert!(validate("172.18.105.249", "255.255.255.0", "шлюз", "8.8.8.8").is_err());
+        // Адреса из документации (RFC 5737), не из рабочих сетей.
+        assert_eq!(validate("203.0.113.10", "255.255.255.0", "203.0.113.1", "198.51.100.53").unwrap().1, 24);
+        assert_eq!(validate("203.0.113.10", "/24", "203.0.113.1", "198.51.100.53").unwrap().1, 24);
+        assert!(validate("203.0.113.10", "255.0.255.0", "203.0.113.1", "198.51.100.53").is_err());
+        assert!(validate("не ip", "255.255.255.0", "203.0.113.1", "198.51.100.53").is_err());
+        assert!(validate("203.0.113.10", "255.255.255.0", "шлюз", "198.51.100.53").is_err());
     }
 
     #[test]

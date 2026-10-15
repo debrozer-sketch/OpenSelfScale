@@ -73,9 +73,9 @@ pub fn build_label(
     let mut job = LabelJob::begin(layout.area);
     let kg = format!("{},{:03}", weight_g / 1000, weight_g % 1000);
     let price_r = format!("{},{:02}", item.price / 100, item.price % 100);
-    // Сумма с округлением до копейки, как в старом ПО: 199,99 ₽ × 1,350 кг
-    // = 269,9865 → 269,99 (совпадает с дампом).
-    let sum_k = (item.price as u64 * weight_g as u64 + 500) / 1000;
+    // Сумма с округлением до копейки — общая функция с экраном (session):
+    // две реализации «как в старом ПО» разошлись бы при первой же правке.
+    let sum_k = crate::session::sum_kopecks(item.price, weight_g);
     let sum_r = format!("{},{:02}", sum_k / 100, sum_k % 100);
     job.field(layout.name.0, layout.name.1, FieldStyle::Normal, &item.namefirst)?
         .field(layout.date.0, layout.date.1, FieldStyle::FontB, date)?
@@ -150,14 +150,6 @@ fn utc_stamp(secs: i64) -> (String, String) {
         format!("{:02}.{:02}.{:02}", d, m, y % 100),
         format!("{:02}:{:02}:{:02}", rem / 3600, (rem % 3600) / 60, rem % 60),
     )
-}
-
-/// Общая блокировка порта принтера: прямые сессии (CLI-калибровка) и демон
-/// не должны писать в один tty одновременно.
-static PORT_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-
-pub fn port_lock() -> &'static std::sync::Mutex<()> {
-    PORT_LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
 /// Состояние принтера для индикации: fault — не отвечает/офлайн,
@@ -362,7 +354,7 @@ fn update_health(st: &escpos::PrinterStatus) {
 static PAPER_WAS_END: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Реалтайм-recovery перед ручными заданиями меню: если принтер сидит в
-/// устранимой ошибке (наблюдалось 2026-10-16: «этикетка выдана» + error-биты
+/// устранимой ошибке (наблюдалось 2026-10-15: «этикетка выдана» + error-биты
 /// без видимой причины), любое задание молча игнорируется. DLE ENQ 1 без
 /// ошибки бездействует, с ошибкой — перезапускает печать.
 fn write_recover_first(port: &mut dyn std::io::Write) -> std::io::Result<()> {
