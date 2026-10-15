@@ -195,32 +195,46 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         }
     }
     // Ожидание: все картинки должны «остыть» — размер не меняется между
-    // двумя замерами с паузой (защита от копирования недокачанного файла,
-    // который иначе навсегда застрянет битым в img/plu).
+    // двумя замерами (защита от копирования недокачанного файла, который
+    // иначе навсегда застрянет битым в img/plu). Два прохода по списку с
+    // одной паузой: пасс не растягивается на 300 мс × N файлов, дедлайн
+    // проверяется после каждого прохода.
     let hot_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
-        let hot = images.iter().any(|p| {
-            let s1 = p.metadata().map(|m| m.len()).ok();
-            if s1.is_none() {
-                return false; // исчез (удалён зеркалом) — не ждать
-            }
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            let s2 = p.metadata().map(|m| m.len()).ok();
-            s1 != s2
-        });
+        let first: Vec<Option<u64>> = images
+            .iter()
+            .map(|p| p.metadata().map(|m| m.len()).ok())
+            .collect();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let hot = first
+            .iter()
+            .zip(images.iter())
+            .any(|(s1, p)| match s1 {
+                None => false, // исчез (удалён зеркалом) — не ждать
+                Some(s1) => p.metadata().map(|m| m.len()).ok() != Some(*s1),
+            });
         if !hot || std::time::Instant::now() > hot_deadline {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(700));
     }
     let mut copied: Vec<std::path::PathBuf> = Vec::new();
     for p in &images {
         let dst = local.join(p.file_name().unwrap_or_default());
-        if dst.exists() {
-            imgs_skip += 1;
-        } else {
+        // Одинаковый размер = та же картинка. Размер — единственное, что
+        // можно сравнить: mtime при копировании не сохраняется. Без этого
+        // смена картинки в центре не доезжала до весов никогда.
+        let stale = match (
+            std::fs::metadata(&dst).map(|m| m.len()).ok(),
+            std::fs::metadata(p).map(|m| m.len()).ok(),
+        ) {
+            (Some(a), Some(b)) => a != b,
+            _ => true, // локального нет или не читается — копировать
+        };
+        if stale {
             std::fs::copy(p, &dst).map_err(|e| format!("{}: {e}", p.display()))?;
             imgs_new += 1;
+        } else {
+            imgs_skip += 1;
         }
         copied.push(p.clone());
     }
@@ -277,7 +291,8 @@ pub fn run(cfg: &Config) -> Result<String, String> {
         (Some(parsed), ldata)
     };
 
-    // Картинки: скачать те, которых локально ещё нет.
+    // Картинки: скачать те, которых нет локально или чей размер на сервере
+    // изменился (смена картинки в центре должна доезжать до весов).
     let (mut imgs_new, mut imgs_skip) = (0usize, 0usize);
     if !c.img_dir.is_empty() {
         let local = c.img_local_dir.join("plu");
@@ -291,11 +306,18 @@ pub fn run(cfg: &Config) -> Result<String, String> {
                 continue;
             }
             let local_path = local.join(name);
-            if local_path.exists() {
+            let remote = format!("{}/{}", c.img_dir.trim_end_matches('/'), name);
+            // SIZE поддерживается всеми серверами, но без него — старое
+            // поведение: пропуск при наличии локального файла.
+            let skip = match (std::fs::metadata(&local_path).map(|m| m.len()).ok(), ftp.size(&remote)) {
+                (Some(local_len), Ok(remote_len)) => local_len == remote_len as u64,
+                (Some(_), Err(_)) => true,
+                (None, _) => false,
+            };
+            if skip {
                 imgs_skip += 1;
                 continue;
             }
-            let remote = format!("{}/{}", c.img_dir.trim_end_matches('/'), name);
             let data = fetch_bytes(&mut ftp, &remote)?;
             std::fs::write(&local_path, &data).map_err(|e| format!("{name}: {e}"))?;
             imgs_new += 1;

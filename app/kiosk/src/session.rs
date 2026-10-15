@@ -50,6 +50,9 @@ pub struct Kiosk {
     pub done_at: Option<Instant>,
     /// Момент сообщения об ошибке принтера — авто-возврат.
     pub error_at: Option<Instant>,
+    /// Момент отправки задания печати — таймаут зависания фазы 2
+    /// (демон не ответил или застрял): покупатель не ждёт вечно.
+    pub print_at: Option<Instant>,
     /// Простой без массы: сброс на главный экран.
     pub idle_since: Option<Instant>,
     /// Текущая страница колонок отделов (пейджинг).
@@ -117,6 +120,7 @@ impl Kiosk {
             print_weight_g: None,
             done_at: None,
             error_at: None,
+            print_at: None,
             idle_since: None,
             dept_page: 0,
             admin_taps: 0,

@@ -254,11 +254,12 @@ component KbKey inherits Rectangle {
     k-ta := TouchArea {
         clicked => { root.key-tapped(root.key); }
     }
-    // Удержание «←» = автозабой: 250 мс и далее по такту, пока палец
-    // на клавише. Отпускание останавливает таймер (running = pressed).
+    // Удержание «←»/«ЗАБОЙ» = автозабой: 250 мс и далее по такту, пока
+    // палец на клавише (клавиатуры сети и поиска называют ключ по-разному).
+    // Отпускание останавливает таймер (running = pressed).
     Timer {
         interval: 250ms;
-        running: k-ta.pressed && root.key == "←";
+        running: k-ta.pressed && (root.key == "←" || root.key == "ЗАБОЙ");
         triggered => { root.key-tapped("ЗАБОЙ"); }
     }
 }

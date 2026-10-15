@@ -349,30 +349,43 @@ pub fn dept_remove(conn: &Connection, name: &str) -> Result<(), StoreError> {
 /// Ручная позиция отдела (0 = первый). Остальные вручную упорядоченные
 /// сдвигаются на +1, коллизий позиций нет. NULL — вернуть в алфавитную секцию.
 pub fn dept_move(conn: &Connection, name: &str, ord: Option<i64>) -> Result<(), StoreError> {
-    if let Some(n) = ord {
-        conn.execute("UPDATE depts SET ord = ord + 1 WHERE ord >= ?1", [n])?;
-    }
-    let rows =
-        conn.execute("UPDATE depts SET ord = ?2 WHERE name = ?1", rusqlite::params![name, ord])?;
-    if rows == 0 {
+    let tx = conn.unchecked_transaction()?;
+    // Существование отдела — до сдвига: иначе UPDATE сдвигает ord всех
+    // ручных позиций, а отдел-то не найден.
+    let exists: i64 = tx
+        .query_row("SELECT COUNT(*) FROM depts WHERE name = ?1", [name], |r| r.get(0))?;
+    if exists == 0 {
         return Err(StoreError::UnknownDept(name.to_string()));
     }
+    if let Some(n) = ord {
+        tx.execute("UPDATE depts SET ord = ord + 1 WHERE ord >= ?1", [n])?;
+    }
+    tx.execute("UPDATE depts SET ord = ?2 WHERE name = ?1", rusqlite::params![name, ord])?;
+    tx.commit()?;
     Ok(())
 }
 
 /// Переписать экранный порядок отделов целиком: ord = индекс в списке.
 /// Используется меню настроек (шаг вверх/вниз = своп соседей + перезапись).
 pub fn dept_reorder(conn: &Connection, names: &[String]) -> Result<(), StoreError> {
-    conn.execute("UPDATE depts SET ord = NULL", [])?;
+    // Полный список проверяется до записи: ошибка на середине оставила бы
+    // часть отделов с ord, остальные — в алфавитной секции.
+    for name in names {
+        let exists: i64 = conn
+            .query_row("SELECT COUNT(*) FROM depts WHERE name = ?1", [name], |r| r.get(0))?;
+        if exists == 0 {
+            return Err(StoreError::UnknownDept(name.clone()));
+        }
+    }
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("UPDATE depts SET ord = NULL", [])?;
     for (i, name) in names.iter().enumerate() {
-        let n = conn.execute(
+        tx.execute(
             "UPDATE depts SET ord = ?2 WHERE name = ?1",
             rusqlite::params![name, i as i64],
         )?;
-        if n == 0 {
-            return Err(StoreError::UnknownDept(name.to_string()));
-        }
     }
+    tx.commit()?;
     Ok(())
 }
 

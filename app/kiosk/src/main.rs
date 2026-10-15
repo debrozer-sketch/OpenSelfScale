@@ -604,6 +604,9 @@ fn run_kiosk(cfg: config::Config) {
             ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles.clone())));
             ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
             ui.set_page_no(page as i32);
+            // Оба счётчика: пейджер под колонками (экран 0) и шапка товаров.
+            // После синхронизации число отделов меняется — оба должны жить.
+            ui.set_pages_total(pages_total as i32);
             ui.set_dept_pages_total(pages_total as i32);
             kiosk.borrow_mut().dept_page = page;
         }
@@ -1200,11 +1203,14 @@ fn run_kiosk(cfg: config::Config) {
         let kiosk = kiosk.clone();
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
-            // Недобранная серия тапов входа сбрасывается. try_borrow: тик
-            // вызывает go_root, уже держа borrow_mut на сессии, — двойной
-            // borrow здесь убил бы процесс (черный экран после печати).
+            // Сброс сессии и страниц. try_borrow: тик вызывает go_root, уже
+            // держа borrow_mut на сессии, — прямой borrow здесь убил бы
+            // процесс (черный экран после печати). При удержанном borrow
+            // вызывающая сторона тика сбрасывает поля сама до вызова.
             if let Ok(mut k) = kiosk.try_borrow_mut() {
                 k.reset_admin_taps();
+                k.dept_page = 0;
+                k.item_page = 0;
             }
             ui.set_screen(0);
             ui.set_page_no(0);
@@ -1214,9 +1220,14 @@ fn run_kiosk(cfg: config::Config) {
             ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles.clone())));
             ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
             if depts_all.borrow().len() == 1 {
-                let name = depts_all.borrow().first().map(|d| d.name.clone());
-                if let Some(n) = name {
-                    open_dept(&n);
+                if let Some(n) = depts_all.borrow().first().map(|d| d.name.clone()) {
+                    // Один отдел = сразу его товары. open_dept берёт borrow
+                    // на сессию — под borrow_mut тика это падение процесса,
+                    // поэтому вызов откладывается до конца текущего замыкания
+                    // (single_shot на нулевом интервале — тот же поток UI).
+                    let dept = n;
+                    let open = open_dept.clone();
+                    slint::Timer::single_shot(Duration::ZERO, move || open(&dept));
                 }
             }
         }
@@ -1236,7 +1247,7 @@ fn run_kiosk(cfg: config::Config) {
         let items_all = items_all.clone();
         let img_dir = img_dir.clone();
         let kiosk = kiosk.clone();
-        let show_dept = show_dept_page.clone();
+        let set_dept_slice = set_dept_slice.clone();
         let show_items = show_items_page.clone();
         let go_root = go_root.clone();
         move || {
@@ -1283,14 +1294,19 @@ fn run_kiosk(cfg: config::Config) {
             *depts_all.borrow_mut() =
                 tiles::dept_tiles(&depts, &gd_map, &all_groups, &img_dir);
             *group_dept.borrow_mut() = gd_map;
+            // Срез отделов обновляется без смены экрана: покупатель, читающий
+            // карточки, не должен вылетать на главный экран посреди листания.
+            let cur = ui.get_screen();
             let page = kiosk.borrow().dept_page;
-            show_dept(&kiosk, page);
-            // покупатель вправе перекладывать товар и листать каталог.
-            if depts_all.borrow().len() == 1 && ui.get_screen() == 0 {
+            set_dept_slice(page);
+            // Одиночный отдел: каталог сворачивается в его товары (go_root
+            // сам откроет отдел через отложенный вызов).
+            if depts_all.borrow().len() == 1 && cur == 0 {
                 go_root();
             }
-            // Открытый экран товаров: пересобрать карточки текущего отдела.
-            if ui.get_screen() == 2 {
+            // Открытый экран товаров: пересобрать карточки текущего отдела,
+            // сохранив номер страницы.
+            if cur == 2 {
                 let title = ui.get_screen_title();
                 let gd = group_dept.borrow();
                 let mut tiles: Vec<PluTile> = catalog
@@ -1359,6 +1375,11 @@ fn run_kiosk(cfg: config::Config) {
     // через канал запросов, на простое — фоновый опрос статуса с детектом
     // заправки бумаги. Здоровье читается тиком через print::health().
     print::spawn_daemon(&cfg);
+    // Долгоживущее соединение для счётчика блокировок входа: тик не должен
+    // открывать файл БД 10 раз в секунду. None = открыть не удалось —
+    // попытка повторится на следующем тике.
+    let lock_db: std::sync::Mutex<Option<rusqlite::Connection>> =
+        std::sync::Mutex::new(None);
     // Тик состояния: 100 мс — обновление веса, переходы, тексты статуса.
     let timer = slint::Timer::default();
     {
@@ -1367,6 +1388,7 @@ fn run_kiosk(cfg: config::Config) {
         let cfg = cfg.clone();
         let ui_handle = ui.as_weak();
         let sync_rx = sync_rx;
+        let lock_db = lock_db;
         let refresh_data = refresh_data;
         let go_root = go_root.clone();
         timer.start(
@@ -1376,7 +1398,14 @@ fn run_kiosk(cfg: config::Config) {
                 let Some(ui) = ui_handle.upgrade() else { return };
                 let snap = app_state.snapshot();
                 let ws = weight_state(&snap);
-                ui.set_weight_text(format!("{:.3}", snap.mass_kg).into());
+                // Порт отвалился — прошлые показания недостоверны: прочерк
+                // вместо крупной цифры (иначе покупатель читает старый вес
+                // под красной полосой «Ошибка весов»).
+                ui.set_weight_text(if snap.port_up {
+                    format!("{:.3}", snap.mass_kg).into()
+                } else {
+                    "--.---".into()
+                });
                 ui.set_weight_state(ws);
                 ui.set_scales_ok(snap.port_up);
                 let ph = print::health();
@@ -1417,12 +1446,15 @@ fn run_kiosk(cfg: config::Config) {
                 }
                 // Результаты фоновой печати.
                 while let Ok(res) = rx.try_recv() {
+                    k.print_at = None;
                     match res {
                         Ok(g) => {
                             log::info!("этикетка напечатана: {g} г");
                             k.phase = 3;
                             k.done_at = Some(Instant::now());
                             k.reset_admin_taps();
+                            k.dept_page = 0;
+                            k.item_page = 0;
                             if cfg.kiosk.return_to_root_after_print {
                                 go_root();
                             }
@@ -1438,6 +1470,14 @@ fn run_kiosk(cfg: config::Config) {
                 if k.phase == 1 && ws == 2 {
                     k.phase = 2;
                 }
+                // Отвал весового модуля в ожидании веса: без прерывания
+                // покупатель стоит в фазе 1 навсегда.
+                if k.phase == 1 && !snap.port_up {
+                    log::warn!("печать отменена: связь с весовым модулем потеряна");
+                    k.phase = 0;
+                    k.selected = None;
+                    k.pending = None;
+                }
                 // Запуск печати: фаза 2 и печать ещё не запущена.
                 if k.phase == 2 && k.print_weight_g.is_none() {
                     // Знаковый вес: после «0» под тарой снятие тары даёт минус —
@@ -1451,6 +1491,7 @@ fn run_kiosk(cfg: config::Config) {
                     } else {
                         let weight_g = weight_g as u32;
                         k.print_weight_g = Some(weight_g);
+                        k.print_at = Some(Instant::now());
                         let cfg = cfg.clone();
                         let tx = tx.clone();
                         let plu =
@@ -1462,6 +1503,18 @@ fn run_kiosk(cfg: config::Config) {
                             let _ = tx.send(res.map(|_| weight_g));
                         });
                     }
+                }
+                // Зависание фазы 2: демон не ответил (порт, партия, снятие
+                // этикетки затянулось) — ошибка печати с авто-возвратом,
+                // покупатель не ждёт вечно.
+                const PRINT_TIMEOUT: Duration = Duration::from_secs(30);
+                if k.phase == 2 && k.print_weight_g.is_some()
+                    && k.print_at.is_some_and(|t| t.elapsed() > PRINT_TIMEOUT)
+                {
+                    log::warn!("печать не завершилась за {PRINT_TIMEOUT:?} — ошибка печати");
+                    k.print_at = None;
+                    k.phase = 4;
+                    k.error_at = Some(Instant::now());
                 }
                 // Возвраты по таймаутам.
                 if k.phase == 3 && k.done_at.is_some_and(|t| t.elapsed() > DONE_TIMEOUT) {
@@ -1481,6 +1534,7 @@ fn run_kiosk(cfg: config::Config) {
                         k.selected = None;
                         k.pending = None;
                         k.dept_page = 0;
+                        k.item_page = 0;
                         // Иначе таймер будет пересоздавать модель отделов
                         // каждые 100 мс и «глотать» первый тап.
                         k.idle_since = None;
@@ -1508,9 +1562,15 @@ fn run_kiosk(cfg: config::Config) {
                         ui.set_screen(screen);
                     }
                     if k.admin_stage == 1 {
-                        let left = datastore::open(&cfg.db_path)
-                            .map(|c| datastore::auth::lock_left(&c))
-                            .unwrap_or(0) as i32;
+                        let left = {
+                            let mut db = lock_db.lock().expect("lock_db");
+                            if db.is_none() {
+                                *db = datastore::open(&cfg.db_path).ok();
+                            }
+                            db.as_ref()
+                                .map(|c| datastore::auth::lock_left(c) as i32)
+                                .unwrap_or(0)
+                        };
                         if ui.get_lock_left() != left {
                             ui.set_lock_left(left);
                         }
@@ -1520,6 +1580,8 @@ fn run_kiosk(cfg: config::Config) {
                 } else if ui.get_screen() >= 4 {
                     // Меню закрыто: возврат к каталогу (страница 0, попап закрыт).
                     k.reset_admin_taps();
+                    k.dept_page = 0;
+                    k.item_page = 0;
                     go_root();
                 }
                 if k.phase != 2 {
@@ -1528,8 +1590,7 @@ fn run_kiosk(cfg: config::Config) {
 
                 // Уведомления — только верхняя строка, нейтральные тексты:
                 // покупатель вправе перекладывать товар и листать каталог.
-                let (text, level): (String, i32) = match k.phase {
-                    1 => (
+                let (text, level): (String, i32) = match k.phase {                    1 => (
                         format!(
                             "{}: взвешиваем…",
                             k.selected
