@@ -107,11 +107,13 @@ pub struct KioskProfile {
     /// true — сразу после печати вернуться на главный экран;
     /// false — остаться в выбранном разделе.
     pub return_to_root_after_print: bool,
+    /// Простой покупателя без касаний до сброса на главный экран, сек.
+    pub idle_timeout_secs: u64,
 }
 
 impl Default for KioskProfile {
     fn default() -> Self {
-        Self { return_to_root_after_print: true }
+        Self { return_to_root_after_print: true, idle_timeout_secs: 60 }
     }
 }
 

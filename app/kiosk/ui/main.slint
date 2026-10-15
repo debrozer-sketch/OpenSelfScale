@@ -357,6 +357,11 @@ export component MainWindow inherits Window {
     in property <[AdminRow]> admin-rows;
     // Маска введённого пароля (точки), чистит бэкенд.
     in property <string> pin-mask;
+    // Смена пароля (экран 10): подсказка этапа и текст ошибки.
+    in property <string> pin-prompt: "Введите старый пароль";
+    in property <string> pin-error;
+    // Заводской пароль: «НАЗАД» скрыт, смена обязательна.
+    in property <bool> pin-forced: false;
     // Остаток паузы после перебора, с; 0 — ввод разрешён.
     in property <int> lock-left;
     // Роль вошедшего: 1 = администратор (полный доступ), 0 = персонал.
@@ -1081,6 +1086,7 @@ export component MainWindow inherits Window {
                     : root.screen == 7 ? "ДИАГНОСТИКА"
                     : root.screen == 8 ? "НАСТРОЙКИ · СЕТЬ"
                     : root.screen == 9 ? "НАСТРОЙКИ · ОБОРУДОВАНИЕ"
+                    : root.screen == 10 ? "СМЕНА ПАРОЛЯ"
                     : "МЕНЮ НАСТРОЕК";
                 font-size: 26px;
                 font-weight: 700;
@@ -1088,7 +1094,8 @@ export component MainWindow inherits Window {
                 vertical-alignment: center;
                 overflow: elide;
             }
-            if root.screen == 4 || root.screen == 8 || root.screen == 9 : Rectangle {
+            if (root.screen == 4 || root.screen == 8 || root.screen == 9)
+                && !root.pin-forced : Rectangle {
                 x: parent.width - 336px;
                 y: 8px;
                 width: 160px;
@@ -1120,6 +1127,99 @@ export component MainWindow inherits Window {
                 }
                 admin-done-ta := TouchArea {
                     clicked => { root.admin-close(); }
+                }
+            }
+        }
+
+        // ---------- Экран 10: смена пароля ----------
+        // Тот же пин-пад, что и на входе; подсказка этапа — pin-prompt.
+        if root.screen == 10 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            Text {
+                x: 0; y: 12px;
+                width: parent.width;
+                height: 36px;
+                text: root.pin-prompt;
+                font-size: 26px;
+                font-weight: 700;
+                color: #1A1E24;
+                horizontal-alignment: center;
+            }
+            Rectangle {
+                x: 262px;
+                y: 60px;
+                width: 500px;
+                height: 72px;
+                border-radius: 14px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: #FFFFFF;
+                Text {
+                    text: root.pin-mask == "" ? "пароль" : root.pin-mask;
+                    font-size: 34px;
+                    font-weight: 700;
+                    color: root.pin-mask == "" ? #A6ADB8 : #1A1E24;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            if root.pin-error != "" : Text {
+                x: 0; y: 144px;
+                width: parent.width;
+                height: 36px;
+                text: root.pin-error;
+                font-size: 22px;
+                font-weight: 700;
+                color: #B3261E;
+                horizontal-alignment: center;
+            }
+
+            property <[string]> keys: ["1","2","3","4","5","6","7","8","9","C","0","←"];
+            for k[i] in keys : Rectangle {
+                x: 262px + mod(i, 3) * 170px;
+                y: 190px + floor(i / 3) * 116px;
+                width: 160px;
+                height: 106px;
+                border-radius: 14px;
+                background: kb2-ta.pressed ? #DDE3EA : #FFFFFF;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                Text {
+                    text: k;
+                    font-size: 40px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                }
+                kb2-ta := TouchArea {
+                    clicked => {
+                        k == "C" ? root.pin-clear()
+                        : k == "←" ? root.pin-back()
+                        : root.pin-digit(k);
+                    }
+                }
+            }
+
+            Rectangle {
+                x: 262px;
+                y: 608px;
+                width: 500px;
+                height: 64px;
+                border-radius: 14px;
+                background: root.pin-mask == ""
+                    ? #DDE1E6
+                    : (pin-save-ta.pressed ? #1E4D3A : #2E7D57);
+                Text {
+                    text: "ДАЛЕЕ";
+                    font-size: 28px;
+                    font-weight: 700;
+                    color: #FFFFFF;
+                }
+                pin-save-ta := TouchArea {
+                    enabled: root.pin-mask != "";
+                    clicked => { root.pin-try(); }
                 }
             }
         }
@@ -1233,6 +1333,7 @@ export component MainWindow inherits Window {
                 { label: "Настройки весов", id: "depts", admin: true },
                 { label: "Оборудование", id: "equip", admin: false },
                 { label: "Сеть", id: "net", admin: true },
+                { label: "Сменить пароль", id: "changepin", admin: true },
                 { label: "Выставить 0 / тарировать", id: "zero", admin: false },
                 { label: "Перезагрузка весов", id: "restart", admin: true },
             ];

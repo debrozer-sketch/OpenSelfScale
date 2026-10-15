@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use session::{
-    sum_kopecks, sum_str, weight_state, Kiosk, DONE_TIMEOUT, ERROR_TIMEOUT, IDLE_TIMEOUT,
+    sum_kopecks, sum_str, weight_state, Kiosk, DONE_TIMEOUT, ERROR_TIMEOUT,
 };slint::include_modules!();
 
 enum Mode {
@@ -62,10 +62,20 @@ fn req_arg<I: Iterator<Item = String>>(args: &mut I, what: &str) -> String {
     })
 }
 
+/// Опциональный позиционный аргумент: следующий, если он не флаг.
+/// «--import x --config y» не должен глотать --config как позиционный.
+fn opt_arg<I: Iterator<Item = String>>(args: &mut std::iter::Peekable<I>) -> Option<String> {
+    match args.peek() {
+        Some(a) if a.starts_with("--") => None,
+        Some(_) => args.next(),
+        None => None,
+    }
+}
+
 fn parse_cli() -> Cli {
     let mut cli =
         Cli { mode: Mode::Kiosk, config_path: PathBuf::from("/etc/scalefw/config.toml") };
-    let mut args = std::env::args().skip(1);
+    let mut args = std::env::args().skip(1).peekable();
     while let Some(a) = args.next() {
         match a.as_str() {
             "--diag" => cli.mode = Mode::Diag,
@@ -74,7 +84,8 @@ fn parse_cli() -> Cli {
             "--import" => {
                 let p = PathBuf::from(req_arg(&mut args, "--import"));
                 // Необязательный --layout layout.xml: группировка старого ПО.
-                let layout = if args.next().as_deref() == Some("--layout") {
+                let layout = if args.peek().map(|s| s.as_str()) == Some("--layout") {
+                    args.next();
                     Some(PathBuf::from(req_arg(&mut args, "--layout")))
                 } else {
                     None
@@ -85,16 +96,16 @@ fn parse_cli() -> Cli {
             "--dept-list" => cli.mode = Mode::DeptList,
             "--dept-add" => {
                 let name = req_arg(&mut args, "--dept-add");
-                let img = args.next();
-                let bg = args.next();
-                let fg = args.next();
+                let img = opt_arg(&mut args);
+                let bg = opt_arg(&mut args);
+                let fg = opt_arg(&mut args);
                 cli.mode = Mode::DeptAdd(name, img, bg, fg);
             }
             "--dept-style" => {
                 let name = req_arg(&mut args, "--dept-style");
-                let img = args.next();
-                let bg = args.next();
-                let fg = args.next();
+                let img = opt_arg(&mut args);
+                let bg = opt_arg(&mut args);
+                let fg = opt_arg(&mut args);
                 cli.mode = Mode::DeptStyle(name, img, bg, fg);
             }
             "--dept-remove" => {
@@ -301,9 +312,11 @@ fn run_kiosk(cfg: config::Config) {
     // Вход персонала: при первом запуске заводской пароль хэшируется с
     // случайной солью и пишется в БД; дальше — только смена через меню.
     // Заводское значение — как пин по умолчанию на весовом терминале.
+    // Первый вход с ним принудительно ведёт на смену (pin_forced).
+    const FACTORY_PIN: &str = "12345";
     match datastore::open(&cfg.db_path) {
         Ok(conn) => {
-            if let Err(e) = datastore::auth::seed(&conn, "12345") {
+            if let Err(e) = datastore::auth::seed(&conn, FACTORY_PIN) {
                 log::error!("вход: инициализация: {e}");
             }
         }
@@ -771,11 +784,14 @@ fn run_kiosk(cfg: config::Config) {
                     let page = (kiosk.borrow().item_page + 1).min(pages_total - 1);
                     show_items(page);
                 }
-                _ => {
+                // Экран 0 — отделы; прочие (поиск 3 и т.д.) пейджером не
+                // обслуживаются, чтобы не уводить покупателя с экрана.
+                0 => {
                     let pages_total = depts_all.borrow().len().div_ceil(max_cols).max(1);
                     let page = (kiosk.borrow().dept_page + 1).min(pages_total - 1);
                     show_dept(&kiosk, page);
                 }
+                _ => {}
             }
         }
     });
@@ -794,10 +810,11 @@ fn run_kiosk(cfg: config::Config) {
                     let page = kiosk.borrow().item_page.saturating_sub(1);
                     show_items(page);
                 }
-                _ => {
+                0 => {
                     let page = kiosk.borrow().dept_page.saturating_sub(1);
                     show_dept(&kiosk, page);
                 }
+                _ => {}
             }
         }
     });
@@ -821,9 +838,20 @@ fn run_kiosk(cfg: config::Config) {
         move || {
             let mut k = kiosk.borrow_mut();
             // Экран диагностики — «ВЫХОД» возвращает в подменю оборудования,
-            // не в меню и не наружу.
+            // не в меню и не наружу. Смена пароля — в меню (бросить смену
+            // можно; при заводском пароле следующий вход снова потребует её).
             if k.admin_stage == 4 {
                 k.admin_stage = 6;
+                return;
+            }
+            if (7..=9).contains(&k.admin_stage) {
+                k.admin_stage = 2;
+                k.pin_pending.clear();
+                k.pin_new.clear();
+                if let Some(ui) = ui_handle.upgrade() {
+                    ui.set_pin_forced(false);
+                    ui.set_pin_error("".into());
+                }
                 return;
             }
             // подтверждаем только реальным весом, иначе ожидание висит
@@ -872,7 +900,10 @@ fn run_kiosk(cfg: config::Config) {
         let kiosk = kiosk.clone();
         move |d| {
             let mut k = kiosk.borrow_mut();
-            if k.admin_stage != 1 || k.admin_pin_buf.len() >= 8 || !d.bytes().all(|b| b.is_ascii_digit()) {
+            if (k.admin_stage != 1 && !(7..=9).contains(&k.admin_stage))
+                || k.admin_pin_buf.len() >= 8
+                || !d.bytes().all(|b| b.is_ascii_digit())
+            {
                 return;
             }
             k.admin_pin_buf.push_str(&d);
@@ -902,47 +933,136 @@ fn run_kiosk(cfg: config::Config) {
             }
         }
     });
-    // Проверка пароля: верный — меню (строки отделов читаются только здесь,
-    // после успеха); неверный — поле чистится, пауза перебора растёт и
-    // переживает перезапуск (счётчик в БД). PIN никуда не логируется.
+    // Проверка пароля и этапы смены (7 старый / 8 новый / 9 повтор).
+    // Верный пароль — меню; заводской пароль принудительно ведёт на смену.
+    // Неверный — поле чистится, пауза перебора растёт и переживает
+    // перезапуск (счётчик в БД). PIN никуда не логируется.
     ui.on_pin_try({
         let ui_handle = ui.as_weak();
         let kiosk = kiosk.clone();
         let cfg = cfg.clone();
         move || {
             let mut k = kiosk.borrow_mut();
-            if k.admin_stage != 1 {
-                return;
-            }
+            let set_err = |ui: &slint::Weak<MainWindow>, msg: &str| {
+                if let Some(ui) = ui.upgrade() {
+                    ui.set_pin_error(msg.into());
+                }
+            };
             let pin = std::mem::take(&mut k.admin_pin_buf);
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_pin_mask("".into());
+                ui.set_pin_error("".into());
             }
+            let stage = k.admin_stage;
+            if stage == 1 {
+                let res = match datastore::open(&cfg.db_path) {
+                    Ok(conn) => datastore::auth::verify(&conn, &pin),
+                    Err(e) => {
+                        log::error!("вход: база: {e}");
+                        return;
+                    }
+                };
+                match res {
+                    Ok(datastore::auth::Auth::Granted(role)) => {
+                        log::info!(
+                            "вход: пароль принят, роль {}",
+                            if role == datastore::auth::Role::Admin { "admin" } else { "staff" }
+                        );
+                        // Заводской пароль — обязательная смена, дальше меню
+                        // не пускаем (защита от «12345» на всём парке).
+                        let factory = match datastore::open(&cfg.db_path) {
+                            Ok(conn) => datastore::auth::pin_is(&conn, FACTORY_PIN)
+                                .unwrap_or(false),
+                            Err(_) => false,
+                        };
+                        k.pin_forced = factory;
+                        k.admin_stage = if factory { 8 } else { 2 };
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_role(if role == datastore::auth::Role::Admin { 1 } else { 0 });
+                            ui.set_pin_forced(factory);
+                        }
+                        if factory {
+                            log::warn!("вход: действует заводской пароль — требуется смена");
+                        }
+                    }
+                    Ok(datastore::auth::Auth::Denied { wait_secs }) => {
+                        log::info!("вход: отказ, пауза {wait_secs} с");
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_lock_left(wait_secs as i32);
+                        }
+                    }
+                    Err(e) => log::error!("вход: проверка: {e}"),
+                }
+                return;
+            }
+            // Этапы смены пароля. Экран 10 доступен только после входа.
+            if !(7..=9).contains(&stage) {
+                return;
+            }
+            if stage == 7 {
+                // Старый пароль: сверка без счётчика перебора (pin_is).
+                let ok = match datastore::open(&cfg.db_path) {
+                    Ok(conn) => datastore::auth::pin_is(&conn, &pin).unwrap_or(false),
+                    Err(e) => {
+                        log::error!("смена пароля: база: {e}");
+                        return;
+                    }
+                };
+                if ok {
+                    k.pin_pending = pin;
+                    k.admin_stage = 8;
+                } else {
+                    set_err(&ui_handle, "Старый пароль неверен");
+                }
+                return;
+            }
+            if stage == 8 {
+                let ok = pin.len() >= 4 && pin.len() <= 8 && pin.bytes().all(|b| b.is_ascii_digit());
+                if !ok {
+                    set_err(&ui_handle, "Новый пароль: 4–8 цифр");
+                    return;
+                }
+                k.pin_new = pin;
+                k.admin_stage = 9;
+                return;
+            }
+            // Этап 9: повтор нового пароля и запись.
+            if pin != k.pin_new {
+                k.pin_new.clear();
+                k.admin_stage = 8;
+                set_err(&ui_handle, "Пароли не совпадают — введите новый");
+                return;
+            }
+            let old = if k.pin_forced {
+                FACTORY_PIN.to_string()
+            } else {
+                std::mem::take(&mut k.pin_pending)
+            };
             let res = match datastore::open(&cfg.db_path) {
-                Ok(conn) => datastore::auth::verify(&conn, &pin),
+                Ok(conn) => datastore::auth::change_pin(&conn, &old, &pin),
                 Err(e) => {
-                    log::error!("вход: база: {e}");
+                    log::error!("смена пароля: база: {e}");
                     return;
                 }
             };
             match res {
-                Ok(datastore::auth::Auth::Granted(role)) => {
-                    log::info!(
-                        "вход: пароль принят, роль {}",
-                        if role == datastore::auth::Role::Admin { "admin" } else { "staff" }
-                    );
+                Ok(Ok(())) => {
+                    log::info!("смена пароля: выполнена");
+                    k.pin_new.clear();
+                    k.pin_forced = false;
                     k.admin_stage = 2;
                     if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_role(if role == datastore::auth::Role::Admin { 1 } else { 0 });
+                        ui.set_pin_forced(false);
                     }
                 }
-                Ok(datastore::auth::Auth::Denied { wait_secs }) => {
-                    log::info!("вход: отказ, пауза {wait_secs} с");
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_lock_left(wait_secs as i32);
+                Ok(Err(msg)) => {
+                    set_err(&ui_handle, msg);
+                    // Неверный старый — заново с этапа 7.
+                    if msg.contains("старый") {
+                        k.admin_stage = 7;
                     }
                 }
-                Err(e) => log::error!("вход: проверка: {e}"),
+                Err(e) => log::error!("смена пароля: {e}"),
             }
         }
     });
@@ -1000,6 +1120,17 @@ fn run_kiosk(cfg: config::Config) {
             match id.as_str() {
                 "equip" => {
                     kiosk.borrow_mut().admin_stage = 6;
+                }
+                "changepin" => {
+                    let mut k = kiosk.borrow_mut();
+                    k.pin_pending.clear();
+                    k.pin_new.clear();
+                    k.pin_forced = false;
+                    k.admin_stage = 7;
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_pin_forced(false);
+                        ui.set_pin_error("".into());
+                    }
                 }
                 "depts" => {
                     admin_reload();
@@ -1133,10 +1264,10 @@ fn run_kiosk(cfg: config::Config) {
         let show_net_result = show_net_result.clone();
         move || {
             let (dhcp, buf) = {
-                let mut k = kiosk.borrow_mut();
-                // Экранные буферы больше не источник истины: применение
-                // перечитывает фактическое состояние после команды.
-                (k.net_dhcp, std::mem::take(&mut k.net_buf))
+                let k = kiosk.borrow();
+                // Копия, не take: поля не пустеют на время применения
+                // (sudo + dhcpcd могут занять до 30 с).
+                (k.net_dhcp, k.net_buf.clone())
             };
             let show = show_net_result.clone();
             std::thread::spawn(move || {
@@ -1527,10 +1658,12 @@ fn run_kiosk(cfg: config::Config) {
                 }
                 // Простой без активной операции → сброс на главный экран
                 // (независимо от того, стоит ли что-то на весах).
+                let idle_timeout =
+                    Duration::from_secs(cfg.kiosk.idle_timeout_secs.max(10));
                 if k.phase < 2 {
                     if k.idle_since.is_none() {
                         k.idle_since = Some(Instant::now());
-                    } else if k.idle_since.is_some_and(|t| t.elapsed() > IDLE_TIMEOUT) {
+                    } else if k.idle_since.is_some_and(|t| t.elapsed() > idle_timeout) {
                         k.selected = None;
                         k.pending = None;
                         k.dept_page = 0;
@@ -1547,7 +1680,8 @@ fn run_kiosk(cfg: config::Config) {
                 // Одно окно: меню настроек — экраны главного окна (оверлей
                 // в main.slint). Маппинг stage -> screen: 1 (PIN) -> 5,
                 // 2 (меню) -> 6, 3 (отделы) -> 4, 4 (диагностика) -> 7,
-                // 5 (сеть) -> 8, 6 (оборудование) -> 9.
+                // 5 (сеть) -> 8, 6 (оборудование) -> 9, 7/8/9 (смена
+                // пароля) -> 10.
                 if k.admin_open {
                     let screen = match k.admin_stage {
                         1 => 5,
@@ -1556,10 +1690,21 @@ fn run_kiosk(cfg: config::Config) {
                         4 => 7,
                         5 => 8,
                         6 => 9,
+                        7 | 8 | 9 => 10,
                         _ => 7,
                     };
                     if ui.get_screen() != screen {
                         ui.set_screen(screen);
+                    }
+                    if (7..=9).contains(&k.admin_stage) {
+                        let prompt = match k.admin_stage {
+                            7 => "Введите старый пароль",
+                            8 => "Новый пароль (4–8 цифр)",
+                            _ => "Повторите новый пароль",
+                        };
+                        if ui.get_pin_prompt() != prompt {
+                            ui.set_pin_prompt(prompt.into());
+                        }
                     }
                     if k.admin_stage == 1 {
                         let left = {

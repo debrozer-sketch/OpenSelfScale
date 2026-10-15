@@ -9,6 +9,10 @@ use suppaftp::FtpStream;
 
 /// Архив выгрузки: исходные plu.xml/layout.xml с датой в имени
 /// (аналог sss/history старого ПО — материал для разбора инцидентов).
+/// Ротация: хранится не более ARCHIVE_KEEP последних выгрузок —
+/// при получасовом интервале без лимита это десятки тысяч каталогов в год.
+const ARCHIVE_KEEP: usize = 240;
+
 fn archive(history_dir: &Path, pairs: &[(&str, &str)]) {
     if history_dir.as_os_str().is_empty() {
         return;
@@ -19,6 +23,23 @@ fn archive(history_dir: &Path, pairs: &[(&str, &str)]) {
     }
     for (name, data) in pairs {
         let _ = std::fs::write(dir.join(name), data);
+    }
+    // Старейшие каталоги удаляются по имени (имя = метка времени, лексический
+    // порядок = хронологический). Ошибки не критичны: не удалили — доедет
+    // на следующей выгрузке.
+    let mut entries: Vec<String> = std::fs::read_dir(history_dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.path().is_dir())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    entries.sort();
+    if entries.len() > ARCHIVE_KEEP {
+        for name in &entries[..entries.len() - ARCHIVE_KEEP] {
+            let _ = std::fs::remove_dir_all(history_dir.join(name));
+        }
     }
 }
 

@@ -17,13 +17,22 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
+/// Предел кэша (записей): на потоке каталогов без вытеснения старые
+/// картинки снятых с продажи товаров копились бы в памяти вечно.
+/// Переполнение — полная очистка: следующие листания перечитают нужное.
+const IMG_CACHE_MAX: usize = 4096;
+
 fn load_img_cached(path: &Path) -> Option<slint::Image> {
     IMG_CACHE.with(|c| {
-        if let Some(hit) = c.borrow().get(path) {
+        let mut map = c.borrow_mut();
+        if let Some(hit) = map.get(path) {
             return hit.clone();
         }
         let loaded = slint::Image::load_from_path(path).ok();
-        c.borrow_mut().insert(path.to_path_buf(), loaded.clone());
+        if map.len() >= IMG_CACHE_MAX {
+            map.clear();
+        }
+        map.insert(path.to_path_buf(), loaded.clone());
         loaded
     })
 }

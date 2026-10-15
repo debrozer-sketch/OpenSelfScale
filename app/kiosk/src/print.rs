@@ -50,6 +50,10 @@ pub enum PrintError {
     Io(#[from] std::io::Error),
     #[error("PLU {0} не найден в базе")]
     PluNotFound(String),
+    /// EAN-13 весового товара вмещает 5 цифр массы; больше — печать отказа
+    /// (молча обрезать массу = этикетка с неверным весом).
+    #[error("вес {0} г выше предела штрихкода (99999 г)")]
+    WeightLimit(u32),
     #[error("принтер отключён в конфиге ([printer].enabled = false)")]
     PrinterDisabled,
 }
@@ -398,6 +402,9 @@ pub fn print_for_plu(
     }
     let conn = datastore::open(&cfg.db_path)?;
     let item = datastore::get_item(&conn, plu)?.ok_or_else(|| PrintError::PluNotFound(plu.into()))?;
+    if weight_g > 99_999 {
+        return Err(PrintError::WeightLimit(weight_g));
+    }
     let (date, time) = now_stamp();
     let bytes = build_label(&item, weight_g, LIVE_LAYOUT, &date, &time)?;
     request(|ack| PrinterRequest::Print { bytes, ack }).map_err(std::io::Error::other)?;

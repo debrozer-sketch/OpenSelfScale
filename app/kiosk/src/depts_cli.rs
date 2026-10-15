@@ -36,19 +36,28 @@ pub fn list(cfg: &config::Config) {
 
 pub fn add(cfg: &config::Config, name: &str, img: Option<&str>, bg: Option<&str>, fg: Option<&str>) {
     let conn = db(cfg);
+    let existed = datastore::depts_list(&conn)
+        .unwrap_or_default()
+        .iter()
+        .any(|d| d.name == name);
     datastore::dept_add(&conn, name, img, bg, fg).unwrap_or_else(|e| {
         eprintln!("добавление отдела: {e}");
         std::process::exit(1);
     });
-    println!("отдел «{name}» добавлен (порядок — алфавит)");
+    if existed {
+        println!("отдел «{name}» уже был (повторное добавление игнорируется)");
+    } else {
+        println!("отдел «{name}» добавлен (порядок — алфавит)");
+    }
 }
 
 pub fn style(cfg: &config::Config, name: &str, img: Option<String>, bg: Option<String>, fg: Option<String>) {
     let conn = db(cfg);
-    // "-" — не менять, "none" — сбросить (авто/заглушка), иначе значение.
+    // Пропуск поля — не менять; "-" — не менять; "none" — сбросить
+    // (авто/заглушка); иначе значение.
     let opt = |v: &Option<String>| match v.as_deref() {
-        None => None,
-        Some("-") | Some("none") => Some(None),
+        None | Some("-") => None,
+        Some("none") => Some(None),
         Some(s) => Some(Some(s.to_string())),
     };
     let style_img = opt(&img);

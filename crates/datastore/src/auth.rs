@@ -214,6 +214,19 @@ pub fn lock_left(conn: &Connection) -> u64 {
     (locked_until - now).max(0) as u64
 }
 
+/// Совпадает ли пароль с введённым, без касания счётчика перебора
+/// (в отличие от verify). Используется для шага «старый пароль» при
+/// смене и для детекта заводского пароля (принудительная смена).
+pub fn pin_is(conn: &Connection, pin: &str) -> Result<bool, rusqlite::Error> {
+    ensure_tables(conn)?;
+    let (salt, hash): (String, String) = conn.query_row(
+        "SELECT pin_salt, pin_hash FROM admin_user WHERE id = 1",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    Ok(constant_time_eq(&sha256_hex(&format!("{salt}:{pin}")), &hash))
+}
+
 /// Смена пароля: старый должен совпасть, новый — цифры, 4..=8, не совпадать
 /// со старым. Вызывается только из меню после успешного входа.
 pub fn change_pin(

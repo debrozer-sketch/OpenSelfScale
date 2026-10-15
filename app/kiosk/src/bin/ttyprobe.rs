@@ -21,8 +21,16 @@ fn main() {
             c_lflag: 0,
             c_line: 0,
             c_cc: [0u8; 32],
+            // Имена полей скорости зависят от libc: musl — с подчёркиваниями,
+            // glibc (Debian 13) — без. Как в weight.rs.
+            #[cfg(target_env = "musl")]
             __c_ispeed: speed,
+            #[cfg(target_env = "musl")]
             __c_ospeed: speed,
+            #[cfg(not(target_env = "musl"))]
+            c_ispeed: speed,
+            #[cfg(not(target_env = "musl"))]
+            c_ospeed: speed,
         };
         term.c_cc[libc::VMIN as usize] = 0;
         term.c_cc[libc::VTIME as usize] = 5;

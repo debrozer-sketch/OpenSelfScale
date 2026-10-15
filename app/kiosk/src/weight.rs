@@ -151,9 +151,14 @@ fn poll_loop(
     stop: Arc<AtomicBool>,
     zero: Arc<AtomicBool>,
 ) {
+    // Был ли порт жив на прошлом цикле: для логирования только переходов.
+    let was_up = AtomicBool::new(false);
     while !stop.load(Ordering::Relaxed) {
         match open_driver(profile) {
             Ok(mut driver) => {
+                if !was_up.swap(true, Ordering::Relaxed) {
+                    log::info!("весы: связь восстановлена");
+                }
                 loop {
                     if stop.load(Ordering::Relaxed) {
                         return;
@@ -186,7 +191,11 @@ fn poll_loop(
                 }
             }
             Err(e) => {
-                log::warn!("весы недоступны: {e}");
+                // Ночная недоступность порта не должна заваливать лог:
+                // ошибка пишется при переходе живо↔мертво, не каждый цикл.
+                if was_up.swap(false, Ordering::Relaxed) {
+                    log::warn!("весы недоступны: {e}");
+                }
                 let mut s = out.lock().expect("weight mutex");
                 s.port_up = false;
                 s.stable = false;
