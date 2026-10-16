@@ -18,7 +18,7 @@ pub fn start(
     refresh_data: Rc<dyn Fn()>,
     sync_rx: Receiver<String>,
 ) -> slint::Timer {
-    let (print_tx, print_rx) = std::sync::mpsc::channel::<Result<u32, String>>();
+    let (print_tx, print_rx) = std::sync::mpsc::channel::<(u64, Result<u32, String>)>();
     // Долгоживущее соединение для счётчика блокировок входа: тик не должен
     // открывать файл БД 10 раз в секунду. None = открыть не удалось —
     // попытка повторится на следующем тике.
@@ -131,8 +131,13 @@ pub fn start(
                         );
                     }
                 }
-                // Результаты фоновой печати.
-                while let Ok(res) = print_rx.try_recv() {
+                // Результаты фоновой печати: результат без актуального id
+                // операции — запоздавший ответ после таймаута, игнорируем.
+                while let Ok((op, res)) = print_rx.try_recv() {
+                    if op != k.print_op {
+                        log::warn!("печать: поздний результат операции #{op} пропущен");
+                        continue;
+                    }
                     k.print_at = None;
                     match res {
                         Ok(g) => {
@@ -178,16 +183,18 @@ pub fn start(
                     } else {
                         let weight_g = weight_g as u32;
                         k.print_weight_g = Some(weight_g);
+                        k.print_op += 1;
                         k.print_at = Some(Instant::now());
                         let cfg = cfg.clone();
                         let tx = print_tx.clone();
+                        let op = k.print_op;
                         let plu =
                             k.selected.as_ref().map(|p| p.plu.clone()).unwrap_or_default();
-                        log::info!("печать: PLU {plu}, {weight_g} г");
+                        log::info!("печать: PLU {plu}, {weight_g} г (операция #{op})");
                         std::thread::spawn(move || {
                             let res = print::print_for_plu(&cfg, weight_g, &plu)
                                 .map_err(|e| format!("{e}"));
-                            let _ = tx.send(res.map(|_| weight_g));
+                            let _ = tx.send((op, res.map(|_| weight_g)));
                         });
                     }
                 }
@@ -200,6 +207,8 @@ pub fn start(
                 {
                     log::warn!("печать не завершилась за {PRINT_TIMEOUT:?} — ошибка печати");
                     k.print_at = None;
+                    // Инвалидируем операцию: поздний результат не принят.
+                    k.print_op += 1;
                     k.phase = 4;
                     k.error_at = Some(Instant::now());
                 }

@@ -424,8 +424,8 @@ pub fn set_calibration(conn: &Connection, key: &str, value: i64) -> Result<(), S
 }
 
 /// Импорт пачки товаров: один батч, возвращает применённое число.
-/// Скидочная цена: нет атрибута (None) — прежнее значение сохраняется;
-/// cardprice="0" — явный сброс (NULL), иначе — новое значение.
+/// Скидочная цена: выгрузка — полное зеркало каталога центра, поэтому
+/// нет атрибута или cardprice="0" — скидки нет (NULL); иначе — значение.
 pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
     let tx = conn.unchecked_transaction()?;
     let mut stmt = tx.prepare(
@@ -437,7 +437,6 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
              price = excluded.price,
              card_price = CASE
                  WHEN excluded.card_price = 0 THEN NULL
-                 WHEN excluded.card_price IS NULL THEN plucodes.card_price
                  ELSE excluded.card_price END,
              itemcode = excluded.itemcode,
              groupcode = excluded.groupcode,
@@ -460,6 +459,28 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
         ])?;
     }
     drop(stmt);
+    tx.commit()?;
+    Ok(n)
+}
+
+/// Удаление товаров, отсутствующих в новой выгрузке: plu.xml — полное
+/// зеркало ассортимента центра, снятые товары не должны оставаться на
+/// весах. Вызывается синхронизацией после import_plu; CLI --import
+/// (ручной, возможно частичный файл) удаление не делает.
+pub fn remove_absent(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch("CREATE TEMP TABLE incoming_plu (plu TEXT PRIMARY KEY)")?;
+    {
+        let mut stmt = tx.prepare("INSERT INTO incoming_plu (plu) VALUES (?1)")?;
+        for it in items {
+            stmt.execute([&it.plu])?;
+        }
+    }
+    let n = tx.execute(
+        "DELETE FROM plucodes WHERE plu NOT IN (SELECT plu FROM incoming_plu)",
+        [],
+    )?;
+    tx.execute_batch("DROP TABLE incoming_plu")?;
     tx.commit()?;
     Ok(n)
 }
@@ -706,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn card_price_survives_import_without_attribute() {
+    fn card_price_follows_center_mirror() {
         let conn = open(":memory:".as_ref()).unwrap();
         // Первая выгрузка задаёт скидочную цену.
         import_plu(&conn, &parse_plu_xml(SAMPLE).unwrap()).unwrap();
@@ -714,7 +735,8 @@ mod tests {
             .query_row("SELECT card_price FROM plucodes WHERE plu='2502192'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(card, Some(17999));
-        // Вторая выгрузка без атрибута: скидочная цена сохраняется.
+        // Вторая выгрузка без атрибута: центр больше не даёт скидку —
+        // сохранять устаревшую нельзя, покупателю ушла бы чужая цена.
         let plain = r#"<body><item plunumber="2502192" price="20999" itemcode="02136" namefirst="ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ" namesecond="" groupcode="21" shelflife="x" /></body>"#;
         import_plu(&conn, &parse_plu_xml(plain).unwrap()).unwrap();
         let (price, card): (i64, Option<i64>) = conn
@@ -725,14 +747,31 @@ mod tests {
             )
             .unwrap();
         assert_eq!(price, 20999);
-        assert_eq!(card, Some(17999));
-        // cardprice="0" — явный сброс скидочной цены.
+        assert_eq!(card, None);
+        // cardprice="0" — тоже сброс скидочной цены.
         let reset = r#"<body><item plunumber="2502192" price="20999" cardprice="0" itemcode="02136" namefirst="ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ" namesecond="" groupcode="21" shelflife="x" /></body>"#;
         import_plu(&conn, &parse_plu_xml(reset).unwrap()).unwrap();
         let card: Option<i64> = conn
             .query_row("SELECT card_price FROM plucodes WHERE plu='2502192'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(card, None);
+    }
+
+    #[test]
+    fn remove_absent_drops_items_missing_from_upload() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        import_plu(&conn, &parse_plu_xml(SAMPLE).unwrap()).unwrap();
+        let all = parse_plu_xml(SAMPLE).unwrap();
+        // Выгрузка только с одним из двух товаров: второй снят с учёта.
+        let kept: Vec<PluItem> = vec![all[0].clone()];
+        let removed = remove_absent(&conn, &kept).unwrap();
+        assert_eq!(removed, 1);
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        // Повторный вызов с тем же набором — идемпотентен.
+        assert_eq!(remove_absent(&conn, &kept).unwrap(), 0);
     }
 
     #[test]

@@ -13,6 +13,20 @@ use suppaftp::FtpStream;
 /// при получасовом интервале без лимита это десятки тысяч каталогов в год.
 const ARCHIVE_KEEP: usize = 240;
 
+/// Атомарная запись файла: temp в том же каталоге + rename. Читатель
+/// (киоск) никогда не видит наполовину записанную картинку.
+fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+    std::fs::write(&tmp, data)?;
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
 fn archive(history_dir: &Path, pairs: &[(&str, &str)]) {
     if history_dir.as_os_str().is_empty() {
         return;
@@ -126,6 +140,9 @@ fn apply_upload(
     );
     let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
     let imported = datastore::import_plu(&conn, items).map_err(|e| format!("импорт: {e}"))?;
+    // Выгрузка — полное зеркало: товары, которых нет в файле, сняты с учёта.
+    let removed = datastore::remove_absent(&conn, items).map_err(|e| format!("удаление снятых: {e}"))?;
+    let removed_note = if removed > 0 { format!(", снято {removed}") } else { String::new() };
     let layout_note = match groups {
         Some(g) => {
             let (regrouped, orphans) =
@@ -139,7 +156,7 @@ fn apply_upload(
         }
         None => String::new(),
     };
-    Ok((imported, layout_note))
+    Ok((imported, format!("{removed_note}{layout_note}")))
 }
 
 pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
@@ -252,7 +269,8 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
             _ => true, // локального нет или не читается — копировать
         };
         if stale {
-            std::fs::copy(p, &dst).map_err(|e| format!("{}: {e}", p.display()))?;
+            let data = std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?;
+            write_atomic(&dst, &data).map_err(|e| format!("{}: {e}", dst.display()))?;
             imgs_new += 1;
         } else {
             imgs_skip += 1;
@@ -293,8 +311,12 @@ pub fn run(cfg: &Config) -> Result<String, String> {
         return Err("центр не настроен: заполните [center] в config.toml (host, plu_path)".into());
     }
     let mut ftp = match c.protocol.as_str() {
-        "ftp" | "ftps" => connect(c)?,
-        other => return Err(format!("протокол «{other}» не поддерживается (ftp/ftps)")),
+        "ftp" => connect(c)?,
+        // suppaftp без TLS-фичи: честная ошибка вместо молчаливого plaintext.
+        "ftps" => {
+            return Err("протокол ftps не реализован: используйте ftp или drop-режим".into())
+        }
+        other => return Err(format!("протокол «{other}» не поддерживается (ftp)")),
     };
 
     // Товары.
@@ -340,7 +362,7 @@ pub fn run(cfg: &Config) -> Result<String, String> {
                 continue;
             }
             let data = fetch_bytes(&mut ftp, &remote)?;
-            std::fs::write(&local_path, &data).map_err(|e| format!("{name}: {e}"))?;
+            write_atomic(&local_path, &data).map_err(|e| format!("{name}: {e}"))?;
             imgs_new += 1;
         }
     }

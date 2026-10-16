@@ -42,7 +42,7 @@ impl Default for UiProfile {
 #[derive(Clone, Deserialize)]
 #[serde(default)]
 pub struct CenterProfile {
-    /// "ftp" (есть и "ftps"); другое — заглушка на будущее.
+    /// "ftp"; другое — заглушка на будущее.
     pub protocol: String,
     pub host: String,
     pub port: u16,
@@ -64,8 +64,6 @@ pub struct CenterProfile {
     pub interval_secs: u32,
     /// Таймаут сетевых операций, сек.
     pub timeout_secs: u32,
-    /// Пассивный режим FTP (для NAT/файрволов).
-    pub passive: bool,
 }
 
 impl Default for CenterProfile {
@@ -83,7 +81,6 @@ impl Default for CenterProfile {
             history_dir: PathBuf::from("/var/lib/scalefw/history"),
             interval_secs: 1800,
             timeout_secs: 30,
-            passive: true,
         }
     }
 }
@@ -116,7 +113,6 @@ impl std::fmt::Debug for CenterProfile {
             .field("history_dir", &self.history_dir)
             .field("interval_secs", &self.interval_secs)
             .field("timeout_secs", &self.timeout_secs)
-            .field("passive", &self.passive)
             .finish()
     }
 }

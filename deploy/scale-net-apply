@@ -49,6 +49,14 @@ iface enp3s0 inet dhcp
 """
 
 
+def write_interfaces(text: str) -> None:
+    """Атомарная запись interfaces: temp + rename — обрыв питания не
+    оставляет недописанный файл, по которому весы не поднимут сеть."""
+    tmp = INTERFACES.with_suffix(".new")
+    tmp.write_text(text)
+    tmp.rename(INTERFACES)
+
+
 def fail(msg: str) -> None:
     print(msg, file=sys.stderr)
     sys.exit(1)
@@ -99,7 +107,7 @@ def main() -> None:
 
     RESOLV.write_text(f"nameserver {dns}\n")
 
-    INTERFACES.write_text(INTERFACES_TEMPLATE.format(ip=ip, pre=pre, gw=gw, dev=DEV_ADDR, iface=IFACE))
+    write_interfaces(INTERFACES_TEMPLATE.format(ip=ip, pre=pre, gw=gw, dev=DEV_ADDR, iface=IFACE))
     print("ok")
 
 
@@ -129,7 +137,7 @@ def apply_dhcp() -> None:
     if r.returncode != 0:
         fail(f"DHCP: dhcpcd завершился с ошибкой: {(r.stderr or r.stdout).strip()[:200]}")
 
-    INTERFACES.write_text(INTERFACES_DHCP_TEMPLATE.format(dev=DEV_ADDR, iface=IFACE))
+    write_interfaces(INTERFACES_DHCP_TEMPLATE.format(dev=DEV_ADDR, iface=IFACE))
     print("ok")
 
 
