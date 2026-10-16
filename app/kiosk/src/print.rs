@@ -225,7 +225,20 @@ pub fn spawn_daemon(cfg: &crate::config::Config) {
     let cfg = cfg.clone();
     std::thread::Builder::new()
         .name("printer".into())
-        .spawn(move || daemon_loop(&cfg, rx))
+        .spawn(move || {
+            // Паника демона не должна оставлять health чистым: задания
+            // перестают выполняться молча. Гасим состояние, лог в journald.
+            let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                daemon_loop(&cfg, rx)
+            }));
+            if guard.is_err() {
+                log::error!("демон принтера: поток остановлен паникой");
+                set_health(PrinterHealth {
+                    fault: true,
+                    ..health()
+                });
+            }
+        })
         .expect("поток принтера");
 }
 

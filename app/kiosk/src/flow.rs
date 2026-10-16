@@ -67,14 +67,15 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let ui_handle = ui_handle.clone();
         move || {
             let mut k = kiosk.borrow_mut();
-            let Some(entry) = k.pending.take() else { return };
-            // Кнопка гаснет при нестабильном весе, но гонка возможна:
-            // подтверждаем только реальным весом, иначе ожидание висит
-            // после закрытия карточки.
+            // Не забираем pending до подтверждения весом: при гонке
+            // (кнопка погасла, вес ещё не стабилен) карточка осталась бы
+            // открытой с мёртвым товаром — повторное ПЕЧАТЬ не работало бы.
+            let Some(entry) = k.pending.clone() else { return };
             let ws = weight_state(&app_state.snapshot());
             if ws != 2 {
                 return;
             }
+            k.pending = None;
             k.selected = Some(entry);
             k.phase = 2;
             k.idle_since = None;
@@ -326,7 +327,10 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                         }
                     }
                     ch => {
-                        if q.len() < 32 {
+                        // 64 байта = 32 кириллические буквы (2 байта/буква
+                        // в UTF-8); прежние 32 байта обрезали поиск на
+                        // середине фразы.
+                        if q.len() < 64 {
                             q.push_str(ch);
                         }
                     }

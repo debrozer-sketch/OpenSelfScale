@@ -371,17 +371,23 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
         let cfg_sync = cfg.clone();
         let tx = tx.clone();
         std::thread::spawn(move || loop {
-            match run_drop(&cfg_sync) {
-                Ok(Some(r)) => {
-                    log::info!("{r}");
-                    let _ = tx.send(r);
+            // Паника не должна молча останавливать приём выгрузки.
+            let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                match run_drop(&cfg_sync) {
+                    Ok(Some(r)) => {
+                        log::info!("{r}");
+                        let _ = tx.send(r);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        log::error!("выгрузка (drop): {e}");
+                        // Ошибку не молотим: пауза перед повторной попыткой.
+                        std::thread::sleep(std::time::Duration::from_secs(60));
+                    }
                 }
-                Ok(None) => {}
-                Err(e) => {
-                    log::error!("выгрузка (drop): {e}");
-                    // Ошибку не молотим: пауза перед повторной попыткой.
-                    std::thread::sleep(std::time::Duration::from_secs(60));
-                }
+            }));
+            if guard.is_err() {
+                log::error!("авто-синхронизация (drop): поток паниковал, перезапуск цикла");
             }
             std::thread::sleep(std::time::Duration::from_secs(5));
         });
@@ -392,12 +398,18 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
             std::time::Duration::from_secs(cfg.center.interval_secs.max(30) as u64);
         std::thread::spawn(move || loop {
             std::thread::sleep(interval);
-            match run(&cfg_sync) {
-                Ok(r) => {
-                    log::info!("авто-синхронизация: {r}");
-                    let _ = tx.send(r);
+            // Паника не должна молча останавливать авто-синхронизацию.
+            let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                match run(&cfg_sync) {
+                    Ok(r) => {
+                        log::info!("авто-синхронизация: {r}");
+                        let _ = tx.send(r);
+                    }
+                    Err(e) => log::error!("авто-синхронизация: {e}"),
                 }
-                Err(e) => log::error!("авто-синхронизация: {e}"),
+            }));
+            if guard.is_err() {
+                log::error!("авто-синхронизация: поток паниковал, продолжаем цикл");
             }
         });
     } else {

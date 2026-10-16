@@ -38,9 +38,23 @@ impl WeightSource {
         let inner_t = inner.clone();
         let stop_t = stop.clone();
         let zero_t = zero.clone();
+        let inner_g = inner.clone();
         std::thread::Builder::new()
             .name("weight-poll".into())
-            .spawn(move || poll_loop(&profile, inner_t, stop_t, zero_t))
+            .spawn(move || {
+                // Паника потока не должна оставлять port_up=true при мёртвом
+                // опросе: гасим состояние, systemd-лог покажет причину.
+                let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    poll_loop(&profile, inner_t, stop_t, zero_t)
+                }));
+                if guard.is_err() {
+                    log::error!("весы: поток опроса остановлен паникой");
+                    if let Ok(mut s) = inner_g.lock() {
+                        s.port_up = false;
+                        s.stable = false;
+                    }
+                }
+            })
             .expect("spawn weight thread");
         Self { inner, stop, zero }
     }
@@ -183,8 +197,12 @@ fn poll_loop(
                         }
                         Err(drivers_api::DriverError::Timeout) => {
                             // Пустая платформа / дрейф: устройство вправе молчать.
-                            // Порт жив — не переподключаемся, просто гасим «стабильно».
+                            // Порт жив — не переподключаемся. Свежего показания
+                            // нет: старую массу оставлять нельзя (новый покупатель
+                            // увидит чужой вес), сбрасываем в ноль. Печать всё
+                            // равно требует stable, следующий кадр вернёт данные.
                             let mut s = out.lock().expect("weight mutex");
+                            s.mass_kg = 0.0;
                             s.stable = false;
                             s.port_up = true;
                         }
