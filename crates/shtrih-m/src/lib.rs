@@ -109,7 +109,6 @@ impl<P: Read + Write + std::os::unix::io::AsRawFd> PortPoll for P {
     fn read_timeout(&mut self, buf: &mut [u8], timeout: Duration) -> std::io::Result<usize> {
         // VTIME порта фиксирован (0.5 с), а опросу нужен свой таймаут —
         // ждём готовность через poll, затем одно чтение.
-        use std::os::unix::io::AsRawFd;
         let mut fds = [libc::pollfd {
             fd: self.as_raw_fd(),
             events: libc::POLLIN,
@@ -378,8 +377,15 @@ mod tests {
             Ok(())
         }
     }
-    // PortPoll для мока не нужен: на хосте действует blanket-impl
-    // (cfg(not(unix))) поверх Read + Write.
+    // Мок без fd: на хосте (не unix) действует blanket-impl поверх
+    // Read + Write; на unix blanket требует AsRawFd — даём ручной impl
+    // для &mut (локальный тип, конфликтов когерентности нет).
+    #[cfg(unix)]
+    impl PortPoll for &mut SplitReplyPort {
+        fn read_timeout(&mut self, buf: &mut [u8], _timeout: Duration) -> std::io::Result<usize> {
+            SplitReplyPort::read(self, buf)
+        }
+    }
 
     #[test]
     fn zero_drains_split_ack_and_frame() {

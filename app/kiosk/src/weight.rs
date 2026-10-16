@@ -105,7 +105,12 @@ fn open_tty_raw(path: &str, baud: u32) -> Result<std::fs::File, String> {
         115200 => libc::B115200,
         other => return Err(format!("скорость {other} не поддерживается (9600..115200)")),
     };
-    let fd = unsafe { libc::open(path.as_ptr() as *const i8, libc::O_RDWR | libc::O_NOCTTY) };
+    let c_path = match std::ffi::CString::new(path) {
+        Ok(p) => p,
+        Err(e) => return Err(format!("путь порта {path:?}: {e}")),
+    };
+    // SAFETY: c_path — валидная NUL-терминированная C-строка.
+    let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDWR | libc::O_NOCTTY) };
     if fd < 0 {
         return Err(std::io::Error::last_os_error().to_string());
     }

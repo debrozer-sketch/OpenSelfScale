@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 /// Пустая платформа стабильно показывает −6 г, товар ≥ 10 г.
 pub const MIN_MASS_KG: f64 = 0.010;
 /// Возврат из «Готово» без снятия товара (S5 → S2).
-pub const DONE_TIMEOUT: Duration = Duration::from_secs(5);
+pub const DONE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Авто-возврат из ошибки принтера.
 pub const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
 /// Заводской пароль персонала: при первом запуске сеется в БД, вход с ним
