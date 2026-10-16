@@ -333,6 +333,10 @@ fn idle_probe(
                 Err(e) => log::warn!("принтер: DLE ENQ 1 не прошёл: {e}"),
             }
         }
+        let prev = STATUS_RAW_LOGGED.swap(st.raw_byte, std::sync::atomic::Ordering::Relaxed);
+        if prev != st.raw_byte {
+            log::info!("принтер: статус сменился: DLE EOT 4 = 0x{:02X}", st.raw_byte);
+        }
         update_health(&st);
         Ok(())
     });
@@ -352,6 +356,10 @@ fn update_health(st: &escpos::PrinterStatus) {
 /// Память прошлого опроса для детекта заправки бумаги
 /// (paper_end true → false): в этот момент принтеру нужен DLE ENQ 1.
 static PAPER_WAS_END: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Сырой байт последнего залогированного статуса: на смену значения —
+/// строка в лог (калибровка битов датчиков идёт по этому дампу).
+static STATUS_RAW_LOGGED: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(0xFF);
 
 /// Реалтайм-recovery перед ручными заданиями меню: если принтер сидит в
 /// устранимой ошибке (наблюдалось 2026-10-15: «этикетка выдана» + error-биты

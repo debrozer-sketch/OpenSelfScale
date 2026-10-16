@@ -189,8 +189,14 @@ pub fn install(ctx: &AppContext) {
                     }
                     Ok(datastore::auth::Auth::Denied { wait_secs }) => {
                         log::info!("вход: отказ, пауза {wait_secs} с");
-                        if let Some(ui) = ui_handle.upgrade() {
-                            ui.set_lock_left(wait_secs as i32);
+                        // Без паузы перебора — обычный неверный пароль:
+                        // молчаливый отказ выглядит как зависание кнопки.
+                        if wait_secs == 0 {
+                            set_err(&ui_handle, "Неверный пароль");
+                        } else {
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_lock_left(wait_secs as i32);
+                            }
                         }
                     }
                     Err(e) => log::error!("вход: проверка: {e}"),

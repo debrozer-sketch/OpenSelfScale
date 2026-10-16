@@ -25,8 +25,11 @@ pub fn start(
     let lock_db: Mutex<Option<rusqlite::Connection>> = Mutex::new(None);
     // Строковые свойства ставятся только при изменении: каждая установка
     // гонит перерисовку текста, 10 раз/сек без нужды — джиттер полосы.
+    // Начальные значения повторяют дефолты UI-свойств (false/0/-1): иначе
+    // первый тик с поднятой связью не ставит scales_ok и полоса остаётся
+    // красной («Ошибка весов») при работающих весах.
     let tick_cache: Rc<RefCell<(String, i32, bool, bool, i32)>> =
-        Rc::new(RefCell::new((String::new(), -1, true, true, -1)));
+        Rc::new(RefCell::new((String::new(), -1, false, false, -1)));
     let timer = slint::Timer::default();
     {
         let kiosk = ctx.kiosk.clone();

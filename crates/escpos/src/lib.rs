@@ -205,6 +205,9 @@ pub struct PrinterStatus {
     pub printer_offline: bool,
     pub paper_end: bool,
     pub paper_near_end: bool,
+    /// Сырой ответ DLE EOT: биты расходника у Штрих-СлиМ не совпадают
+    /// со спецификацией Epson — калибровка датчика идёт по дампу.
+    pub raw_byte: u8,
 }
 
 /// Запрос статуса: DLE EOT n, n=1..4 (см. ESC/POS).
@@ -233,18 +236,21 @@ pub fn parse_status(level: u8, byte: u8) -> PrinterStatus {
             printer_offline: byte & 0x04 != 0,
             paper_end: false,
             paper_near_end: false,
+            raw_byte: byte,
         },
         2 => PrinterStatus {
             drawer_open: byte & 0x08 != 0,
             printer_offline: byte & 0x04 != 0,
             paper_end: false,
             paper_near_end: false,
+            raw_byte: byte,
         },
         3 => PrinterStatus {
             drawer_open: false,
             printer_offline: byte & 0x04 != 0,
             paper_end: false,
             paper_near_end: false,
+            raw_byte: byte,
         },
         // Уровень 4, эмпирика принтера Штрих-СлиМ (Custom): в покое 0x1E,
         // после выдачи этикетки 0x7E — биты 5-6 означают «этикетка выдана,
@@ -256,12 +262,14 @@ pub fn parse_status(level: u8, byte: u8) -> PrinterStatus {
             printer_offline: false,
             paper_end: false,
             paper_near_end: false,
+            raw_byte: byte,
         },
         _ => PrinterStatus {
             drawer_open: false,
             printer_offline: false,
             paper_end: false,
             paper_near_end: false,
+            raw_byte: byte,
         },
     }
 }
