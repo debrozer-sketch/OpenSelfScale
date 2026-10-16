@@ -1,17 +1,9 @@
 //! Экран «Сеть»: чтение и применение настроек главного адреса.
-//!
-//! Главное (продакшн) подключение: IP/маска/шлюз/DNS интерфейса enp3s0.
-//! Служебный адрес разработки 172.32.0.5 живёт рядом и меню «Сеть» его
-//! не трогает; в продакшне он удаляется из конфига вместе с этой константой.
 
 use std::net::Ipv4Addr;
 use std::process::Command;
 
 const IFACE: &str = "enp3s0";
-/// Служебный адрес разработки; меню «Сеть» его не трогает. При снятии
-/// dev-доступа удалить константу, строку из interfaces-файла и правило
-/// sudoers (см. deploy/scale-net-apply).
-const DEV_ADDR_PREFIX: &str = "172.32.0.";
 
 /// Текущие настройки, как они видны системе (не из конфига).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,9 +38,10 @@ pub fn prefix_to_mask(pre: u8) -> String {
     Ipv4Addr::from(v).to_string()
 }
 
-/// Текущие настройки системы: главный адрес (не dev), маска, шлюз, DNS.
+/// Текущие настройки системы: главный адрес, маска, шлюз, DNS.
 pub fn read_live() -> NetConfig {
     let addr_out = run("ip", &["-4", "addr", "show", "dev", IFACE]);
+    // Главный адрес — первый inet на интерфейсе (вторичные идут следом).
     let mut ip = String::new();
     let mut pre = 24u8;
     for l in addr_out.lines() {
@@ -56,11 +49,12 @@ pub fn read_live() -> NetConfig {
         if let Some(rest) = t.strip_prefix("inet ") {
             let tok = rest.split_whitespace().next().unwrap_or("");
             let (a, p) = tok.split_once('/').unwrap_or((tok, "24"));
-            if a.starts_with(DEV_ADDR_PREFIX) {
+            if a.starts_with("127.") {
                 continue;
             }
             ip = a.to_string();
             pre = p.parse().unwrap_or(24);
+            break;
         }
     }
     let gateway = run("ip", &["route", "show", "default"])

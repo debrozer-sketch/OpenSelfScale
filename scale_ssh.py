@@ -10,6 +10,10 @@ Jump-хост (если весы не видны напрямую): SCALE_JUMP �
 на jump — ключом SCALE_JUMP_KEY (по умолчанию ~/.ssh/scalefw_bastion),
 иначе паролем SCALE_JUMP_PASSWORD, иначе SCALE_PASSWORD. Переменные
 окружения SCALE_* перекрывают значения из .env.
+
+Ключ хоста проверяется по ~/.ssh/known_hosts (защита от MITM). Хост без
+записи — отказ с подсказкой; одноразовый обход: SCALE_ACCEPT_NEW_HOST=1
+(переустановленная весы, смена ключа — после проверки причины).
 """
 import os
 import shlex
@@ -33,10 +37,34 @@ def load_env(path: Path) -> dict:
     return env
 
 
+def _accept_new() -> bool:
+    return os.environ.get("SCALE_ACCEPT_NEW_HOST") == "1"
+
+
+def _make_client(accept_new: bool) -> paramiko.SSHClient:
+    """Клиент с проверкой ключа хоста; AutoAdd — только по явному запросу."""
+    c = paramiko.SSHClient()
+    c.load_system_host_keys()
+    if accept_new:
+        c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    else:
+        c.set_missing_host_key_policy(paramiko.RejectPolicy())
+    return c
+
+
+def _fail_unknown_host(host: str, e: paramiko.SSHException) -> None:
+    if "not found in known_hosts" in str(e):
+        raise RuntimeError(
+            f"хост {host} отсутствует в ~/.ssh/known_hosts — один раз выполните\n"
+            f"  ssh-keyscan -H {host} >> ~/.ssh/known_hosts\n"
+            f"или повторите с SCALE_ACCEPT_NEW_HOST=1 (после проверки причины)"
+        ) from e
+    raise e
+
+
 def _connect_jump(cfg: dict) -> paramiko.SSHClient:
     """Jump-хост: ключ предпочтительнее пароля."""
-    jump = paramiko.SSHClient()
-    jump.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    jump = _make_client(_accept_new())
     kwargs = dict(
         hostname=cfg["SCALE_JUMP"],
         port=int(cfg.get("SCALE_JUMP_PORT", "22")),
@@ -54,7 +82,10 @@ def _connect_jump(cfg: dict) -> paramiko.SSHClient:
         kwargs["pkey"] = paramiko.Ed25519Key.from_private_key_file(key_path)
     else:
         kwargs["password"] = cfg.get("SCALE_JUMP_PASSWORD", cfg["SCALE_PASSWORD"])
-    jump.connect(**kwargs)
+    try:
+        jump.connect(**kwargs)
+    except paramiko.SSHException as e:
+        _fail_unknown_host(cfg["SCALE_JUMP"], e)
     return jump
 
 
@@ -67,8 +98,7 @@ def connect() -> paramiko.SSHClient:
     missing = [k for k in ("SCALE_HOST", "SCALE_USER", "SCALE_PASSWORD") if not cfg.get(k)]
     if missing:
         raise RuntimeError("Не заполнены поля в .env: " + ", ".join(missing))
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client = _make_client(_accept_new())
     sock = None
     if cfg.get("SCALE_JUMP"):
         sock = _connect_jump(cfg).get_transport().open_channel(
@@ -77,18 +107,21 @@ def connect() -> paramiko.SSHClient:
             ("127.0.0.1", 0),
             timeout=15,
         )
-    client.connect(
-        hostname=cfg["SCALE_HOST"],
-        port=int(cfg.get("SCALE_PORT", "22")),
-        username=cfg["SCALE_USER"],
-        password=cfg["SCALE_PASSWORD"],
-        sock=sock,
-        timeout=10,
-        banner_timeout=10,
-        auth_timeout=10,
-        allow_agent=False,
-        look_for_keys=False,
-    )
+    try:
+        client.connect(
+            hostname=cfg["SCALE_HOST"],
+            port=int(cfg.get("SCALE_PORT", "22")),
+            username=cfg["SCALE_USER"],
+            password=cfg["SCALE_PASSWORD"],
+            sock=sock,
+            timeout=10,
+            banner_timeout=10,
+            auth_timeout=10,
+            allow_agent=False,
+            look_for_keys=False,
+        )
+    except paramiko.SSHException as e:
+        _fail_unknown_host(cfg["SCALE_HOST"], e)
     return client
 
 

@@ -64,6 +64,31 @@ fn sha256_hex(data: &str) -> String {
     d.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Растяжение хеша PIN: одиночный SHA-256 от 4–8 цифр перебирается
+/// миллиардами в секунду. 20k итераций дают ~миллисекунды на входе
+/// (незаметно на экране входа) и миллиарды операций на перебор словаря.
+const PIN_ROUNDS: u32 = 20_000;
+/// Тег формата в pin_hash: «k1$» — растянутый хеш, голый hex — старый
+/// одиночный SHA-256 (мигрирует при первом успешном входе).
+const PIN_TAG: &str = "k1$";
+
+fn stretch(salt: &str, pin: &str) -> String {
+    let mut h = sha256_hex(&format!("{salt}:{pin}"));
+    for _ in 1..PIN_ROUNDS {
+        h = sha256_hex(&h);
+    }
+    h
+}
+
+/// Ожидаемый pin_hash по хранимому формату: тегированный — растянутый,
+/// голый hex — старый одиночный (совпадение = успешная миграция).
+fn expected_hash(salt: &str, pin: &str, stored: &str) -> String {
+    match stored.strip_prefix(PIN_TAG) {
+        Some(_) => format!("{PIN_TAG}{}", stretch(salt, pin)),
+        None => sha256_hex(&format!("{salt}:{pin}")),
+    }
+}
+
 /// Сравнение строк в постоянном времени: длина и все байты обходятся всегда.
 fn constant_time_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
@@ -77,10 +102,6 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     diff == 0
 }
 
-/// Случайная соль: /dev/urandom, целевая платформа гарантирует его
-/// наличие (Debian). Без urandom — отказ: предсказуемая соль ослабляет
-/// защиту от заранее посчитанных таблиц. Не-Linux пути (разработка под
-/// Windows) допускают резерв из времени и pid — в продакшн не попадают.
 /// Случайная соль. Целевая платформа (Debian) гарантирует /dev/urandom;
 /// без него — отказ: предсказуемая соль ослабляет защиту от заранее
 /// посчитанных таблиц. Не-Linux резерв (разработка под Windows) — из
@@ -143,7 +164,7 @@ pub fn seed(conn: &Connection, factory_pin: &str) -> Result<(), rusqlite::Error>
     let n: i64 = conn.query_row("SELECT COUNT(*) FROM admin_user", [], |r| r.get(0))?;
     if n == 0 {
         let salt = random_salt();
-        let hash = sha256_hex(&format!("{salt}:{factory_pin}"));
+        let hash = format!("{PIN_TAG}{}", stretch(&salt, factory_pin));
         conn.execute(
             "INSERT INTO admin_user (id, role, pin_salt, pin_hash) VALUES (1, 'admin', ?1, ?2)",
             rusqlite::params![salt, hash],
@@ -188,10 +209,19 @@ pub fn verify(conn: &Connection, pin: &str) -> Result<Auth, rusqlite::Error> {
         )
         .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
 
-    let passed = well_formed
-        && constant_time_eq(&sha256_hex(&format!("{salt}:{pin}")), &hash);
+    let passed = well_formed && constant_time_eq(&expected_hash(&salt, pin, &hash), &hash);
 
     if passed {
+        // Старый формат (голый SHA-256) мигрирует на растянутый при
+        // первом же успешном входе: соль обновляется заодно.
+        if !hash.starts_with(PIN_TAG) {
+            let salt = random_salt();
+            let upgraded = format!("{PIN_TAG}{}", stretch(&salt, pin));
+            conn.execute(
+                "UPDATE admin_user SET pin_salt = ?1, pin_hash = ?2 WHERE id = 1",
+                rusqlite::params![salt, upgraded],
+            )?;
+        }
         conn.execute("UPDATE admin_lock SET failed = 0, locked_until = 0 WHERE id = 1", [])?;
         return Ok(Role::from_db(&role).map_or(Auth::Denied { wait_secs: 0 }, Auth::Granted));
     }
@@ -224,7 +254,7 @@ pub fn pin_is(conn: &Connection, pin: &str) -> Result<bool, rusqlite::Error> {
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    Ok(constant_time_eq(&sha256_hex(&format!("{salt}:{pin}")), &hash))
+    Ok(constant_time_eq(&expected_hash(&salt, pin, &hash), &hash))
 }
 
 /// Смена пароля: старый должен совпасть, новый — цифры, 4..=8, не совпадать
@@ -248,7 +278,7 @@ pub fn change_pin(
         return Ok(Err("новый пароль совпадает со старым"));
     }
     let salt = random_salt();
-    let hash = sha256_hex(&format!("{salt}:{new}"));
+    let hash = format!("{PIN_TAG}{}", stretch(&salt, new));
     conn.execute(
         "UPDATE admin_user SET pin_salt = ?1, pin_hash = ?2 WHERE id = 1",
         rusqlite::params![salt, hash],
@@ -306,9 +336,11 @@ mod tests {
             Auth::Denied { wait_secs: 10 }
         ));
         // Четвёртая попытка уже с паузой 10 с: верный PIN не проходит.
+        // wait = locked_until - now в целых секундах: у границы секунды
+        // остаётся 9 (проверка с растяжением занимает ~десятки мс).
         assert!(matches!(
             verify(&conn, "12345").unwrap(),
-            Auth::Denied { wait_secs: 10 }
+            Auth::Denied { wait_secs: w } if (9..=10).contains(&w)
         ));
         assert!(lock_left(&conn) > 0);
         // Пауза в БД: переживает «перезапуск» (новое соединение — в тестах
@@ -339,6 +371,30 @@ mod tests {
         assert!(change_pin(&conn, "12345", "12345").unwrap().is_err());
         assert!(change_pin(&conn, "12345", "54321").unwrap().is_ok());
         assert_eq!(verify(&conn, "54321").unwrap(), Auth::Granted(Role::Admin));
+    }
+
+    #[test]
+    fn legacy_pin_hash_migrates_on_login() {
+        let conn = db();
+        // Запись в старом формате (голый SHA-256, как до растяжения).
+        let salt = "aabbccdd00112233";
+        let legacy = sha256_hex(&format!("{salt}:12345"));
+        conn.execute(
+            "UPDATE admin_user SET pin_salt = ?1, pin_hash = ?2 WHERE id = 1",
+            rusqlite::params![salt, legacy],
+        )
+        .unwrap();
+        // Вход по старому формату работает и мигрирует запись.
+        assert_eq!(verify(&conn, "12345").unwrap(), Auth::Granted(Role::Admin));
+        let (salt, hash): (String, String) = conn
+            .query_row("SELECT pin_salt, pin_hash FROM admin_user WHERE id = 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert!(hash.starts_with(PIN_TAG));
+        assert_ne!(salt, "aabbccdd00112233");
+        // После миграции вход продолжается в новом формате.
+        assert_eq!(verify(&conn, "12345").unwrap(), Auth::Granted(Role::Admin));
     }
 
     #[test]

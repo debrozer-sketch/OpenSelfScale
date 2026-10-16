@@ -5,8 +5,7 @@
   scale-net-apply <IP> <PREFIX> <GATEWAY> <DNS>   — ручной (статический)
   scale-net-apply dhcp                            — DHCP (dhcpcd)
 Применяет настройки живо (адрес, default route, resolv.conf) и перезаписывает
-/etc/network/interfaces для сохранности после перезагрузки. Служебный адрес
-разработки 172.32.0.5 не трогает.
+/etc/network/interfaces для сохранности после перезагрузки.
 """
 import ipaddress
 import pathlib
@@ -14,7 +13,6 @@ import subprocess
 import sys
 
 IFACE = "enp3s0"
-DEV_ADDR = "172.32.0.5/24"
 INTERFACES = pathlib.Path("/etc/network/interfaces")
 RESOLV = pathlib.Path("/etc/resolv.conf")
 
@@ -25,14 +23,11 @@ source /etc/network/interfaces.d/*
 auto lo
 iface lo inet loopback
 
-# Служебный адрес разработки; меню «Сеть» его не трогает.
 allow-hotplug enp3s0
 auto enp3s0
 iface enp3s0 inet static
 \taddress {ip}/{pre}
 \tgateway {gw}
-\tup ip addr add {dev} dev {iface} || true
-\tdown ip addr del {dev} dev {iface} || true
 """
 
 INTERFACES_DHCP_TEMPLATE = """\
@@ -40,12 +35,9 @@ source /etc/network/interfaces.d/*
 auto lo
 iface lo inet loopback
 
-# Служебный адрес разработки; меню «Сеть» его не трогает.
 allow-hotplug enp3s0
 auto enp3s0
 iface enp3s0 inet dhcp
-\tup ip addr add {dev} dev {iface} || true
-\tdown ip addr del {dev} dev {iface} || true
 """
 
 
@@ -87,11 +79,10 @@ def main() -> None:
     dns = parse_addr(dns_s, "DNS")
 
     # Живое применение без разрыва интерфейса.
-    dev = ipaddress.IPv4Interface(DEV_ADDR)
     run = lambda *args: subprocess.run(args, check=False).returncode == 0
 
     run("ip", "addr", "replace", f"{ip}/{pre}", "dev", IFACE)
-    # Старый главный адрес (если отличался) снять.
+    # Прежние адреса (кроме loopback) снять — главный один.
     out = subprocess.run(["ip", "-4", "addr", "show", "dev", IFACE],
                          capture_output=True, text=True).stdout
     new_main = f"{ip}/{pre}"
@@ -100,23 +91,23 @@ def main() -> None:
         if not line.startswith("inet "):
             continue
         tok = line.split()[1]
-        if tok in (new_main, str(dev)) or tok.startswith("127."):
+        if tok == new_main or tok.startswith("127."):
             continue
         run("ip", "addr", "del", tok, "dev", IFACE)
     run("ip", "route", "replace", "default", "via", str(gw), "dev", IFACE)
 
     RESOLV.write_text(f"nameserver {dns}\n")
 
-    write_interfaces(INTERFACES_TEMPLATE.format(ip=ip, pre=pre, gw=gw, dev=DEV_ADDR, iface=IFACE))
+    write_interfaces(INTERFACES_TEMPLATE.format(ip=ip, pre=pre, gw=gw))
     print("ok")
 
 
 def apply_dhcp() -> None:
     """Снять статические настройки главного адреса, получить аренду."""
     run = lambda *args: subprocess.run(args, check=False).returncode == 0
-    dev = ipaddress.IPv4Interface(DEV_ADDR)
 
-    # Старый главный адрес и его default route — долой, их заменит аренда.
+    # Прежние адреса (кроме loopback) и их default route — долой,
+    # их заменит аренда.
     out = subprocess.run(["ip", "-4", "addr", "show", "dev", IFACE],
                          capture_output=True, text=True).stdout
     for line in out.splitlines():
@@ -124,7 +115,7 @@ def apply_dhcp() -> None:
         if not line.startswith("inet "):
             continue
         tok = line.split()[1]
-        if tok == str(dev) or tok.startswith("127."):
+        if tok.startswith("127."):
             continue
         run("ip", "addr", "del", tok, "dev", IFACE)
     run("ip", "route", "del", "default", "dev", IFACE)
@@ -137,7 +128,7 @@ def apply_dhcp() -> None:
     if r.returncode != 0:
         fail(f"DHCP: dhcpcd завершился с ошибкой: {(r.stderr or r.stdout).strip()[:200]}")
 
-    write_interfaces(INTERFACES_DHCP_TEMPLATE.format(dev=DEV_ADDR, iface=IFACE))
+    write_interfaces(INTERFACES_DHCP_TEMPLATE)
     print("ok")
 
 
