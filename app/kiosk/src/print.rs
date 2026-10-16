@@ -260,6 +260,10 @@ fn daemon_loop(cfg: &crate::config::Config, rx: mpsc::Receiver<PrinterRequest>) 
                     prn.port_mut().write_all(&[escpos::GS, escpos::FF]).map_err(|e| e.to_string())?;
                     prn.port_mut().flush().map_err(|e| e.to_string())?;
                     log::info!("принтер: подача до метки");
+                    match prn.status().map(|s| s.raw_byte) {
+                        Ok(b) => log::info!("принтер: статус после подачи: DLE EOT 4 = {b:#04X}"),
+                        Err(e) => log::warn!("принтер: статус после подачи не прочитан: {e}"),
+                    }
                     Ok(())
                 });
                 finish(ack, res, "подача");
@@ -270,6 +274,10 @@ fn daemon_loop(cfg: &crate::config::Config, rx: mpsc::Receiver<PrinterRequest>) 
                     prn.port_mut().write_all(&bytes).map_err(|e| e.to_string())?;
                     prn.port_mut().flush().map_err(|e| e.to_string())?;
                     log::info!("принтер: тестовая этикетка напечатана");
+                    match prn.status().map(|s| s.raw_byte) {
+                        Ok(b) => log::info!("принтер: статус после теста: DLE EOT 4 = {b:#04X}"),
+                        Err(e) => log::warn!("принтер: статус после теста не прочитан: {e}"),
+                    }
                     Ok(())
                 });
                 finish(ack, res, "тестовая печать");
@@ -325,7 +333,24 @@ fn idle_probe(
     prn: &mut Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>>,
 ) {
     let res = with_port(cfg, prn, |p| {
-        let st = p.status().map_err(|e| e.to_string())?;
+        // Дамп всех каналов статуса: DLE EOT 1-4 не отражают датчик ленты
+        // на этом принтере — добавлены GS r 1 (датчик бумаги) и ESC v
+        // (сводный статус). Ищем живые биты по дампу.
+        let mut raw = [0u8; 6];
+        for (i, level) in [1u8, 2, 3, 4].iter().enumerate() {
+            p.port_mut()
+                .write_all(&escpos::build_status_query(*level))
+                .map_err(|e| e.to_string())?;
+            p.port_mut().flush().map_err(|e| e.to_string())?;
+            p.port_mut().read_exact(&mut raw[i..i + 1]).map_err(|e| e.to_string())?;
+        }
+        p.port_mut().write_all(&[escpos::GS, b'r', 1]).map_err(|e| e.to_string())?;
+        p.port_mut().flush().map_err(|e| e.to_string())?;
+        p.port_mut().read_exact(&mut raw[4..5]).map_err(|e| e.to_string())?;
+        p.port_mut().write_all(&[escpos::ESC, b'v', 0]).map_err(|e| e.to_string())?;
+        p.port_mut().flush().map_err(|e| e.to_string())?;
+        p.port_mut().read_exact(&mut raw[5..6]).map_err(|e| e.to_string())?;
+        let st = escpos::parse_status(4, raw[3]);
         let was = PAPER_WAS_END.swap(st.paper_end, std::sync::atomic::Ordering::Relaxed);
         if was && !st.paper_end {
             match p.recover(1).map_err(|e| e.to_string()) {
@@ -333,9 +358,15 @@ fn idle_probe(
                 Err(e) => log::warn!("принтер: DLE ENQ 1 не прошёл: {e}"),
             }
         }
-        let prev = STATUS_RAW_LOGGED.swap(st.raw_byte, std::sync::atomic::Ordering::Relaxed);
-        if prev != st.raw_byte {
-            log::info!("принтер: статус сменился: DLE EOT 4 = 0x{:02X}", st.raw_byte);
+        let key = u32::from_le_bytes(raw[..4].try_into().expect("4 байта"));
+        let extra = u16::from_le_bytes(raw[4..6].try_into().expect("2 байта")) as u32;
+        let key = key | (extra << 16);
+        let prev = STATUS_RAW_LOGGED.swap(key, std::sync::atomic::Ordering::Relaxed);
+        if prev != key {
+            log::info!(
+                "принтер: статусы: L1={:#04X} L2={:#04X} L3={:#04X} L4={:#04X} GSR={:#04X} ESCV={:#04X}",
+                raw[0], raw[1], raw[2], raw[3], raw[4], raw[5]
+            );
         }
         update_health(&st);
         Ok(())
@@ -358,8 +389,8 @@ fn update_health(st: &escpos::PrinterStatus) {
 static PAPER_WAS_END: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Сырой байт последнего залогированного статуса: на смену значения —
 /// строка в лог (калибровка битов датчиков идёт по этому дампу).
-static STATUS_RAW_LOGGED: std::sync::atomic::AtomicU8 =
-    std::sync::atomic::AtomicU8::new(0xFF);
+static STATUS_RAW_LOGGED: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0xFFFF_FFFF);
 
 /// Реалтайм-recovery перед ручными заданиями меню: если принтер сидит в
 /// устранимой ошибке (наблюдалось 2026-10-15: «этикетка выдана» + error-биты
