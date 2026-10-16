@@ -469,9 +469,19 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
 /// (ручной, возможно частичный файл) удаление не делает.
 pub fn remove_absent(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
     let tx = conn.unchecked_transaction()?;
+    // Защита от обрезанной выгрузки: файл, оборванный на границе записи,
+    // разбирается без ошибок, и без проверки снял бы с учёта весь остаток.
+    let existing: i64 = tx.query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))?;
+    if existing >= 20 && (items.len() as i64) * 2 < existing {
+        return Err(StoreError::Xml(format!(
+            "в выгрузке {} товаров при {existing} в базе: подозрение на обрезанный файл, снятие отменено",
+            items.len()
+        )));
+    }
     tx.execute_batch("CREATE TEMP TABLE incoming_plu (plu TEXT PRIMARY KEY)")?;
     {
-        let mut stmt = tx.prepare("INSERT INTO incoming_plu (plu) VALUES (?1)")?;
+        // OR IGNORE: повтор PLU в выгрузке не должен ронять всю синхронизацию.
+        let mut stmt = tx.prepare("INSERT OR IGNORE INTO incoming_plu (plu) VALUES (?1)")?;
         for it in items {
             stmt.execute([&it.plu])?;
         }
@@ -772,6 +782,47 @@ mod tests {
         assert_eq!(n, 1);
         // Повторный вызов с тем же набором — идемпотентен.
         assert_eq!(remove_absent(&conn, &kept).unwrap(), 0);
+    }
+
+    #[test]
+    fn remove_absent_rejects_suspiciously_small_upload() {
+        // Обрезанный на границе записи plu.xml разбирается без ошибок,
+        // но снял бы с учёта почти весь ассортимент — защита обязана
+        // прервать синхронизацию ошибкой.
+        let conn = open(":memory:".as_ref()).unwrap();
+        let mut xml = String::from("<body>");
+        for i in 0..21 {
+            xml.push_str(&format!(
+                r#"<item plunumber="25010{i:02}" price="1000" itemcode="0001" namefirst="ТОВАР {i}" namesecond="" groupcode="21" shelflife="x" />"#
+            ));
+        }
+        xml.push_str("</body>");
+        import_plu(&conn, &parse_plu_xml(&xml).unwrap()).unwrap();
+        // «Обрезанная» выгрузка: 10 из 21 (< половины) — отказ.
+        let half: Vec<PluItem> = parse_plu_xml(&xml).unwrap().into_iter().take(10).collect();
+        assert!(remove_absent(&conn, &half).is_err());
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 21);
+        // Полная выгрузка проходит: снятий нет, база цела.
+        let all: Vec<PluItem> = parse_plu_xml(&xml).unwrap();
+        assert_eq!(remove_absent(&conn, &all).unwrap(), 0);
+    }
+
+    #[test]
+    fn remove_absent_tolerates_duplicate_plu_in_upload() {
+        // Повтор PLU в выгрузке раньше падал по UNIQUE-констрейнту
+        // временной таблицы и ронял всю синхронизацию.
+        let conn = open(":memory:".as_ref()).unwrap();
+        import_plu(&conn, &parse_plu_xml(SAMPLE).unwrap()).unwrap();
+        let all = parse_plu_xml(SAMPLE).unwrap();
+        let dup: Vec<PluItem> = vec![all[0].clone(), all[0].clone()];
+        assert_eq!(remove_absent(&conn, &dup).unwrap(), 1);
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
     }
 
     #[test]

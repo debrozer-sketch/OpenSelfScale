@@ -226,17 +226,24 @@ pub fn spawn_daemon(cfg: &crate::config::Config) {
     std::thread::Builder::new()
         .name("printer".into())
         .spawn(move || {
-            // Паника демона не должна оставлять health чистым: задания
-            // перестают выполняться молча. Гасим состояние, лог в journald.
-            let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                daemon_loop(&cfg, rx)
-            }));
-            if guard.is_err() {
-                log::error!("демон принтера: поток остановлен паникой");
-                set_health(PrinterHealth {
-                    fault: true,
-                    ..health()
-                });
+            // Паника демона не должна хоронить печать до рестарта сервиса:
+            // daemon_loop перезапускается с тем же каналом (rx по ссылке),
+            // между падением и перезапуском задания копятся в очереди.
+            loop {
+                let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    daemon_loop(&cfg, &rx)
+                }));
+                if guard.is_err() {
+                    log::error!("демон принтера: перезапуск после паники");
+                    set_health(PrinterHealth {
+                        fault: true,
+                        ..health()
+                    });
+                    std::thread::sleep(Duration::from_secs(2));
+                } else {
+                    // Канал закрыт — киоск завершается.
+                    break;
+                }
             }
         })
         .expect("поток принтера");
@@ -471,7 +478,7 @@ fn print_job(
     Ok(())
 }
 
-fn daemon_loop(cfg: &crate::config::Config, rx: mpsc::Receiver<PrinterRequest>) {
+fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>) {
     // Порт открыт между заданиями; при ошибке ввода-вывода закрывается и
     // переоткроется на следующем обращении — так принтер, выключенный на
     // ночь, не оставляет демон в вечном fault. Авария принтера порт не
