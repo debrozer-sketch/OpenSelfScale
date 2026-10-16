@@ -1347,7 +1347,6 @@ export component MainWindow inherits Window {
                 { label: "Оборудование", id: "equip", admin: false },
                 { label: "Сеть", id: "net", admin: true },
                 { label: "Сменить пароль", id: "changepin", admin: true },
-                { label: "Простой до сброса", id: "idletimeout", admin: true },
                 { label: "Выставить 0 / тарировать", id: "zero", admin: false },
                 { label: "Перезагрузка весов", id: "restart", admin: true },
             ];
@@ -1635,7 +1634,7 @@ export component MainWindow inherits Window {
                 x: 0; y: 16px;
                 width: parent.width;
                 height: 34px;
-                text: "Сброс на главный экран, сек (10–600)";
+                text: "Возврат на главный экран, сек (10–600)";
                 font-size: 26px;
                 font-weight: 700;
                 color: #1A1E24;
@@ -1759,6 +1758,30 @@ export component MainWindow inherits Window {
                     Text { text: "✕"; font-size: 26px; font-weight: 700; color: #7A2E2E; }
                     admin-del-ta := TouchArea { clicked => { root.admin-del(r.name); } }
                 }
+            }
+
+            // Таймаут простоя — пункт настроек в этом же разделе, под списком.
+            Rectangle {
+                x: 8px;
+                y: 20px + root.admin-rows.length * 72px;
+                width: parent.width - 16px;
+                height: 64px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: idle-row-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    x: 16px;
+                    width: parent.width - 32px;
+                    height: parent.height;
+                    text: "Возврат на главный экран · " + root.idle-value + " с";
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                idle-row-ta := TouchArea { clicked => { root.menu-tap("idletimeout"); } }
             }
         }
     }

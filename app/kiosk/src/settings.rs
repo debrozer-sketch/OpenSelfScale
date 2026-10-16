@@ -271,7 +271,10 @@ pub fn install(ctx: &AppContext) {
     ui.on_depts_close({
         let kiosk = kiosk.clone();
         move || {
-            kiosk.borrow_mut().admin_stage = 2;
+            // Из «Возврат на главный экран» назад — в этот же раздел
+            // (настройки весов), из остальных экранов — в меню.
+            let mut k = kiosk.borrow_mut();
+            k.admin_stage = if k.admin_stage == 10 { 3 } else { 2 };
         }
     });
     ui.on_admin_up({
@@ -339,7 +342,12 @@ pub fn install(ctx: &AppContext) {
                 }
                 "depts" => {
                     admin_reload();
-                    kiosk.borrow_mut().admin_stage = 3;
+                    let mut k = kiosk.borrow_mut();
+                    // Значение таймаута в строке раздела — актуальное.
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_idle_value(idle_secs.get().to_string().into());
+                    }
+                    k.admin_stage = 3;
                 }
                 "net" => {
                     let (ui, mut k) = (ui_handle.upgrade(), kiosk.borrow_mut());
@@ -492,7 +500,7 @@ pub fn install(ctx: &AppContext) {
                         Ok(Ok(())) => {
                             idle_secs.set(v);
                             log::info!("меню: таймаут простоя {v} с (сохранён в базу)");
-                            k.admin_stage = 2;
+                            k.admin_stage = 3;
                         }
                         Ok(Err(e)) => log::error!("меню: таймаут простоя: запись: {e}"),
                         Err(e) => log::error!("меню: таймаут простоя: база: {e}"),
