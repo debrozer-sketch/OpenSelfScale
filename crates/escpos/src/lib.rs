@@ -172,7 +172,7 @@ impl LabelJob {
             return Err(EscPosError::RasterSize);
         }
         let band = width_bytes as usize * 8;
-        if data.is_empty() || data.len() % band != 0 {
+        if data.is_empty() || !data.len().is_multiple_of(band) {
             return Err(EscPosError::RasterSize);
         }
         let height_units = (data.len() / band) as u8;
@@ -222,12 +222,34 @@ pub fn build_recover(level: u8) -> [u8; 3] {
     [0x10, 0x05, level]
 }
 
+/// Признак настоящего ответа на DLE EOT n. По спецификации ESC/POS в байте
+/// ответа bit0 = 0, bit1 = 1, bit4 = 1, bit7 = 0 (маска 0x93 == 0x12). Все
+/// наблюдавшиеся значения L4 (0x7E, 0x1E, 0x72) этому удовлетворяют, а
+/// посторонние байты в потоке (0x00, 0xFF, 0x03 от GS r, 0x10/0x0F от ASB)
+/// нет. Фильтр по признаку надёжнее списка «известных плохих» байтов.
+pub fn is_valid_l4(byte: u8) -> bool {
+    byte & 0x93 == 0x12
+}
+
+/// Авария по L4: bit2 снят (0x72 против покоя 0x7E/0x1E). Осмысленно только
+/// для валидного ответа (`is_valid_l4`).
+pub fn l4_fault(byte: u8) -> bool {
+    byte & 0x04 == 0
+}
+
 /// Уровень 4 (Custom/Штрих-СлиМ): биты 5-6 = датчик выходного лотка.
-/// Выход занят этикеткой 0x1E (биты 5-6 сняты), выход пуст 0x7E —
+/// Этикетка в выходе: биты сняты (0x1E); лоток пуст: биты стоят (0x7E) —
 /// эмпирика 2026-10-16 (этикетка наполовину вытащена при старте весов).
-/// Возвращает true, когда этикетка снята (лоток свободен).
-pub fn label_awaiting_removal(level4_byte: u8) -> bool {
-    level4_byte & 0x60 != 0
+/// Старое имя `label_awaiting_removal` возвращало обратное значение
+/// (true при ПУСТОМ лотке), из-за чего ожидание снятия этикетки работало
+/// наоборот.
+pub fn label_in_tray(level4_byte: u8) -> bool {
+    level4_byte & 0x60 == 0
+}
+
+/// ESC @ — инициализация принтера (сброс режима, буфера страницы).
+pub fn build_init() -> [u8; 2] {
+    [ESC, b'@']
 }
 
 /// Разбор ответа DLE EOT (1 байт на уровень). Бит-карта — мануал Custom
@@ -238,7 +260,7 @@ pub fn label_awaiting_removal(level4_byte: u8) -> bool {
 ///   L4: норма 0x7E (ленты нет/до датчика) и 0x1E (этикетка в выходе),
 ///       авария 0x72 — bit2 (0x04) снят; датчик рулона в машине
 ///       не подключён (опция по мануалу), поэтому paper_end синтезируем
-///       из bit2, а «этикетка в выходе» — bits 5,6 (см. label_awaiting_removal).
+///       из bit2, а «этикетка в выходе» — bits 5,6 (см. label_in_tray).
 pub fn parse_status(level: u8, byte: u8) -> PrinterStatus {
     match level {
         1 => PrinterStatus {
@@ -303,35 +325,6 @@ impl<P: Read + Write> EscPosPrinter<P> {
         Ok(())
     }
 
-    /// Сырой ответ 0x00/0xFF у Штрих-СлиМ — не валидный статус: принтер ещё
-    /// занят (крутит отрез, режет) либо ответа нет вовсе. Переспрашиваем с
-    /// паузой, иначе вешаем аварию по пустому чтению (попап после удачной
-    /// печати). Датчик рулона не подключён, бити расходника калиброваны по
-    /// дампу — здесь валиден только бит карты из parse_status.
-    pub fn status(&mut self) -> Result<PrinterStatus, EscPosError> {
-        // Уровень 4: бумага (биты 5/6). Уровни 1-3 в боевом пути не нужны,
-        // но build_status_query/parse_status оставлены для отладки.
-        let level = 4u8;
-        for attempt in 0..3 {
-            self.port.write_all(&build_status_query(level))?;
-            self.port.flush()?;
-            let mut b = [0u8; 1];
-            self.port.read_exact(&mut b)?;
-            let st = parse_status(level, b[0]);
-            // 0x00/0xFF — не валидный статус (принтер ещё занят/нет ответа):
-            // переспрашиваем. 0x03 — тоже не покой L4 (покой 0x7E): это
-            // сдвинутый остаток ASB/предыдущей команды, ловим и его.
-            if b[0] != 0x00 && b[0] != 0xFF && b[0] != 0x03 {
-                return Ok(st);
-            }
-            if attempt < 2 {
-                std::thread::sleep(std::time::Duration::from_millis(300));
-            }
-        }
-        // Все три чтения пустые: принтер не отвечает — отдаём аварию.
-        Ok(parse_status(level, 0x00))
-    }
-
     /// DLE ENQ n — восстановление после ошибки. Ответ (1 байт статуса)
     /// прочитывается и отбрасывается: важен сам сигнал, не содержимое.
     pub fn recover(&mut self, level: u8) -> Result<(), EscPosError> {
@@ -343,29 +336,6 @@ impl<P: Read + Write> EscPosPrinter<P> {
             // Принтер мог не ответить — восстановление уже доставлено.
             Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => Ok(()),
             Err(e) => Err(e.into()),
-        }
-    }
-
-    /// Ожидание снятия этикетки: опрос DLE EOT 4, «выдана» = биты 5-6.
-    /// true — снята за `timeout`; false — таймаут (этикетку не сняли).
-    pub fn wait_label_removed(
-        &mut self,
-        poll: std::time::Duration,
-        timeout: std::time::Duration,
-    ) -> Result<bool, EscPosError> {
-        let deadline = std::time::Instant::now() + timeout;
-        let mut b = [0u8; 1];
-        loop {
-            self.port.write_all(&build_status_query(4))?;
-            self.port.flush()?;
-            self.port.read_exact(&mut b)?;
-            if !label_awaiting_removal(b[0]) {
-                return Ok(true);
-            }
-            if std::time::Instant::now() >= deadline {
-                return Ok(false);
-            }
-            std::thread::sleep(poll);
         }
     }
 }
@@ -437,11 +407,35 @@ mod tests {
     }
 
     #[test]
-    fn label_removal_bits_match_live_printer() {
-        // Эмпирика audit/PROTOCOL.md §2: покой 0x1E, выдана 0x7E.
-        assert!(!label_awaiting_removal(0x1E));
-        assert!(label_awaiting_removal(0x7E));
-        assert!(!label_awaiting_removal(0x0E));
+    fn label_tray_bits_match_live_printer() {
+        // Эмпирика 2026-10-16: 0x7E — лоток пуст (покой), 0x1E — этикетка
+        // в выходе, 0x72 — авария (bit2 снят).
+        assert!(!label_in_tray(0x7E));
+        assert!(label_in_tray(0x1E));
+        assert!(!label_in_tray(0x72));
+    }
+
+    #[test]
+    fn l4_validity_filters_stray_bytes() {
+        for ok in [0x7Eu8, 0x1E, 0x72] {
+            assert!(is_valid_l4(ok), "{ok:#04x}");
+        }
+        // 0x03 — ответ GS r 1; 0x00/0xFF — тишина/шум; 0x10, 0x0F — кадр ASB.
+        for bad in [0x00u8, 0xFF, 0x03, 0x10, 0x0F] {
+            assert!(!is_valid_l4(bad), "{bad:#04x}");
+        }
+    }
+
+    #[test]
+    fn l4_fault_only_on_bit2() {
+        assert!(!l4_fault(0x7E));
+        assert!(!l4_fault(0x1E));
+        assert!(l4_fault(0x72));
+    }
+
+    #[test]
+    fn init_frame_is_esc_at() {
+        assert_eq!(build_init(), [0x1B, 0x40]);
     }
 
     fn window<'a>(hay: &'a [u8], needle: &[u8]) -> Option<&'a [u8]> {

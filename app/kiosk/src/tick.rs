@@ -28,7 +28,8 @@ pub fn start(
     // Начальные значения повторяют дефолты UI-свойств (false/0/-1): иначе
     // первый тик с поднятой связью не ставит scales_ok и полоса остаётся
     // красной («Ошибка весов») при работающих весах.
-    let tick_cache: Rc<RefCell<(String, i32, bool, bool, i32, bool)>> =
+    type TickCache = (String, i32, bool, bool, i32, bool);
+    let tick_cache: Rc<RefCell<TickCache>> =
         Rc::new(RefCell::new((String::new(), -1, false, false, -1, false)));
     let timer = slint::Timer::default();
     {
@@ -254,7 +255,7 @@ pub fn start(
                         4 => 7,
                         5 => 8,
                         6 => 9,
-                        7 | 8 | 9 => 10,
+                        7..=9 => 10,
                         10 => 11,
                         _ => 7,
                     };

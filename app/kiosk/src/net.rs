@@ -101,7 +101,7 @@ pub fn validate(
     } else {
         let m: Ipv4Addr = mask.parse().map_err(|_| format!("неверная маска: {mask}"))?;
         let bits = u32::from(m);
-        if (bits.reverse_bits()).trailing_ones() != u32::from(bits).count_ones() {
+        if (bits.reverse_bits()).trailing_ones() != bits.count_ones() {
             return Err(format!("маска не непрерывная: {mask}"));
         }
         bits.count_ones() as u8

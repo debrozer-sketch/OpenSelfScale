@@ -242,99 +242,330 @@ pub fn spawn_daemon(cfg: &crate::config::Config) {
         .expect("поток принтера");
 }
 
+/// Период фонового опроса: в покое, при подозрении на аварию (быстрое
+/// подтверждение/снятие) и пока в лотке лежит этикетка.
+const PROBE_IDLE: Duration = Duration::from_secs(10);
+const PROBE_FAST: Duration = Duration::from_millis(800);
+const PROBE_LABEL: Duration = Duration::from_millis(500);
+/// Дольше этого лоток опрашивается обычным периодом: этикетку могли оставить.
+const LABEL_WATCH_MAX: Duration = Duration::from_secs(60);
+/// Сколько подряд замеров с аварийным L4 нужно для поднятия fault. Одиночный
+/// сбойный замер не показывает покупателю попап.
+const FAULT_CONFIRM: u8 = 2;
+/// Сколько подряд замеров без валидного ответа считать обрывом связи.
+const SILENT_CONFIRM: u8 = 3;
+/// Сколько ждать выдачи этикетки после задания (ожидание — для контроля
+/// аварии и журнала, не для блокировки покупателя дольше необходимого).
+const PRESENT_WAIT: Duration = Duration::from_secs(6);
+/// Таймаут чтения одного ответа DLE EOT (реальный ответ — единицы мс).
+const L4_READ_TIMEOUT: Duration = Duration::from_millis(300);
+
+/// Причина отказа операции порта: Io — порт сломан, его закрывают и
+/// переоткрывают; Printer — порт жив, принтер сообщил аварию/не готов.
+enum Fail {
+    Io(String),
+    Printer(String),
+}
+
+impl Fail {
+    fn io(e: impl std::fmt::Display) -> Self {
+        Fail::Io(e.to_string())
+    }
+    fn text(self) -> String {
+        match self {
+            Fail::Io(s) | Fail::Printer(s) => s,
+        }
+    }
+}
+
+/// Накопитель замеров L4 → здоровье принтера с подтверждением. Один замер
+/// ничего не решает: авария = FAULT_CONFIRM аварийных подряд, обрыв связи =
+/// SILENT_CONFIRM пустых подряд.
+#[derive(Default)]
+struct Monitor {
+    fault_streak: u8,
+    silent_streak: u8,
+    label_since: Option<std::time::Instant>,
+    health: PrinterHealth,
+}
+
+impl Monitor {
+    /// Учесть замер (None — валидного ответа не было) и опубликовать здоровье.
+    fn feed(&mut self, sample: Option<u8>) {
+        match sample {
+            Some(b) => {
+                self.silent_streak = 0;
+                self.fault_streak =
+                    if escpos::l4_fault(b) { self.fault_streak.saturating_add(1) } else { 0 };
+                self.health.fault = self.fault_streak >= FAULT_CONFIRM;
+                let in_tray = escpos::label_in_tray(b);
+                if in_tray && !self.health.label_waiting {
+                    self.label_since = Some(std::time::Instant::now());
+                }
+                if !in_tray {
+                    self.label_since = None;
+                }
+                self.health.label_waiting = in_tray;
+            }
+            None => {
+                self.silent_streak = self.silent_streak.saturating_add(1);
+                if self.silent_streak >= SILENT_CONFIRM {
+                    self.health.fault = true;
+                    self.health.label_waiting = false;
+                    self.label_since = None;
+                }
+            }
+        }
+        set_health(self.health);
+    }
+
+    /// Отказ операции: сразу считаем аварию подтверждённой; ближайший быстрый
+    /// опрос её снимет, если принтер на деле в порядке.
+    fn note_failure(&mut self) {
+        self.fault_streak = FAULT_CONFIRM;
+        self.health.fault = true;
+        set_health(self.health);
+    }
+
+    fn next_probe(&self) -> Duration {
+        if self.fault_streak > 0 || self.silent_streak > 0 {
+            PROBE_FAST
+        } else if self.label_since.is_some_and(|t| t.elapsed() < LABEL_WATCH_MAX) {
+            PROBE_LABEL
+        } else {
+            PROBE_IDLE
+        }
+    }
+}
+
+fn fmt_l4(s: Option<u8>) -> String {
+    s.map_or_else(|| "нет ответа".to_string(), |b| format!("{b:#04X}"))
+}
+
+/// Один замер L4 с жёсткой фильтрацией. Перед КАЖДОЙ попыткой входной буфер
+/// сбрасывается (иначе ответ читается со сдвигом), принимается только байт,
+/// похожий на ответ DLE EOT (`is_valid_l4`); посторонние байты и тишина —
+/// не авария, а повод повторить. None — валидного ответа не получено.
+fn read_l4(port: &mut Box<dyn serialport::SerialPort>, attempts: u32) -> Option<u8> {
+    let prev = port.timeout();
+    let _ = port.set_timeout(L4_READ_TIMEOUT);
+    let mut out = None;
+    for i in 0..attempts {
+        drain_port_rx(port);
+        if port.write_all(&escpos::build_status_query(4)).is_err() || port.flush().is_err() {
+            break;
+        }
+        let mut b = [0u8; 1];
+        match Read::read(port.as_mut(), &mut b) {
+            Ok(1) if escpos::is_valid_l4(b[0]) => {
+                out = Some(b[0]);
+                break;
+            }
+            Ok(1) => log::debug!("принтер: посторонний байт вместо L4: {:#04X}", b[0]),
+            _ => {}
+        }
+        if i + 1 < attempts {
+            std::thread::sleep(Duration::from_millis(120));
+        }
+    }
+    let _ = port.set_timeout(prev);
+    out
+}
+
+/// Лестница восстановления после аварии. Каждый шаг журналируется вместе с
+/// L4 после него: по журналу видно, какой шаг (если какой-то) снимает
+/// конкретную аварию. Возвращает L4 первого шага, после которого аварии нет.
+fn recover_printer(port: &mut Box<dyn serialport::SerialPort>) -> Option<u8> {
+    let steps: [(&str, Vec<u8>); 3] = [
+        ("DLE ENQ 1", escpos::build_recover(1).to_vec()),
+        ("DLE ENQ 2", escpos::build_recover(2).to_vec()),
+        ("ESC @", escpos::build_init().to_vec()),
+    ];
+    for (name, cmd) in steps {
+        if port.write_all(&cmd).is_err() || port.flush().is_err() {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(400));
+        let s = read_l4(port, 3);
+        log::info!("принтер: восстановление {name} → L4 = {}", fmt_l4(s));
+        if let Some(b) = s {
+            if !escpos::l4_fault(b) {
+                return Some(b);
+            }
+        }
+    }
+    None
+}
+
+/// Готовность перед заданием: при аварии — лестница восстановления; если
+/// принтер всё ещё в аварии, задание НЕ отправляется (в ошибке оно молча
+/// теряется, а покупатель получил бы «Готово» без этикетки).
+fn ensure_ready(port: &mut Box<dyn serialport::SerialPort>) -> Result<(), Fail> {
+    match read_l4(port, 3) {
+        Some(b) if escpos::l4_fault(b) => {
+            log::warn!("принтер: авария до печати (L4 = {b:#04X}), пробую восстановить");
+            match recover_printer(port) {
+                Some(_) => Ok(()),
+                None => Err(Fail::Printer(
+                    "принтер в аварии: проверьте ленту/крышку, при необходимости перезапустите питание".into(),
+                )),
+            }
+        }
+        Some(_) => Ok(()),
+        // Нет валидного ответа — не блокируем печать: ответ мог потеряться,
+        // итог покажет контроль после задания.
+        None => {
+            log::warn!("принтер: нет ответа на статус перед печатью, печатаю без предпроверки");
+            Ok(())
+        }
+    }
+}
+
+/// Печать задания с контролем: предпроверка → запись → ожидание выдачи
+/// этикетки (L4 раз в 250 мс). Две аварийные пробы подряд = отказ. Ожидание
+/// снятия этикетки здесь не делается: его ведёт фоновый опрос (Monitor), и
+/// следующий покупатель не ждёт, пока заберут предыдущую этикетку.
+fn print_job(
+    port: &mut Box<dyn serialport::SerialPort>,
+    bytes: &[u8],
+    mon: &mut Monitor,
+) -> Result<(), Fail> {
+    ensure_ready(port)?;
+    drain_port_rx(port);
+    port.write_all(bytes).map_err(Fail::io)?;
+    port.flush().map_err(Fail::io)?;
+    let t0 = std::time::Instant::now();
+    let mut trace = String::new();
+    let mut fault_hits = 0u8;
+    let mut presented = false;
+    let mut last = None;
+    while t0.elapsed() < PRESENT_WAIT {
+        std::thread::sleep(Duration::from_millis(250));
+        let s = read_l4(port, 1);
+        trace.push_str(&format!("{}ms:{} ", t0.elapsed().as_millis(), fmt_l4(s)));
+        match s {
+            Some(b) if escpos::l4_fault(b) => {
+                fault_hits += 1;
+                if fault_hits >= FAULT_CONFIRM {
+                    log::warn!("принтер: авария во время печати, трасса L4: {trace}");
+                    return Err(Fail::Printer(format!(
+                        "авария принтера во время печати (L4 = {b:#04X})"
+                    )));
+                }
+            }
+            Some(b) => {
+                fault_hits = 0;
+                last = Some(b);
+                if escpos::label_in_tray(b) {
+                    presented = true;
+                    break;
+                }
+            }
+            None => {}
+        }
+    }
+    // Трасса — материал для калибровки: по ней видно, как L4 ведёт себя от
+    // записи задания до выдачи этикетки.
+    log::info!("принтер: печать завершена, выдана={presented}, трасса L4: {trace}");
+    mon.feed(last);
+    Ok(())
+}
+
 fn daemon_loop(cfg: &crate::config::Config, rx: mpsc::Receiver<PrinterRequest>) {
-    // Порт открыт между заданиями; при ошибке закрывается и переоткроется
-    // на следующем обращении — так принтер, выключенный на ночь, не
-    // оставляет демон в вечном fault.
+    // Порт открыт между заданиями; при ошибке ввода-вывода закрывается и
+    // переоткроется на следующем обращении — так принтер, выключенный на
+    // ночь, не оставляет демон в вечном fault. Авария принтера порт не
+    // закрывает: принтер отвечает, порт исправен.
     let mut prn: Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>> = None;
+    let mut mon = Monitor::default();
     loop {
-        match rx.recv_timeout(Duration::from_secs(10)) {
+        match rx.recv_timeout(mon.next_probe()) {
             Ok(PrinterRequest::Print { bytes, ack }) => {
-                let res = with_port(cfg, &mut prn, |prn| {
-                    prn.port_mut().write_all(&bytes).map_err(|e| e.to_string())?;
-                    prn.port_mut().flush().map_err(|e| e.to_string())?;
-                    drain_port_rx(prn.port_mut());
-                    let st = prn.status().map_err(|e| e.to_string())?;
-                    log::info!("статус принтера после печати: {st:?}");
-                    update_health(&st, !escpos::label_awaiting_removal(st.raw_byte));
-                    match prn.wait_label_removed(
-                        Duration::from_millis(500),
-                        Duration::from_secs(15),
-                    ) {
-                        Ok(true) => {}
-                        Ok(false) => {
-                            log::warn!("принтер: этикетка не снята за 15 с — печать продолжится по факту")
-                        }
-                        Err(e) => log::warn!("принтер: ожидание снятия этикетки прервано: {e}"),
-                    }
-                    Ok(())
-                });
+                let res = with_port(cfg, &mut prn, |p| print_job(p.port_mut(), &bytes, &mut mon));
+                if res.is_err() {
+                    mon.note_failure();
+                }
                 finish(ack, res, "печать");
             }
             Ok(PrinterRequest::Feed { ack }) => {
-                let res = with_port(cfg, &mut prn, |prn| {
-                    write_recover_first(prn.port_mut()).map_err(|e| e.to_string())?;
-                    prn.port_mut().write_all(&[escpos::GS, escpos::FF]).map_err(|e| e.to_string())?;
-                    prn.port_mut().flush().map_err(|e| e.to_string())?;
+                let res = with_port(cfg, &mut prn, |p| {
+                    let port = p.port_mut();
+                    ensure_ready(port)?;
+                    port.write_all(&[escpos::GS, escpos::FF]).map_err(Fail::io)?;
+                    port.flush().map_err(Fail::io)?;
                     log::info!("принтер: подача до метки");
-                    match prn.status().map(|s| s.raw_byte) {
-                        Ok(b) => log::info!("принтер: статус после подачи: DLE EOT 4 = {b:#04X}"),
-                        Err(e) => log::warn!("принтер: статус после подачи не прочитан: {e}"),
-                    }
+                    std::thread::sleep(Duration::from_millis(500));
+                    let s = read_l4(port, 2);
+                    log::info!("принтер: после подачи L4 = {}", fmt_l4(s));
+                    mon.feed(s);
                     Ok(())
                 });
+                if res.is_err() {
+                    mon.note_failure();
+                }
                 finish(ack, res, "подача");
             }
             Ok(PrinterRequest::Test { bytes, ack }) => {
-                let res = with_port(cfg, &mut prn, |prn| {
-                    write_recover_first(prn.port_mut()).map_err(|e| e.to_string())?;
-                    prn.port_mut().write_all(&bytes).map_err(|e| e.to_string())?;
-                    prn.port_mut().flush().map_err(|e| e.to_string())?;
+                let res = with_port(cfg, &mut prn, |p| {
+                    let port = p.port_mut();
+                    ensure_ready(port)?;
+                    drain_port_rx(port);
+                    port.write_all(&bytes).map_err(Fail::io)?;
+                    port.flush().map_err(Fail::io)?;
                     log::info!("принтер: тестовая этикетка напечатана");
-                    match prn.status().map(|s| s.raw_byte) {
-                        Ok(b) => log::info!("принтер: статус после теста: DLE EOT 4 = {b:#04X}"),
-                        Err(e) => log::warn!("принтер: статус после теста не прочитан: {e}"),
-                    }
+                    std::thread::sleep(Duration::from_millis(800));
+                    let s = read_l4(port, 2);
+                    log::info!("принтер: после теста L4 = {}", fmt_l4(s));
+                    mon.feed(s);
                     Ok(())
                 });
+                if res.is_err() {
+                    mon.note_failure();
+                }
                 finish(ack, res, "тестовая печать");
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                idle_probe(cfg, &mut prn);
+                probe(cfg, &mut prn, &mut mon);
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
 }
 
-type PortResult<T> = Result<T, String>;
-
 fn with_port(
     cfg: &crate::config::Config,
     prn: &mut Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>>,
-    f: impl FnOnce(&mut escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>) -> PortResult<()>,
-) -> PortResult<()> {
+    f: impl FnOnce(&mut escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>) -> Result<(), Fail>,
+) -> Result<(), String> {
     if prn.is_none() {
         let port = serialport::new(&cfg.printer.port, cfg.printer.baud)
             .timeout(Duration::from_millis(1500))
             .open()
-            .map_err(|e| format!("{}: {e}", cfg.printer.port))?;
+            .map_err(|e| {
+                set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
+                format!("{}: {e}", cfg.printer.port)
+            })?;
         *prn = Some(escpos::EscPosPrinter::new(port));
     }
     let res = match prn.as_mut() {
         Some(p) => f(p),
-        None => Err("порт принтера не открыт".into()),
+        None => Err(Fail::Io("порт принтера не открыт".into())),
     };
-    if res.is_err() {
-        // Битое состояние порта не лечится на месте: закрыть, следующий
-        // запрос переоткроет с чистыми буферами.
-        *prn = None;
-        set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
+    match res {
+        Ok(()) => Ok(()),
+        Err(Fail::Io(e)) => {
+            // Порт сломан и не лечится на месте: закрыть, следующий запрос
+            // переоткроет с чистыми буферами.
+            *prn = None;
+            set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
+            Err(e)
+        }
+        // Порт исправен — принтер сообщил аварию: порт не трогаем.
+        Err(f @ Fail::Printer(_)) => Err(f.text()),
     }
-    res
 }
 
-fn finish(ack: mpsc::Sender<Result<(), String>>, res: PortResult<()>, what: &str) {
+fn finish(ack: mpsc::Sender<Result<(), String>>, res: Result<(), String>, what: &str) {
     let out = res.map_err(|e| {
         log::warn!("принтер: {what}: {e}");
         e
@@ -342,162 +573,95 @@ fn finish(ack: mpsc::Sender<Result<(), String>>, res: PortResult<()>, what: &str
     let _ = ack.send(out);
 }
 
-/// Опрос на простое: статус + детект заправки бумаги (paper_end true →
-/// false) с авто-recovery DLE ENQ 1, иначе принтер остаётся в error
-/// до перезапуска (эмпирика PROTOCOL.md §2).
-fn idle_probe(
+/// Фоновый опрос: один замер L4 (при `[printer].debug_dump = true` ещё и
+/// полный диагностический дамп). Результат проходит через Monitor.
+fn probe(
     cfg: &crate::config::Config,
     prn: &mut Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>>,
+    mon: &mut Monitor,
 ) {
     let res = with_port(cfg, prn, |p| {
-        // Сброс входного буфера. ASB у Custom — это FULL STATUS BACK
-        // (0x1D 0xE0), НЕ Epson-овский GS a: его ВКЛЮЧАЕМ (все компоненты,
-        // маска 0x0F) — при изменении датчиков принтер сам шлёт кадр
-        // 0x10 0x0F paper user recoverable unrecoverable.
-        p.port_mut().set_timeout(Duration::from_millis(30)).map_err(|e| e.to_string())?;
-        let mut sink = [0u8; 64];
-        loop {
-            match std::io::Read::read(p.port_mut(), &mut sink) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {}
-            }
+        let port = p.port_mut();
+        if cfg.printer.debug_dump {
+            debug_dump(port);
         }
-        p.port_mut().write_all(&[0x1D, 0xE0, 0x0F]).map_err(|e| e.to_string())?;
-        p.port_mut().flush().map_err(|e| e.to_string())?;
-        std::thread::sleep(Duration::from_millis(50));
-        loop {
-            match std::io::Read::read(p.port_mut(), &mut sink) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {}
-            }
+        let s = read_l4(port, 2);
+        if s.is_none() || s.is_some_and(escpos::l4_fault) {
+            log::info!("принтер: замер L4 = {}", fmt_l4(s));
         }
-        p.port_mut().set_timeout(Duration::from_millis(200)).map_err(|e| e.to_string())?;
-        // Калибровочный дамп: после каждой команды собираем ВСЕ байты
-        // ответа до таймаута — форма ответа прошивки Штрих-СлиМ
-        // (сколько байтов на DLE EOT) фиксируется здесь.
-        let mut dump = String::new();
-        let mut last4 = [0u8; 4];
-        let cmds: [(&str, Vec<u8>); 7] = [
-            ("L1", escpos::build_status_query(1).to_vec()),
-            ("L2", escpos::build_status_query(2).to_vec()),
-            ("L3", escpos::build_status_query(3).to_vec()),
-            ("L4", escpos::build_status_query(4).to_vec()),
-            ("GSR", vec![escpos::GS, b'r', 1]),
-            ("ESCV", vec![escpos::ESC, b'v']),
-            // Остаток ленты до виртуального конца: ответ ASCII «NNNcm».
-            ("E1", vec![0x1D, 0xE1]),
-        ];
-        for (i, (name, cmd)) in cmds.iter().enumerate() {
-            p.port_mut().write_all(cmd).map_err(|e| e.to_string())?;
-            p.port_mut().flush().map_err(|e| e.to_string())?;
-            let mut got = Vec::new();
-            let mut b = [0u8; 1];
-            let limit = if *name == "E1" { 16 } else { 8 };
-            while got.len() < limit {
-                match std::io::Read::read(p.port_mut(), &mut b) {
-                    Ok(1) => got.push(b[0]),
-                    _ => break,
-                }
-            }
-            if !dump.is_empty() {
-                dump.push(' ');
-            }
-            if *name == "E1" {
-                let text = String::from_utf8_lossy(&got).into_owned();
-                dump.push_str(&format!("{name}=\"{text}\""));
-            } else {
-                dump.push_str(&format!("{name}=[{}]", got.iter().map(|v| format!("{v:#04X}")).collect::<Vec<_>>().join(" ")));
-            }
-            if i < 4 {
-                last4[i] = *got.last().unwrap_or(&0);
-            }
-        }
-        // Пассивное чтение самопроизвольного кадра FULL STATUS BACK
-        // (0x10 0x0F ...): приходит при изменении датчиков.
-        let mut b = [0u8; 1];
-        let mut fsb = Vec::new();
-        while fsb.len() < 16 {
-            match std::io::Read::read(p.port_mut(), &mut b) {
-                Ok(1) => fsb.push(b[0]),
-                _ => break,
-            }
-        }
-        if !fsb.is_empty() {
-            dump.push_str(&format!(" FSB=[{}]", fsb.iter().map(|v| format!("{v:#04X}")).collect::<Vec<_>>().join(" ")));
-        }
-        let st = escpos::parse_status(4, last4[3]);
-        // Fault по трём каналам (любой поднимает): L1 offline (bit3),
-        // L2 error (bit6), L4 авария (bit2 снят). Норма — все чистые.
-        let mut h = st;
-        h.printer_offline = st.printer_offline
-            || escpos::parse_status(1, last4[0]).printer_offline
-            || escpos::parse_status(2, last4[1]).printer_offline;
-        let was = PAPER_WAS_END.swap(st.paper_end, std::sync::atomic::Ordering::Relaxed);
-        if was && !st.paper_end {
-            match p.recover(1).map_err(|e| e.to_string()) {
-                Ok(()) => log::info!("принтер: заправка бумаги — послан DLE ENQ 1"),
-                Err(e) => log::warn!("принтер: DLE ENQ 1 не прошёл: {e}"),
-            }
-        }
-        // Калибровка датчиков: дамп пишется в лог каждый тик (сравнение
-        // состояний «лента есть/нет/в зоне» делается по журналу вручную).
-        log::info!("принтер: дамп: {dump}");
-        // Выходной лоток: биты 5-6 L4 сняты — в лотке этикетка.
-        let label_waiting = !escpos::label_awaiting_removal(last4[3]);
-        update_health(&h, label_waiting);
-        log::info!(
-            "принтер: health: fault={} label={} raw4={:#04X}",
-            h.printer_offline, label_waiting, last4[3]
-        );
+        mon.feed(s);
         Ok(())
     });
     if let Err(e) = res {
+        // Порт не открылся/сломан: with_port уже поднял fault и закрыл порт.
         log::warn!("опрос статуса принтера: {e}");
-        // Принтер в аварии (нет ленты / зажеван) не отвечает и остаётся
-        // в error до перезагрузки. Пытаемся выйти DLE ENQ 1: сигнал
-        // доставляется даже если ответ не придёт (recover трактует
-        // таймаут как успех).
-        if with_port(cfg, prn, |p| {
-            match p.recover(1).map_err(|e| e.to_string()) {
-                Ok(()) => {
-                    log::info!("принтер: авария/нет ответа — послан DLE ENQ 1 (попытка выхода)");
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            }
-        })
-        .is_err()
-        {
-            log::warn!("принтер: DLE ENQ 1 тоже не прошёл — нужна перезагрузка");
-        }
+        mon.note_failure();
     }
 }
 
-fn update_health(st: &escpos::PrinterStatus, label_waiting: bool) {
-    set_health(PrinterHealth {
-        fault: st.printer_offline,
-        paper_end: st.paper_end,
-        paper_near_end: st.paper_near_end,
-        label_waiting,
-    });
+/// Диагностический дамп (только по `debug_dump`): ответы на все запросы
+/// статуса и самопроизвольный кадр FULL STATUS BACK. Нужен для разбора
+/// аварий (в аварийном состоянии кадр говорит, восстановима ли ошибка
+/// программно). ASB (`1D E0 0F`) включается ТОЛЬКО здесь: посторонние
+/// кадры в потоке ломают схему «запрос-ответ». Состояние ASB держится до
+/// выключения питания принтера.
+fn debug_dump(port: &mut Box<dyn serialport::SerialPort>) {
+    let prev = port.timeout();
+    let _ = port.set_timeout(Duration::from_millis(200));
+    let mut sink = [0u8; 64];
+    drain_port_rx(port);
+    let _ = port.write_all(&[0x1D, 0xE0, 0x0F]);
+    let _ = port.flush();
+    std::thread::sleep(Duration::from_millis(50));
+    drain_port_rx(port);
+    let cmds: [(&str, Vec<u8>); 7] = [
+        ("L1", escpos::build_status_query(1).to_vec()),
+        ("L2", escpos::build_status_query(2).to_vec()),
+        ("L3", escpos::build_status_query(3).to_vec()),
+        ("L4", escpos::build_status_query(4).to_vec()),
+        ("GSR", vec![escpos::GS, b'r', 1]),
+        ("ESCV", vec![escpos::ESC, b'v']),
+        // Остаток ленты до виртуального конца: ответ ASCII «NNNcm».
+        ("E1", vec![0x1D, 0xE1]),
+    ];
+    let mut dump = String::new();
+    for (name, cmd) in &cmds {
+        let _ = port.write_all(cmd);
+        let _ = port.flush();
+        let limit = if *name == "E1" { 16 } else { 8 };
+        let mut got = Vec::new();
+        let mut b = [0u8; 1];
+        while got.len() < limit {
+            match Read::read(port.as_mut(), &mut b) {
+                Ok(1) => got.push(b[0]),
+                _ => break,
+            }
+        }
+        if *name == "E1" {
+            dump.push_str(&format!("{name}=\"{}\" ", String::from_utf8_lossy(&got)));
+        } else {
+            let hex: Vec<String> = got.iter().map(|v| format!("{v:#04X}")).collect();
+            dump.push_str(&format!("{name}=[{}] ", hex.join(" ")));
+        }
+    }
+    // Самопроизвольный кадр FULL STATUS BACK (0x10 0x0F ...).
+    let mut fsb = Vec::new();
+    while fsb.len() < 16 {
+        match Read::read(port.as_mut(), &mut sink[..1]) {
+            Ok(1) => fsb.push(sink[0]),
+            _ => break,
+        }
+    }
+    if !fsb.is_empty() {
+        let hex: Vec<String> = fsb.iter().map(|v| format!("{v:#04X}")).collect();
+        dump.push_str(&format!("FSB=[{}]", hex.join(" ")));
+    }
+    log::info!("принтер: дамп: {dump}");
+    let _ = port.set_timeout(prev);
 }
 
-/// Память прошлого опроса для детекта заправки бумаги
-/// (paper_end true → false): в этот момент принтеру нужен DLE ENQ 1.
-static PAPER_WAS_END: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Реалтайм-recovery перед ручными заданиями меню: если принтер сидит в
-/// устранимой ошибке (наблюдалось 2026-10-15: «этикетка выдана» + error-биты
-/// без видимой причины), любое задание молча игнорируется. DLE ENQ 1 без
-/// ошибки бездействует, с ошибкой — перезапускает печать.
-fn write_recover_first(port: &mut dyn std::io::Write) -> std::io::Result<()> {
-    port.write_all(&escpos::build_recover(1))?;
-    port.flush()
-}
-
-/// Слить входной буфер порта перед status(): idle-опрос (ASB/GS r/статусные
-/// байты) может оставить остаток, который status() иначе прочитает как свой
-/// ответ (сырой 0x03 вместо покойного 0x7E → ложная авария после печати).
+/// Слить входной буфер порта: любой остаток (посторонний байт, поздний
+/// ответ) иначе будет прочитан как ответ на следующий запрос.
 fn drain_port_rx(port: &mut Box<dyn serialport::SerialPort>) {
     let cur = port.timeout();
     if port.set_timeout(Duration::from_millis(30)).is_ok() {

@@ -65,11 +65,21 @@ pub struct PrinterProfile {
     /// Принтер установлен на платформе. false — стенд без принтера:
     /// не опрашивать статус и не краснить полосу.
     pub enabled: bool,
+    /// Подробный диагностический дамп статусов в журнал при каждом опросе
+    /// (разбор аварий). В боевом режиме выключен: дамп включает ASB принтера
+    /// и занимает порт почти на 2 с каждые 10 с.
+    pub debug_dump: bool,
 }
 
 impl Default for PrinterProfile {
     fn default() -> Self {
-        Self { kind: "escpos".into(), port: "/dev/ttyS3".into(), baud: 19_200, enabled: true }
+        Self {
+            kind: "escpos".into(),
+            port: "/dev/ttyS3".into(),
+            baud: 19_200,
+            enabled: true,
+            debug_dump: false,
+        }
     }
 }
 
