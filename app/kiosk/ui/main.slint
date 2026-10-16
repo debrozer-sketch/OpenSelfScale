@@ -284,6 +284,11 @@ export component MainWindow inherits Window {
     in property <bool> printer-fault: false;
     // Этикет-лента: 0 в норме, 1 заканчивается, 2 закончилась.
     in property <int> paper-state: 0;
+    // Модальная блокировка «лента закончилась»: закрывается сама, когда
+    // фоновый опрос снова отвечает (заправка + протяжка выполнены).
+    in property <bool> paper-popup-open: false;
+    // В выходном лотке лежит напечатанная этикетка (датчик лотка).
+    in property <bool> label-waiting: false;
     // 0 покой, 1 ожидание стабилизации, 2 печать, 3 готово, 4 ошибка принтера
     in property <int> phase: 0;
     in property <string> status-text: "";
@@ -422,6 +427,7 @@ export component MainWindow inherits Window {
         height: 20px;
         background: root.printer-fault || !root.scales-ok || status-level == 2 ? #E23B3B
                   : root.paper-state != 0 ? #F6D9A0
+                  : root.label-waiting ? #F6D9A0
                   : status-level == 1 ? #F5E3BC : #D8EEDF;
         Text {
             x: 16px;
@@ -430,6 +436,7 @@ export component MainWindow inherits Window {
                         text: root.status-text != "" ? root.status-text
                 : !root.scales-ok ? "Ошибка весов. Позовите сотрудника"
                 : root.printer-fault ? "Ошибка печати. Позовите сотрудника"
+                : root.label-waiting ? "Уберите этикетку из лотка"
                 : root.paper-state == 2 ? "Лента закончилась. Позовите сотрудника"
                 : root.paper-state == 1 ? "Лента заканчивается" : "";
             font-size: 13px;
@@ -1060,6 +1067,45 @@ export component MainWindow inherits Window {
                     enabled: !root.popup-empty && root.weight-state == 2;
                     clicked => { root.plu-confirm(); }
                 }
+            }
+        }
+    }
+
+    // ---------- Модальное окно «лента закончилась» ----------
+    // Верхний уровень окна (вне экранов и админ-оверлея), иначе не видно
+    // на покупательских экранах. Показ при fault (screen <= 3): тапы не
+    // проходят сквозь. Уходит сам после заправки и перезагрузки весов
+    // (опрос статуса снова отвечает).
+    if root.paper-popup-open && root.screen <= 3 : Rectangle {
+        x: 0; y: 0;
+        width: root.width;
+        height: root.height;
+        background: rgba(10, 14, 20, 0.6);
+        paper-popup-ta := TouchArea { }
+        Rectangle {
+            x: (root.width - 640px) / 2;
+            y: (root.height - 330px) / 2;
+            width: 640px;
+            height: 330px;
+            border-radius: 18px;
+            background: #FFFFFF;
+            Text {
+                x: 32px;
+                y: 30px;
+                width: parent.width - 64px;
+                text: "Закончилась бумага в принтере";
+                font-size: 30px;
+                font-weight: 700;
+                color: #C0392B;
+            }
+            Text {
+                x: 32px;
+                y: 110px;
+                width: parent.width - 64px;
+                text: "Проверьте ленту в принтере и перезаправьте, если нужно.\nЗатем выключите весы на несколько секунд и включите обратно.";
+                font-size: 22px;
+                color: #2B2F36;
+                wrap: word-wrap;
             }
         }
     }

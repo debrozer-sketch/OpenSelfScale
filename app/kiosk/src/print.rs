@@ -2,6 +2,7 @@
 //! Координаты — из шаблона этикетки (потом придут из центра), пока
 //! зашита совместимая раскладка, снятая с живого дампа (PROTOCOL.md §2).
 
+use std::io::Read;
 use std::time::Duration;
 
 use datastore::PluItem;
@@ -153,13 +154,15 @@ fn utc_stamp(secs: i64) -> (String, String) {
 }
 
 /// Состояние принтера для индикации: fault — не отвечает/офлайн,
-/// paper_* — расходник (этикет-лента). Дефолт — всё false: до первого
+/// paper_* — расходник (этикет-лента), label_waiting — в выходном
+/// лотке лежит напечатанная этикетка. Дефолт — всё false: до первого
 /// опроса не пугаем продавца красным.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PrinterHealth {
     pub fault: bool,
     pub paper_end: bool,
     pub paper_near_end: bool,
+    pub label_waiting: bool,
 }
 
 /// Запрос демону принтера. Порт — его собственность, обращаться только
@@ -237,9 +240,10 @@ fn daemon_loop(cfg: &crate::config::Config, rx: mpsc::Receiver<PrinterRequest>) 
                 let res = with_port(cfg, &mut prn, |prn| {
                     prn.port_mut().write_all(&bytes).map_err(|e| e.to_string())?;
                     prn.port_mut().flush().map_err(|e| e.to_string())?;
+                    drain_port_rx(prn.port_mut());
                     let st = prn.status().map_err(|e| e.to_string())?;
                     log::info!("статус принтера после печати: {st:?}");
-                    update_health(&st);
+                    update_health(&st, !escpos::label_awaiting_removal(st.raw_byte));
                     match prn.wait_label_removed(
                         Duration::from_millis(500),
                         Duration::from_secs(15),
@@ -333,9 +337,10 @@ fn idle_probe(
     prn: &mut Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>>,
 ) {
     let res = with_port(cfg, prn, |p| {
-        // Сброс входного буфера и гашение автопередачи статуса (ASB, GS a 0):
-        // после операций принтер сам шлёт байты статуса, они вклиниваются
-        // в ответы на запросы и сдвигают фазу чтения (наблюдалось 2026-10-16).
+        // Сброс входного буфера. ASB у Custom — это FULL STATUS BACK
+        // (0x1D 0xE0), НЕ Epson-овский GS a: его ВКЛЮЧАЕМ (все компоненты,
+        // маска 0x0F) — при изменении датчиков принтер сам шлёт кадр
+        // 0x10 0x0F paper user recoverable unrecoverable.
         p.port_mut().set_timeout(Duration::from_millis(30)).map_err(|e| e.to_string())?;
         let mut sink = [0u8; 64];
         loop {
@@ -344,34 +349,76 @@ fn idle_probe(
                 Ok(_) => {}
             }
         }
-        p.port_mut().write_all(&[escpos::GS, b'a', 0]).map_err(|e| e.to_string())?;
+        p.port_mut().write_all(&[0x1D, 0xE0, 0x0F]).map_err(|e| e.to_string())?;
         p.port_mut().flush().map_err(|e| e.to_string())?;
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(50));
         loop {
             match std::io::Read::read(p.port_mut(), &mut sink) {
                 Ok(0) | Err(_) => break,
                 Ok(_) => {}
             }
         }
-        p.port_mut().set_timeout(Duration::from_millis(1500)).map_err(|e| e.to_string())?;
-        // Дамп всех каналов статуса: DLE EOT 1-4 не отражают датчик ленты
-        // на этом принтере — добавлены GS r 1 (датчик бумаги) и ESC v
-        // (сводный статус). Ищем живые биты по дампу.
-        let mut raw = [0u8; 6];
-        for (i, level) in [1u8, 2, 3, 4].iter().enumerate() {
-            p.port_mut()
-                .write_all(&escpos::build_status_query(*level))
-                .map_err(|e| e.to_string())?;
+        p.port_mut().set_timeout(Duration::from_millis(200)).map_err(|e| e.to_string())?;
+        // Калибровочный дамп: после каждой команды собираем ВСЕ байты
+        // ответа до таймаута — форма ответа прошивки Штрих-СлиМ
+        // (сколько байтов на DLE EOT) фиксируется здесь.
+        let mut dump = String::new();
+        let mut last4 = [0u8; 4];
+        let cmds: [(&str, Vec<u8>); 7] = [
+            ("L1", escpos::build_status_query(1).to_vec()),
+            ("L2", escpos::build_status_query(2).to_vec()),
+            ("L3", escpos::build_status_query(3).to_vec()),
+            ("L4", escpos::build_status_query(4).to_vec()),
+            ("GSR", vec![escpos::GS, b'r', 1]),
+            ("ESCV", vec![escpos::ESC, b'v']),
+            // Остаток ленты до виртуального конца: ответ ASCII «NNNcm».
+            ("E1", vec![0x1D, 0xE1]),
+        ];
+        for (i, (name, cmd)) in cmds.iter().enumerate() {
+            p.port_mut().write_all(cmd).map_err(|e| e.to_string())?;
             p.port_mut().flush().map_err(|e| e.to_string())?;
-            p.port_mut().read_exact(&mut raw[i..i + 1]).map_err(|e| e.to_string())?;
+            let mut got = Vec::new();
+            let mut b = [0u8; 1];
+            let limit = if *name == "E1" { 16 } else { 8 };
+            while got.len() < limit {
+                match std::io::Read::read(p.port_mut(), &mut b) {
+                    Ok(1) => got.push(b[0]),
+                    _ => break,
+                }
+            }
+            if !dump.is_empty() {
+                dump.push(' ');
+            }
+            if *name == "E1" {
+                let text = String::from_utf8_lossy(&got).into_owned();
+                dump.push_str(&format!("{name}=\"{text}\""));
+            } else {
+                dump.push_str(&format!("{name}=[{}]", got.iter().map(|v| format!("{v:#04X}")).collect::<Vec<_>>().join(" ")));
+            }
+            if i < 4 {
+                last4[i] = *got.last().unwrap_or(&0);
+            }
         }
-        p.port_mut().write_all(&[escpos::GS, b'r', 1]).map_err(|e| e.to_string())?;
-        p.port_mut().flush().map_err(|e| e.to_string())?;
-        let _ = p.port_mut().read_exact(&mut raw[4..5]);
-        p.port_mut().write_all(&[escpos::ESC, b'v', 0]).map_err(|e| e.to_string())?;
-        p.port_mut().flush().map_err(|e| e.to_string())?;
-        let _ = p.port_mut().read_exact(&mut raw[5..6]);
-        let st = escpos::parse_status(4, raw[3]);
+        // Пассивное чтение самопроизвольного кадра FULL STATUS BACK
+        // (0x10 0x0F ...): приходит при изменении датчиков.
+        let mut b = [0u8; 1];
+        let mut fsb = Vec::new();
+        while fsb.len() < 16 {
+            match std::io::Read::read(p.port_mut(), &mut b) {
+                Ok(1) => fsb.push(b[0]),
+                _ => break,
+            }
+        }
+        if !fsb.is_empty() {
+            dump.push_str(&format!(" FSB=[{}]", fsb.iter().map(|v| format!("{v:#04X}")).collect::<Vec<_>>().join(" ")));
+        }
+        let st = escpos::parse_status(4, last4[3]);
+        // Fault по трём каналам (любой поднимает): L1 offline (bit3),
+        // L2 error (bit6), L4 авария (bit2 снят). Норма — все чистые.
+        let mut h = st;
+        h.printer_offline = st.printer_offline
+            || escpos::parse_status(1, last4[0]).printer_offline
+            || escpos::parse_status(2, last4[1]).printer_offline;
         let was = PAPER_WAS_END.swap(st.paper_end, std::sync::atomic::Ordering::Relaxed);
         if was && !st.paper_end {
             match p.recover(1).map_err(|e| e.to_string()) {
@@ -379,19 +426,16 @@ fn idle_probe(
                 Err(e) => log::warn!("принтер: DLE ENQ 1 не прошёл: {e}"),
             }
         }
-        let key = u32::from_le_bytes(raw[..4].try_into().expect("4 байта"));
-        let was_extra = (raw[4..6] != [0x00, 0x00]).then(|| {
-            let extra = u16::from_le_bytes(raw[4..6].try_into().expect("2 байта")) as u32;
-            (key | (extra << 16))
-        });
-        let prev = STATUS_RAW_LOGGED.swap(was_extra.unwrap_or(key), std::sync::atomic::Ordering::Relaxed);
-        if prev != key {
-            log::info!(
-                "принтер: статусы: L1={:#04X} L2={:#04X} L3={:#04X} L4={:#04X} GSR={:#04X} ESCV={:#04X}",
-                raw[0], raw[1], raw[2], raw[3], raw[4], raw[5]
-            );
-        }
-        update_health(&st);
+        // Калибровка датчиков: дамп пишется в лог каждый тик (сравнение
+        // состояний «лента есть/нет/в зоне» делается по журналу вручную).
+        log::info!("принтер: дамп: {dump}");
+        // Выходной лоток: биты 5-6 L4 сняты — в лотке этикетка.
+        let label_waiting = !escpos::label_awaiting_removal(last4[3]);
+        update_health(&h, label_waiting);
+        log::info!(
+            "принтер: health: fault={} label={} raw4={:#04X}",
+            h.printer_offline, label_waiting, last4[3]
+        );
         Ok(())
     });
     if let Err(e) = res {
@@ -416,21 +460,18 @@ fn idle_probe(
     }
 }
 
-fn update_health(st: &escpos::PrinterStatus) {
+fn update_health(st: &escpos::PrinterStatus, label_waiting: bool) {
     set_health(PrinterHealth {
         fault: st.printer_offline,
         paper_end: st.paper_end,
         paper_near_end: st.paper_near_end,
+        label_waiting,
     });
 }
 
 /// Память прошлого опроса для детекта заправки бумаги
 /// (paper_end true → false): в этот момент принтеру нужен DLE ENQ 1.
 static PAPER_WAS_END: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// Сырой байт последнего залогированного статуса: на смену значения —
-/// строка в лог (калибровка битов датчиков идёт по этому дампу).
-static STATUS_RAW_LOGGED: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(0xFFFF_FFFF);
 
 /// Реалтайм-recovery перед ручными заданиями меню: если принтер сидит в
 /// устранимой ошибке (наблюдалось 2026-10-15: «этикетка выдана» + error-биты
@@ -439,6 +480,23 @@ static STATUS_RAW_LOGGED: std::sync::atomic::AtomicU32 =
 fn write_recover_first(port: &mut dyn std::io::Write) -> std::io::Result<()> {
     port.write_all(&escpos::build_recover(1))?;
     port.flush()
+}
+
+/// Слить входной буфер порта перед status(): idle-опрос (ASB/GS r/статусные
+/// байты) может оставить остаток, который status() иначе прочитает как свой
+/// ответ (сырой 0x03 вместо покойного 0x7E → ложная авария после печати).
+fn drain_port_rx(port: &mut Box<dyn serialport::SerialPort>) {
+    let cur = port.timeout();
+    if port.set_timeout(Duration::from_millis(30)).is_ok() {
+        let mut sink = [0u8; 64];
+        loop {
+            match Read::read(port.as_mut(), &mut sink) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        let _ = port.set_timeout(cur);
+    }
 }
 
 /// Подача до метки следующей этикетки (GS FF): после смены рулона/заправки.

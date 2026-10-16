@@ -28,8 +28,8 @@ pub fn start(
     // Начальные значения повторяют дефолты UI-свойств (false/0/-1): иначе
     // первый тик с поднятой связью не ставит scales_ok и полоса остаётся
     // красной («Ошибка весов») при работающих весах.
-    let tick_cache: Rc<RefCell<(String, i32, bool, bool, i32)>> =
-        Rc::new(RefCell::new((String::new(), -1, false, false, -1)));
+    let tick_cache: Rc<RefCell<(String, i32, bool, bool, i32, bool)>> =
+        Rc::new(RefCell::new((String::new(), -1, false, false, -1, false)));
     let timer = slint::Timer::default();
     {
         let kiosk = ctx.kiosk.clone();
@@ -81,6 +81,24 @@ pub fn start(
                         c.4 = paper;
                         ui.set_paper_state(paper);
                     }
+                    if c.5 != ph.label_waiting {
+                        c.5 = ph.label_waiting;
+                        ui.set_label_waiting(ph.label_waiting);
+                    }
+                }
+                // Модальная блокировка «лента закончилась»: пока принтер в
+                // fault, покупательский экран (0-3) перекрыт попапом; в
+                // меню обслуживания (screen >= 4) попап не мешает работе.
+                // Уходит сам, когда опрос статуса снова отвечает.
+                let want_popup = ph.fault && ui.get_screen() < 4;
+                if ui.get_paper_popup_open() != want_popup {
+                    log::info!(
+                        "попап: {} (fault={} screen={})",
+                        if want_popup { "показ" } else { "скрытие" },
+                        ph.fault,
+                        ui.get_screen()
+                    );
+                    ui.set_paper_popup_open(want_popup);
                 }
 
                 // Пришла авто-синхронизация → перечитать каталог и отделы

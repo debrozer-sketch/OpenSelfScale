@@ -69,6 +69,10 @@ impl FeedCalibration {
 /// обрезание по буферу принтера, текстовые поля — ~0,5 КБ и мгновенно.
 pub fn test_label_bytes() -> Vec<u8> {
     const COLS: usize = 37; // 37 колонок шрифта A (12 точек) на ширину 448
+    // GS FF до и после задания: подача до начала следующей этикетки по
+    // gap-датчику. Без первой прокрутки печать стартует от текущей позиции
+    // головки и ложится на межэтикеточный зазор, если лента не докручена.
+    let mut bytes = vec![0x1D, 0x0C];
     let mut job = LabelJob::begin((448, 232));
     let _ = job.field(0, 0, escpos::FieldStyle::Normal, "ТЕСТОВАЯ ПЕЧАТЬ 12345");
     // Шахматка 12×12 из полублоков: ▀ на чётных колонках (56..68), ▀ на
@@ -92,7 +96,8 @@ pub fn test_label_bytes() -> Vec<u8> {
     // Тонкая линия (подчёркивания, шрифт B) и жирная (нижние полублоки).
     let _ = job.field(0, 184, escpos::FieldStyle::FontB, &"_".repeat(COLS));
     let _ = job.field(0, 196, escpos::FieldStyle::Normal, &"▄".repeat(COLS));
-    job.finish()
+    bytes.extend(job.finish());
+    bytes
 }
 
 /// Терминальный калибровочный мастер (флаг --calibrate): печатает тестовую

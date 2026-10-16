@@ -222,44 +222,52 @@ pub fn build_recover(level: u8) -> [u8; 3] {
     [0x10, 0x05, level]
 }
 
-/// Уровень 4 (Custom/Штрих-СлиМ): биты 5-6 = «этикетка выдана, ждёт снятия».
-/// Покой 0x1E, выдана 0x7E — эмпирика audit/PROTOCOL.md §2.
+/// Уровень 4 (Custom/Штрих-СлиМ): биты 5-6 = датчик выходного лотка.
+/// Выход занят этикеткой 0x1E (биты 5-6 сняты), выход пуст 0x7E —
+/// эмпирика 2026-10-16 (этикетка наполовину вытащена при старте весов).
+/// Возвращает true, когда этикетка снята (лоток свободен).
 pub fn label_awaiting_removal(level4_byte: u8) -> bool {
     level4_byte & 0x60 != 0
 }
 
-/// Разбор ответа DLE EOT (1 байт на уровень).
+/// Разбор ответа DLE EOT (1 байт на уровень). Бит-карта — мануал Custom
+/// VKP80II + эмпирика Штрих-СлиМ 2026-10-16 (сняты покой с лентой, покой
+/// без ленты, авария «подача без ленты»):
+///   L1: норма 0x00, авария 0x48 — bit3 (0x08) = offline;
+///   L2: норма 0x12, авария 0x52 — bit6 (0x40) = Error;
+///   L4: норма 0x7E (ленты нет/до датчика) и 0x1E (этикетка в выходе),
+///       авария 0x72 — bit2 (0x04) снят; датчик рулона в машине
+///       не подключён (опция по мануалу), поэтому paper_end синтезируем
+///       из bit2, а «этикетка в выходе» — bits 5,6 (см. label_awaiting_removal).
 pub fn parse_status(level: u8, byte: u8) -> PrinterStatus {
     match level {
         1 => PrinterStatus {
-            drawer_open: byte & 0x08 != 0,
-            printer_offline: byte & 0x04 != 0,
+            drawer_open: false,
+            printer_offline: byte & 0x08 != 0,
             paper_end: false,
             paper_near_end: false,
             raw_byte: byte,
         },
         2 => PrinterStatus {
-            drawer_open: byte & 0x08 != 0,
-            printer_offline: byte & 0x04 != 0,
+            drawer_open: false,
+            printer_offline: byte & 0x40 != 0,
             paper_end: false,
             paper_near_end: false,
             raw_byte: byte,
         },
         3 => PrinterStatus {
             drawer_open: false,
-            printer_offline: byte & 0x04 != 0,
+            // Уровень 3 в норме и в аварии даёт 0x12 — биты не живые.
+            printer_offline: false,
             paper_end: false,
             paper_near_end: false,
             raw_byte: byte,
         },
-        // Уровень 4, эмпирика принтера Штрих-СлиМ (Custom): в покое 0x1E,
-        // после выдачи этикетки 0x7E — биты 5-6 означают «этикетка выдана,
-        // ждёт снятия», а не конец ленты. Синтетические значения 0x40/0x60
-        // как paper_near_end/paper_end по спецификации Epson здесь ложные.
-        // Реальные биты расходника фиксируются калибровкой датчика.
+        // Датчик рулона в Штрих-СлиМ не подключён: 0x7E в любом состоянии
+        // ленты. Авария (offline/error) отмечается снятием bit2 (0x72).
         4 => PrinterStatus {
             drawer_open: false,
-            printer_offline: false,
+            printer_offline: byte & 0x04 == 0,
             paper_end: false,
             paper_near_end: false,
             raw_byte: byte,
@@ -295,15 +303,33 @@ impl<P: Read + Write> EscPosPrinter<P> {
         Ok(())
     }
 
+    /// Сырой ответ 0x00/0xFF у Штрих-СлиМ — не валидный статус: принтер ещё
+    /// занят (крутит отрез, режет) либо ответа нет вовсе. Переспрашиваем с
+    /// паузой, иначе вешаем аварию по пустому чтению (попап после удачной
+    /// печати). Датчик рулона не подключён, бити расходника калиброваны по
+    /// дампу — здесь валиден только бит карты из parse_status.
     pub fn status(&mut self) -> Result<PrinterStatus, EscPosError> {
         // Уровень 4: бумага (биты 5/6). Уровни 1-3 в боевом пути не нужны,
         // но build_status_query/parse_status оставлены для отладки.
         let level = 4u8;
-        self.port.write_all(&build_status_query(level))?;
-        self.port.flush()?;
-        let mut b = [0u8; 1];
-        self.port.read_exact(&mut b)?;
-        Ok(parse_status(level, b[0]))
+        for attempt in 0..3 {
+            self.port.write_all(&build_status_query(level))?;
+            self.port.flush()?;
+            let mut b = [0u8; 1];
+            self.port.read_exact(&mut b)?;
+            let st = parse_status(level, b[0]);
+            // 0x00/0xFF — не валидный статус (принтер ещё занят/нет ответа):
+            // переспрашиваем. 0x03 — тоже не покой L4 (покой 0x7E): это
+            // сдвинутый остаток ASB/предыдущей команды, ловим и его.
+            if b[0] != 0x00 && b[0] != 0xFF && b[0] != 0x03 {
+                return Ok(st);
+            }
+            if attempt < 2 {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+        }
+        // Все три чтения пустые: принтер не отвечает — отдаём аварию.
+        Ok(parse_status(level, 0x00))
     }
 
     /// DLE ENQ n — восстановление после ошибки. Ответ (1 байт статуса)
