@@ -333,6 +333,27 @@ fn idle_probe(
     prn: &mut Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>>,
 ) {
     let res = with_port(cfg, prn, |p| {
+        // Сброс входного буфера и гашение автопередачи статуса (ASB, GS a 0):
+        // после операций принтер сам шлёт байты статуса, они вклиниваются
+        // в ответы на запросы и сдвигают фазу чтения (наблюдалось 2026-10-16).
+        p.port_mut().set_timeout(Duration::from_millis(30)).map_err(|e| e.to_string())?;
+        let mut sink = [0u8; 64];
+        loop {
+            match std::io::Read::read(p.port_mut(), &mut sink) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        p.port_mut().write_all(&[escpos::GS, b'a', 0]).map_err(|e| e.to_string())?;
+        p.port_mut().flush().map_err(|e| e.to_string())?;
+        std::thread::sleep(Duration::from_millis(100));
+        loop {
+            match std::io::Read::read(p.port_mut(), &mut sink) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        p.port_mut().set_timeout(Duration::from_millis(1500)).map_err(|e| e.to_string())?;
         // Дамп всех каналов статуса: DLE EOT 1-4 не отражают датчик ленты
         // на этом принтере — добавлены GS r 1 (датчик бумаги) и ESC v
         // (сводный статус). Ищем живые биты по дампу.
@@ -346,10 +367,10 @@ fn idle_probe(
         }
         p.port_mut().write_all(&[escpos::GS, b'r', 1]).map_err(|e| e.to_string())?;
         p.port_mut().flush().map_err(|e| e.to_string())?;
-        p.port_mut().read_exact(&mut raw[4..5]).map_err(|e| e.to_string())?;
+        let _ = p.port_mut().read_exact(&mut raw[4..5]);
         p.port_mut().write_all(&[escpos::ESC, b'v', 0]).map_err(|e| e.to_string())?;
         p.port_mut().flush().map_err(|e| e.to_string())?;
-        p.port_mut().read_exact(&mut raw[5..6]).map_err(|e| e.to_string())?;
+        let _ = p.port_mut().read_exact(&mut raw[5..6]);
         let st = escpos::parse_status(4, raw[3]);
         let was = PAPER_WAS_END.swap(st.paper_end, std::sync::atomic::Ordering::Relaxed);
         if was && !st.paper_end {
@@ -359,9 +380,11 @@ fn idle_probe(
             }
         }
         let key = u32::from_le_bytes(raw[..4].try_into().expect("4 байта"));
-        let extra = u16::from_le_bytes(raw[4..6].try_into().expect("2 байта")) as u32;
-        let key = key | (extra << 16);
-        let prev = STATUS_RAW_LOGGED.swap(key, std::sync::atomic::Ordering::Relaxed);
+        let was_extra = (raw[4..6] != [0x00, 0x00]).then(|| {
+            let extra = u16::from_le_bytes(raw[4..6].try_into().expect("2 байта")) as u32;
+            (key | (extra << 16))
+        });
+        let prev = STATUS_RAW_LOGGED.swap(was_extra.unwrap_or(key), std::sync::atomic::Ordering::Relaxed);
         if prev != key {
             log::info!(
                 "принтер: статусы: L1={:#04X} L2={:#04X} L3={:#04X} L4={:#04X} GSR={:#04X} ESCV={:#04X}",
@@ -373,6 +396,23 @@ fn idle_probe(
     });
     if let Err(e) = res {
         log::warn!("опрос статуса принтера: {e}");
+        // Принтер в аварии (нет ленты / зажеван) не отвечает и остаётся
+        // в error до перезагрузки. Пытаемся выйти DLE ENQ 1: сигнал
+        // доставляется даже если ответ не придёт (recover трактует
+        // таймаут как успех).
+        if with_port(cfg, prn, |p| {
+            match p.recover(1).map_err(|e| e.to_string()) {
+                Ok(()) => {
+                    log::info!("принтер: авария/нет ответа — послан DLE ENQ 1 (попытка выхода)");
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        })
+        .is_err()
+        {
+            log::warn!("принтер: DLE ENQ 1 тоже не прошёл — нужна перезагрузка");
+        }
     }
 }
 
