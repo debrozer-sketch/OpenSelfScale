@@ -1152,9 +1152,9 @@ export component MainWindow inherits Window {
             height: parent.height - 84px;
 
             Text {
-                x: 0; y: 12px;
+                x: 0; y: 8px;
                 width: parent.width;
-                height: 36px;
+                height: 32px;
                 text: root.pin-prompt;
                 font-size: 26px;
                 font-weight: 700;
@@ -1163,9 +1163,9 @@ export component MainWindow inherits Window {
             }
             Rectangle {
                 x: 262px;
-                y: 60px;
+                y: 44px;
                 width: 500px;
-                height: 72px;
+                height: 64px;
                 border-radius: 14px;
                 border-width: 2px;
                 border-color: #C9CFD7;
@@ -1180,9 +1180,9 @@ export component MainWindow inherits Window {
                 }
             }
             if root.pin-error != "" : Text {
-                x: 0; y: 144px;
+                x: 0; y: 112px;
                 width: parent.width;
-                height: 36px;
+                height: 32px;
                 text: root.pin-error;
                 font-size: 22px;
                 font-weight: 700;
@@ -1193,9 +1193,9 @@ export component MainWindow inherits Window {
             property <[string]> keys: ["1","2","3","4","5","6","7","8","9","C","0","←"];
             for k[i] in keys : Rectangle {
                 x: 262px + mod(i, 3) * 170px;
-                y: 190px + floor(i / 3) * 116px;
+                y: 152px + floor(i / 3) * 100px;
                 width: 160px;
-                height: 106px;
+                height: 92px;
                 border-radius: 14px;
                 background: kb2-ta.pressed ? #DDE3EA : #FFFFFF;
                 border-width: 2px;
@@ -1632,9 +1632,9 @@ export component MainWindow inherits Window {
             height: parent.height - 84px;
 
             Text {
-                x: 0; y: 24px;
+                x: 0; y: 16px;
                 width: parent.width;
-                height: 36px;
+                height: 34px;
                 text: "Сброс на главный экран, сек (10–600)";
                 font-size: 26px;
                 font-weight: 700;
@@ -1643,9 +1643,9 @@ export component MainWindow inherits Window {
             }
             Rectangle {
                 x: 262px;
-                y: 80px;
+                y: 56px;
                 width: 500px;
-                height: 72px;
+                height: 64px;
                 border-radius: 14px;
                 border-width: 2px;
                 border-color: root.idle-valid ? #C9CFD7 : #B3261E;
@@ -1663,9 +1663,9 @@ export component MainWindow inherits Window {
             property <[string]> keys: ["7","8","9","4","5","6","1","2","3","C","0","←"];
             for k[i] in keys : Rectangle {
                 x: 262px + mod(i, 3) * 170px;
-                y: 180px + floor(i / 3) * 116px;
+                y: 136px + floor(i / 3) * 100px;
                 width: 160px;
-                height: 106px;
+                height: 92px;
                 border-radius: 14px;
                 background: idle-key-ta.pressed ? #DDE3EA : #FFFFFF;
                 border-width: 2px;
