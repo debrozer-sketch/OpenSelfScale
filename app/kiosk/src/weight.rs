@@ -42,16 +42,26 @@ impl WeightSource {
         std::thread::Builder::new()
             .name("weight-poll".into())
             .spawn(move || {
-                // Паника потока не должна оставлять port_up=true при мёртвом
-                // опросе: гасим состояние, systemd-лог покажет причину.
-                let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    poll_loop(&profile, inner_t, stop_t, zero_t)
-                }));
-                if guard.is_err() {
-                    log::error!("весы: поток опроса остановлен паникой");
-                    if let Ok(mut s) = inner_g.lock() {
-                        s.port_up = false;
-                        s.stable = false;
+                // Паника опроса не должна хоронить весы до рестарта сервиса:
+                // poll_loop перезапускается, между падением и перезапуском
+                // snapshot показывает PortDown («Ошибка весов»).
+                loop {
+                    let inner_c = inner_t.clone();
+                    let stop_c = stop_t.clone();
+                    let zero_c = zero_t.clone();
+                    let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        poll_loop(&profile, inner_c, stop_c, zero_c)
+                    }));
+                    if guard.is_err() {
+                        log::error!("весы: перезапуск опроса после паники");
+                        if let Ok(mut s) = inner_g.lock() {
+                            s.port_up = false;
+                            s.stable = false;
+                        }
+                        std::thread::sleep(Duration::from_secs(2));
+                    } else {
+                        // stop выставлен — киоск завершается.
+                        break;
                     }
                 }
             })
