@@ -402,8 +402,9 @@ pub fn install(ctx: &AppContext) {
                     }
                     let cfg = cfg.clone();
                     let ui_handle = ui_handle.clone();
+                    let snap = app_state.snapshot();
                     std::thread::spawn(move || {
-                        let text = diag::collect(&cfg);
+                        let text = diag::collect_live(&cfg, &snap);
                         slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_handle.upgrade() {
                                 ui.set_diag_text(text.into());

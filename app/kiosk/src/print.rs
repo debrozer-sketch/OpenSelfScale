@@ -169,7 +169,9 @@ pub struct PrinterHealth {
 /// через канал: одновременная запись двух потоков перемешивает байты.
 pub enum PrinterRequest {
     /// Готовое задание (этикетка товара): печать + ожидание снятия.
-    Print { bytes: Vec<u8>, ack: mpsc::Sender<Result<(), String>> },
+    /// `queued_at` — момент постановки: задание старше STALE_JOB покупатель
+    /// уже получил как «ошибка печати», допечатывать его нельзя.
+    Print { bytes: Vec<u8>, ack: mpsc::Sender<Result<(), String>>, queued_at: std::time::Instant },
     /// Подача до метки следующей этикетки (GS FF) с предварительным
     /// recovery: после заправки рулона принтер может сидеть в ошибке.
     Feed { ack: mpsc::Sender<Result<(), String>> },
@@ -183,6 +185,11 @@ static PRINTER_TX: std::sync::OnceLock<mpsc::Sender<PrinterRequest>> =
     std::sync::OnceLock::new();
 static HEALTH: std::sync::OnceLock<std::sync::Mutex<PrinterHealth>> =
     std::sync::OnceLock::new();
+
+/// Работает ли демон принтера в этом процессе (в CLI-режимах его нет).
+pub fn daemon_running(cfg: &crate::config::Config) -> bool {
+    cfg.printer.enabled && PRINTER_TX.get().is_some()
+}
 
 /// Текущее здоровье принтера из демона (не блокирует, копия).
 pub fn health() -> PrinterHealth {
@@ -264,6 +271,9 @@ const SILENT_CONFIRM: u8 = 3;
 /// Сколько ждать выдачи этикетки после задания (ожидание — для контроля
 /// аварии и журнала, не для блокировки покупателя дольше необходимого).
 const PRESENT_WAIT: Duration = Duration::from_secs(6);
+/// Задание печати старше этого срока не печатается (экран покупателя
+/// сдаётся по таймауту 30 с, поэтому берём чуть меньше).
+const STALE_JOB: Duration = Duration::from_secs(25);
 /// Таймаут чтения одного ответа DLE EOT (реальный ответ — единицы мс).
 const L4_READ_TIMEOUT: Duration = Duration::from_millis(300);
 
@@ -368,7 +378,7 @@ fn read_l4(port: &mut Box<dyn serialport::SerialPort>, attempts: u32) -> Option<
                 out = Some(b[0]);
                 break;
             }
-            Ok(1) => log::debug!("принтер: посторонний байт вместо L4: {:#04X}", b[0]),
+            Ok(1) => log::info!("принтер: посторонний байт вместо L4: {:#04X}", b[0]),
             _ => {}
         }
         if i + 1 < attempts {
@@ -487,7 +497,15 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
     let mut mon = Monitor::default();
     loop {
         match rx.recv_timeout(mon.next_probe()) {
-            Ok(PrinterRequest::Print { bytes, ack }) => {
+            Ok(PrinterRequest::Print { bytes, ack, queued_at }) => {
+                if queued_at.elapsed() > STALE_JOB {
+                    log::warn!(
+                        "принтер: задание устарело ({} с в очереди) — пропущено",
+                        queued_at.elapsed().as_secs()
+                    );
+                    finish(ack, Err("задание печати устарело".into()), "печать");
+                    continue;
+                }
                 let res = with_port(cfg, &mut prn, |p| print_job(p.port_mut(), &bytes, &mut mon));
                 if res.is_err() {
                     mon.note_failure();
@@ -673,7 +691,10 @@ fn drain_port_rx(port: &mut Box<dyn serialport::SerialPort>) {
     let cur = port.timeout();
     if port.set_timeout(Duration::from_millis(30)).is_ok() {
         let mut sink = [0u8; 64];
-        loop {
+        // Предел по времени: принтер, непрерывно шлющий байты, не должен
+        // подвешивать демон в вечном «сливе».
+        let deadline = std::time::Instant::now() + Duration::from_millis(300);
+        while std::time::Instant::now() < deadline {
             match Read::read(port.as_mut(), &mut sink) {
                 Ok(0) | Err(_) => break,
                 Ok(_) => {}
@@ -720,7 +741,8 @@ pub fn print_for_plu(
     }
     let (date, time) = now_stamp();
     let bytes = build_label(&item, weight_g, LIVE_LAYOUT, &date, &time)?;
-    request(|ack| PrinterRequest::Print { bytes, ack }).map_err(std::io::Error::other)?;
+    request(|ack| PrinterRequest::Print { bytes, ack, queued_at: std::time::Instant::now() })
+        .map_err(std::io::Error::other)?;
     Ok(())
 }
 

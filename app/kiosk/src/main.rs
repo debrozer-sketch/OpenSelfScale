@@ -233,16 +233,24 @@ fn run_kiosk(cfg: config::Config) {
                 Ok(items) => {
                     log::info!("загружено товаров: {}", items.len());
                     all_groups = datastore::groups_alpha(&conn).unwrap_or_default();
-                    let gd = group_dept.borrow();
-                    let mut unmapped = 0;
-                    for (g, n) in &all_groups {
-                        if !gd.contains_key(g) {
-                            unmapped += *n as usize;
-                            log::warn!("группа без отдела: {g} ({n} шт.)");
+                    // Группы без отдела не пропадают из меню: уходят в «ПРОЧЕЕ».
+                    let routed = datastore::route_unmapped_groups(
+                        &conn,
+                        &mut group_dept.borrow_mut(),
+                        &all_groups,
+                    );
+                    match routed {
+                        Ok(un) if !un.is_empty() => {
+                            for g in &un {
+                                log::warn!(
+                                    "группа без отдела: {g} → {}",
+                                    datastore::FALLBACK_DEPT
+                                );
+                            }
+                            depts = datastore::depts_list(&conn).unwrap_or(depts);
                         }
-                    }
-                    if unmapped > 0 {
-                        log::warn!("товаров вне отделов: {unmapped} — не видны в меню");
+                        Ok(_) => {}
+                        Err(e) => log::error!("группы без отдела: {e}"),
                     }
                     items
                 }

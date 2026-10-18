@@ -475,7 +475,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             };
             // Ошибки чтения НЕ затирают модели пустотой: транзитная блокировка
             // БД не должна оставлять киоск с пустым меню до следующей синхронизации.
-            let (depts, gd_pairs, all_groups, items);
+            let (mut depts, gd_pairs, all_groups, items);
             match (
                 datastore::depts_list(&conn),
                 datastore::group_depts(&conn),
@@ -507,8 +507,19 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 .enumerate()
                 .map(|(i, p)| (p.name.to_uppercase(), i))
                 .collect();
-            let gd_map: std::collections::HashMap<String, String> =
+            let mut gd_map: std::collections::HashMap<String, String> =
                 gd_pairs.into_iter().collect();
+            // Группы без отдела уходят в «ПРОЧЕЕ», а не пропадают из меню.
+            match datastore::route_unmapped_groups(&conn, &mut gd_map, &all_groups) {
+                Ok(un) if !un.is_empty() => {
+                    for g in &un {
+                        log::warn!("группа без отдела: {g} → {}", datastore::FALLBACK_DEPT);
+                    }
+                    depts = datastore::depts_list(&conn).unwrap_or(depts);
+                }
+                Ok(_) => {}
+                Err(e) => log::error!("группы без отдела: {e}"),
+            }
             *depts_all.borrow_mut() =
                 tiles::dept_tiles(&depts, &gd_map, &all_groups, &img_dir);
             *group_dept.borrow_mut() = gd_map;

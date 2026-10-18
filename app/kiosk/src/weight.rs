@@ -174,6 +174,9 @@ fn open_tty_raw(path: &str, baud: u32) -> Result<std::fs::File, String> {
     Ok(unsafe { std::fs::File::from_raw_fd(fd) })
 }
 
+/// Сколько опросов без ответа подряд считать потерей связи (~0,9 с каждый).
+const SILENT_LIMIT: u32 = 6;
+
 fn poll_loop(
     profile: &ScalesProfile,
     out: Arc<Mutex<Snapshot>>,
@@ -188,6 +191,9 @@ fn poll_loop(
                 if !was_up.swap(true, Ordering::Relaxed) {
                     log::info!("весы: связь восстановлена");
                 }
+                // Подряд идущие таймауты: пустая платформа отвечает нулём, так
+                // что долгая тишина — неисправность, а не «ничего не лежит».
+                let mut silent = 0u32;
                 loop {
                     if stop.load(Ordering::Relaxed) {
                         return;
@@ -200,6 +206,7 @@ fn poll_loop(
                     }
                     match driver.poll_once(Duration::from_millis(900)) {
                         Ok(sample) => {
+                            silent = 0;
                             let mut s = out.lock().expect("weight mutex");
                             s.mass_kg = sample.mass_g as f64 / 1000.0;
                             s.stable = sample.stable;
@@ -211,13 +218,23 @@ fn poll_loop(
                             // нет: старую массу оставлять нельзя (новый покупатель
                             // увидит чужой вес), сбрасываем в ноль. Печать всё
                             // равно требует stable, следующий кадр вернёт данные.
+                            silent += 1;
                             let mut s = out.lock().expect("weight mutex");
                             s.mass_kg = 0.0;
                             s.stable = false;
-                            s.port_up = true;
+                            if silent == SILENT_LIMIT {
+                                log::warn!("весы молчат {SILENT_LIMIT} опросов подряд — связь потеряна");
+                            }
+                            s.port_up = silent < SILENT_LIMIT;
                         }
                         Err(e) => {
                             log::warn!("опрос весов: {e}; переподключение");
+                            // Старые масса и stable при переподключении не
+                            // оставляем: иначе до 3 с можно напечатать чужой вес.
+                            let mut s = out.lock().expect("weight mutex");
+                            s.mass_kg = 0.0;
+                            s.stable = false;
+                            s.port_up = false;
                             break;
                         }
                     }

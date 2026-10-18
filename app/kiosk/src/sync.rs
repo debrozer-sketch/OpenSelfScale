@@ -190,7 +190,11 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
 
     // Товары (обязательны) и раскладка (необязательна, как в FTP-режиме).
     let plu_data = std::fs::read_to_string(&plu).map_err(|e| format!("{}: {e}", plu.display()))?;
-    let items = datastore::parse_plu_xml(&plu_data).map_err(|e| format!("разбор plu.xml: {e}"))?;
+    let (items, skipped) = datastore::parse_plu_xml_counted(&plu_data)
+        .map_err(|e| format!("разбор plu.xml: {e}"))?;
+    if skipped > 0 {
+        log::warn!("plu.xml: пропущено битых записей: {skipped}");
+    }
     if items.is_empty() {
         // Пустой/битый plu.xml: не принимать и не подчищать — источник
         // перезальёт; в history пустоту не архивируем.
@@ -321,8 +325,11 @@ pub fn run(cfg: &Config) -> Result<String, String> {
 
     // Товары.
     let plu_data = fetch_string(&mut ftp, &c.plu_path)?;
-    let items = datastore::parse_plu_xml(&plu_data)
+    let (items, skipped) = datastore::parse_plu_xml_counted(&plu_data)
         .map_err(|e| format!("разбор plu.xml: {e}"))?;
+    if skipped > 0 {
+        log::warn!("plu.xml: пропущено битых записей: {skipped}");
+    }
 
     // Раскладка (группировка старого ПО) — необязательна.
     let (groups, ldata_str) = if c.layout_path.is_empty() {

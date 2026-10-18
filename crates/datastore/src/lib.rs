@@ -499,13 +499,32 @@ pub fn remove_absent(conn: &Connection, items: &[PluItem]) -> Result<usize, Stor
 /// `<item plunumber="012112" price="44999" itemcode="02367" namefirst="АВОКАДО КГ"
 ///       namesecond="" groupcode="21" shelflife="22/11/2026 15:25:36" />`
 pub fn parse_plu_xml(data: &str) -> Result<Vec<PluItem>, StoreError> {
+    parse_plu_xml_counted(data).map(|(items, _)| items)
+}
+
+/// Разбор выгрузки с подсчётом пропущенных записей. Одна битая запись
+/// (цена с запятой, пустой plunumber) не должна останавливать обновление цен
+/// на всех весах: она пропускается и считается. Файл отвергается целиком,
+/// если пропущено больше десятой части записей или не осталось ни одной, а
+/// также если XML оборван (не закрыт корневой тег): обрезанная выгрузка
+/// иначе разбирается «успешно» и снимает с учёта остаток каталога.
+pub fn parse_plu_xml_counted(data: &str) -> Result<(Vec<PluItem>, usize), StoreError> {
+    use quick_xml::events::Event;
     let mut reader = quick_xml::Reader::from_str(data);
     reader.config_mut().trim_text(true);
     let mut items = Vec::new();
+    let mut skipped = 0usize;
+    let mut depth: i32 = 0;
     let mut buf = Vec::new();
     loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(quick_xml::events::Event::Start(e)) | Ok(quick_xml::events::Event::Empty(e)) => {
+        let ev = reader.read_event_into(&mut buf);
+        match &ev {
+            Ok(Event::Start(_)) => depth += 1,
+            Ok(Event::End(_)) => depth -= 1,
+            _ => {}
+        }
+        match ev {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
                 if e.name().as_ref() == b"item" {
                     let mut it = PluItem {
                         plu: String::new(),
@@ -517,6 +536,7 @@ pub fn parse_plu_xml(data: &str) -> Result<Vec<PluItem>, StoreError> {
                         groupcode: String::new(),
                         shelflife: String::new(),
                     };
+                    let mut bad = false;
                     for attr in e.attributes() {
                         let a = attr.map_err(|e| StoreError::Xml(e.to_string()))?;
                         let v = a
@@ -525,17 +545,14 @@ pub fn parse_plu_xml(data: &str) -> Result<Vec<PluItem>, StoreError> {
                             .to_string();
                         match a.key.as_ref() {
                             b"plunumber" => it.plu = v,
-                            b"price" => {
-                                it.price =
-                                    v.parse().map_err(|_| StoreError::Xml(format!("price={v}")))?
-                            }
-                            b"cardprice" => {
-                                it.card_price = Some(
-                                    v.parse().map_err(|_| {
-                                        StoreError::Xml(format!("cardprice={v}"))
-                                    })?,
-                                )
-                            }
+                            b"price" => match v.parse() {
+                                Ok(p) => it.price = p,
+                                Err(_) => bad = true,
+                            },
+                            b"cardprice" => match v.parse() {
+                                Ok(p) => it.card_price = Some(p),
+                                Err(_) => bad = true,
+                            },
                             b"itemcode" => it.itemcode = v,
                             b"namefirst" => it.namefirst = v,
                             b"namesecond" => it.namesecond = v,
@@ -544,19 +561,54 @@ pub fn parse_plu_xml(data: &str) -> Result<Vec<PluItem>, StoreError> {
                             _ => {}
                         }
                     }
-                    if it.plu.is_empty() {
-                        return Err(StoreError::Xml("item без plunumber".into()));
+                    if bad || it.plu.is_empty() {
+                        skipped += 1;
+                    } else {
+                        items.push(it);
                     }
-                    items.push(it);
                 }
             }
-            Ok(quick_xml::events::Event::Eof) => break,
+            Ok(Event::Eof) => break,
             Err(e) => return Err(StoreError::Xml(e.to_string())),
             _ => {}
         }
         buf.clear();
     }
-    Ok(items)
+    if depth != 0 {
+        return Err(StoreError::Xml("файл оборван: не закрыт корневой тег".into()));
+    }
+    if skipped > 0 && (items.is_empty() || skipped * 10 > items.len() + skipped) {
+        return Err(StoreError::Xml(format!(
+            "битых записей {skipped} из {}: файл отвергнут",
+            items.len() + skipped
+        )));
+    }
+    Ok((items, skipped))
+}
+
+/// Отдел для групп, которым отдел не назначен: иначе их товары не видны
+/// покупателю нигде, кроме поиска. Возвращает названия таких групп (пусто —
+/// ничего не менялось). Отдел создаётся при необходимости, привязка живёт
+/// только в переданной карте (в БД не пишется: оператор назначит отдел сам).
+pub const FALLBACK_DEPT: &str = "ПРОЧЕЕ";
+
+pub fn route_unmapped_groups(
+    conn: &Connection,
+    group_dept: &mut std::collections::HashMap<String, String>,
+    groups: &[(String, i64)],
+) -> Result<Vec<String>, StoreError> {
+    let unmapped: Vec<String> = groups
+        .iter()
+        .filter(|(g, n)| *n > 0 && !group_dept.contains_key(g))
+        .map(|(g, _)| g.clone())
+        .collect();
+    if !unmapped.is_empty() {
+        dept_add(conn, FALLBACK_DEPT, None, None, None)?;
+        for g in &unmapped {
+            group_dept.insert(g.clone(), FALLBACK_DEPT.to_string());
+        }
+    }
+    Ok(unmapped)
 }
 
 /// Раскладка старого ПО (layout.xml): `<group name="..."><button PLU="..."/>`.
@@ -908,5 +960,41 @@ mod tests {
         group_assign(&conn, "КЛЮКВА", "ЯГОДЫ").unwrap();
         dept_remove(&conn, "ЯГОДЫ").unwrap();
         assert!(group_depts(&conn).unwrap().iter().all(|(_, d)| d != "ЯГОДЫ"));
+    }
+
+    #[test]
+    fn truncated_xml_is_rejected() {
+        let cut = r#"<root><item plunumber="1" price="100"/><item plunumber="2" price="200"/>"#;
+        assert!(parse_plu_xml(cut).is_err(), "корневой тег не закрыт");
+    }
+
+    #[test]
+    fn single_bad_item_is_skipped_not_fatal() {
+        let mut xml = String::from("<root>");
+        for i in 1..=30 {
+            xml.push_str(&format!(r#"<item plunumber="{i}" price="{}00"/>"#, i));
+        }
+        xml.push_str(r#"<item plunumber="99" price="12,5"/></root>"#);
+        let (items, skipped) = parse_plu_xml_counted(&xml).unwrap();
+        assert_eq!((items.len(), skipped), (30, 1));
+    }
+
+    #[test]
+    fn too_many_bad_items_reject_the_file() {
+        let xml = r#"<root><item plunumber="1" price="1"/><item plunumber="2" price="x"/><item plunumber="3" price="y"/></root>"#;
+        assert!(parse_plu_xml(xml).is_err());
+    }
+
+    #[test]
+    fn unmapped_groups_go_to_fallback_dept() {
+        let conn = open(std::path::Path::new(":memory:")).unwrap();
+        let mut gd: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        gd.insert("ВИНОГРАД".into(), "ФРУКТЫ".into());
+        let groups = vec![("ВИНОГРАД".to_string(), 3i64), ("КИНЗА".to_string(), 2), ("ПУСТО".to_string(), 0)];
+        let un = route_unmapped_groups(&conn, &mut gd, &groups).unwrap();
+        assert_eq!(un, vec!["КИНЗА".to_string()]);
+        assert_eq!(gd.get("КИНЗА").map(String::as_str), Some(FALLBACK_DEPT));
+        assert!(!gd.contains_key("ПУСТО"), "пустая группа не маршрутизируется");
+        assert!(depts_list(&conn).unwrap().iter().any(|d| d.name == FALLBACK_DEPT));
     }
 }

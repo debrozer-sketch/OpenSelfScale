@@ -7,20 +7,48 @@ use crate::config::Config;
 
 /// Краткий отчёт диагностики: человекочитаемый, для экрана и для центра.
 pub fn collect(cfg: &Config) -> String {
+    report(cfg, None)
+}
+
+/// Отчёт внутри работающего киоска: порты уже заняты весовым потоком и
+/// демоном принтера, повторное открытие дало бы ложное «занят» и сбило бы
+/// настройки живого порта, поэтому статус берётся у владельцев портов.
+pub fn collect_live(cfg: &Config, scales: &crate::weight::Snapshot) -> String {
+    report(cfg, Some(scales))
+}
+
+fn report(cfg: &Config, live: Option<&crate::weight::Snapshot>) -> String {
     let mut r = String::new();
+    let scales_state = match live {
+        Some(s) if s.port_up => format!(
+            "связь есть, {:.3} кг, {}",
+            s.mass_kg,
+            if s.stable { "вес стабилен" } else { "вес нестабилен" }
+        ),
+        Some(_) => "нет связи с весовым модулем".to_string(),
+        None => probe_serial(Path::new(&cfg.scales.port), cfg.scales.baud),
+    };
     r.push_str(&format!(
         "Весы {} {} ({}): {}\n",
-        cfg.scales.kind,
-        cfg.scales.port,
-        cfg.scales.baud,
-        probe_serial(Path::new(&cfg.scales.port), cfg.scales.baud)
+        cfg.scales.kind, cfg.scales.port, cfg.scales.baud, scales_state
     ));
+    let printer_state = if !cfg.printer.enabled {
+        "отключён в конфиге".to_string()
+    } else if live.is_some() && crate::print::daemon_running(cfg) {
+        let h = crate::print::health();
+        if h.fault {
+            "авария или нет ответа (подробности в журнале)".to_string()
+        } else if h.label_waiting {
+            "исправен, в лотке этикетка".to_string()
+        } else {
+            "исправен".to_string()
+        }
+    } else {
+        probe_serial(Path::new(&cfg.printer.port), cfg.printer.baud)
+    };
     r.push_str(&format!(
         "Принтер {} {} ({}): {}\n",
-        cfg.printer.kind,
-        cfg.printer.port,
-        cfg.printer.baud,
-        probe_serial(Path::new(&cfg.printer.port), cfg.printer.baud)
+        cfg.printer.kind, cfg.printer.port, cfg.printer.baud, printer_state
     ));
     r.push_str(&format!(
         "База PLU {}: {}\n",
