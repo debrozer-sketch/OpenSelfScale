@@ -270,6 +270,8 @@ pub enum PrinterRequest {
     Diagnostics { ack: mpsc::Sender<PrinterDiagnostics> },
     /// Сброс аварии: лестница DLE ENQ 1 → 2 → ESC @ (вручную из меню).
     Reset { ack: mpsc::Sender<Result<(), String>> },
+    /// Калибровка этикетки: шаг-скан одной этикетки → длина в мм.
+    Calibrate { ack: mpsc::Sender<Result<u32, String>> },
 }
 
 /// Журнальные данные печати: заполняются сборщиком задания, пишутся
@@ -528,6 +530,88 @@ fn read_l4(port: &mut Box<dyn serialport::SerialPort>, attempts: u32) -> Option<
     }
     let _ = port.set_timeout(prev);
     out
+}
+
+/// Одна фаза шаг-скана: подавать по 1 мм, пока датчик не покажет нужное
+/// состояние (этикетка у сенсора / зазор). Кап шагов и дедлайн — обязательны:
+/// без бумаги скан обязан закончиться ошибкой, а не вечным ожиданием.
+fn scan_phase(
+    port: &mut Box<dyn serialport::SerialPort>,
+    want_label: bool,
+    cap: u32,
+    what: &str,
+    started: std::time::Instant,
+    total: Duration,
+) -> Result<(), Fail> {
+    for _ in 0..cap {
+        if started.elapsed() > total {
+            return Err(Fail::Printer(format!("шаг-скан: дедлайн фазы «{what}»")));
+        }
+        if port.write_all(&[escpos::ESC, b'J', 10]).is_err() || port.flush().is_err() {
+            return Err(Fail::Io("шаг-скан: запись в порт".into()));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        if let Some(b) = read_l4(port, 2) {
+            if escpos::label_in_tray(b) == want_label {
+                return Ok(());
+            }
+        }
+    }
+    Err(Fail::Printer(format!(
+        "шаг-скан: не дождались «{what}» за {cap} шагов"
+    )))
+}
+
+/// Калибровка этикетки шаг-сканом (подтверждено live 19.10, PROTOCOL):
+/// единица подачи GS P 0 254 = 0,1 мм/дот, шаг ESC J 10 = 1,0 мм ровно.
+/// Фазы: дойти до зазора → до начала этикетки → считать шаги этикетки
+/// (это её длина в мм) → снова выйти на начало следующей (принтер остаётся
+/// выровненным к печати). Единицы подачи восстанавливаются в конце.
+fn set_unit(port: &mut Box<dyn serialport::SerialPort>, y: u8) {
+    let _ = port.write_all(&[escpos::GS, 0x50, 0, y]);
+    let _ = port.flush();
+}
+
+fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, Fail> {
+    // Суммарный дедлайн скана: калибровка идёт через демон порта и на всё
+    // её время блокирует покупательскую печать (выполняется только из
+    // сервисного экрана). Потолок согласован с ACK-таймаутом calibrate_label.
+    const TOTAL_DEADLINE: Duration = Duration::from_secs(150);
+    const STEP_CAP: u32 = 350; // ~350 мм: страховка от бесконечной подачи
+    const GAP_CAP: u32 = 60; // зазор ~3 мм, с запасом на стык рулона
+    let started = std::time::Instant::now();
+    let expired = |what: &str| {
+        Fail::Printer(format!("шаг-скан: дедлайн фазы «{what}»"))
+    };
+    set_unit(port, 254);
+    let res = (|| {
+        scan_phase(port, false, STEP_CAP, "зазор", started, TOTAL_DEADLINE)?;
+        scan_phase(port, true, GAP_CAP, "начало этикетки", started, TOTAL_DEADLINE)?;
+        let mut len = 0u32;
+        while len < STEP_CAP {
+            if started.elapsed() > TOTAL_DEADLINE {
+                return Err(expired("счёт длины"));
+            }
+            if port.write_all(&[escpos::ESC, b'J', 10]).is_err() || port.flush().is_err() {
+                return Err(Fail::Io("шаг-скан: запись в порт".into()));
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            match read_l4(port, 2) {
+                Some(b) if escpos::label_in_tray(b) => len += 1,
+                Some(_) if len > 0 => break,
+                Some(_) => return Err(Fail::Printer("шаг-скан: этикетка нулевой длины".into())),
+                None => {}
+            }
+        }
+        if len >= STEP_CAP {
+            return Err(Fail::Printer("шаг-скан: этикетка длиннее лимита".into()));
+        }
+        // Вернуть принтер на начало следующей этикетки — как после FF.
+        scan_phase(port, true, GAP_CAP, "выравнивание", started, TOTAL_DEADLINE)?;
+        Ok(len)
+    })();
+    set_unit(port, 0);
+    res
 }
 
 /// Лестница восстановления после аварии. Каждый шаг журналируется вместе с
@@ -798,6 +882,25 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 }
                 finish(ack, res, "сброс аварии");
             }
+            Ok(PrinterRequest::Calibrate { ack }) => {
+                let res = with_port(cfg, &mut prn, |p| {
+                    let port = p.port_mut();
+                    ensure_ready(port)?;
+                    log::info!("принтер: калибровка: шаг-скан этикетки");
+                    scan_label_length(port)
+                });
+                match res {
+                    Ok(mm) => {
+                        log::info!("принтер: калибровка: длина этикетки {mm} мм");
+                        let _ = ack.send(Ok(mm));
+                    }
+                    Err(e) => {
+                        log::warn!("принтер: калибровка: {e}");
+                        mon.note_failure();
+                        let _ = ack.send(Err(e.to_string()));
+                    }
+                }
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 probe(cfg, &mut prn, &mut mon);
             }
@@ -806,11 +909,11 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
     }
 }
 
-fn with_port(
+fn with_port<T>(
     cfg: &crate::config::Config,
     prn: &mut Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>>,
-    f: impl FnOnce(&mut escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>) -> Result<(), Fail>,
-) -> Result<(), String> {
+    f: impl FnOnce(&mut escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>) -> Result<T, Fail>,
+) -> Result<T, String> {
     if prn.is_none() {
         let port = serialport::new(&cfg.printer.port, cfg.printer.baud)
             .timeout(Duration::from_millis(1500))
@@ -826,7 +929,7 @@ fn with_port(
         None => Err(Fail::Io("порт принтера не открыт".into())),
     };
     match res {
-        Ok(()) => Ok(()),
+        Ok(v) => Ok(v),
         Err(Fail::Io(e)) => {
             // Порт сломан и не лечится на месте: закрыть, следующий запрос
             // переоткроет с чистыми буферами.
@@ -998,12 +1101,17 @@ fn probe(
                 mon.feed(rec);
             } else if due && mon.recover_attempts >= RECOVER_MAX {
                 mon.last_recover = Some(std::time::Instant::now());
+                // Одна запись на эпизод: пока авария не снята, подсказка
+                // уже видна покупателю, журнал спамить не должен.
+                let first_hint = !mon.health.power_cycle_hint;
                 mon.health.power_cycle_hint = true;
                 set_health(mon.health);
-                log::error!(
-                    "принтер: восстановление не помогло {} раз — требуется выключить и включить питание принтера",
-                    RECOVER_MAX
-                );
+                if first_hint {
+                    log::error!(
+                        "принтер: восстановление не помогло {} раз — требуется выключить и включить питание принтера",
+                        RECOVER_MAX
+                    );
+                }
             }
         }
         mon.feed(s);
@@ -1186,15 +1294,37 @@ pub fn reset_printer(cfg: &crate::config::Config) -> Result<(), PrintError> {
     Ok(())
 }
 
+/// Калибровка длины этикетки шаг-сканом. Скан 40 мм этикетки — ~20 с,
+/// потолок на длинной/зажеванной — до 2 минут; отдельный канал с запасом.
+pub fn calibrate_label(cfg: &crate::config::Config) -> Result<u32, PrintError> {
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
+    let tx = PRINTER_TX.get().ok_or(PrintError::PrinterDisabled)?;
+    let (ack_tx, ack_rx) = mpsc::channel();
+    tx.send(PrinterRequest::Calibrate { ack: ack_tx })
+        .map_err(|_| std::io::Error::other("демон принтера остановлен"))?;
+    ack_rx
+        .recv_timeout(Duration::from_secs(180))
+        .map_err(|_| PrintError::Printer("демон принтера не ответил".into()))?
+        .map_err(PrintError::Printer)
+}
+
 /// Текстовый отчёт диагностики для экрана (моно, расшифровка по мануалу
-/// HPRT; неподдержанные команды — «—»).
-pub fn fmt_diagnostics(d: &PrinterDiagnostics) -> String {
+/// HPRT; неподдержанные команды — «—»). Длина этикетки — из калибровки
+/// (шаг-скан), имя шаблона — из конфигурации раскладки.
+pub fn fmt_diagnostics(
+    d: &PrinterDiagnostics,
+    label_len_mm: Option<i64>,
+    layout_name: Option<&str>,
+) -> String {
     let b = |v: Option<u8>| v.map_or_else(|| "—".into(), |x| format!("{x:#04X}"));
     let s = |v: &Option<String>| v.clone().unwrap_or_else(|| "—".into());
     format!(
         "ПРОШИВКА\n  версия:     {}\n  производ.:  {}\n  модель:     {}\n  серийный:   {}\n\n\
          СТАТУСЫ (DLE EOT)\n  L1 (принтер):    {} — {}\n  L2 (offline):    {} — {}\n  L3 (ошибки):     {} — {}\n  L4 (сенсоры):    {} — {}\n\n\
          ДАТЧИКИ\n  GS r  (бумага):  {} — {}\n  ESC v (печать):  {} — {}\n\n\
+         ЭТИКЕТКА\n  длина:   {}\n  шаблон:  {}\n\n\
          ПОДДЕРЖКА КОМАНД\n  счётчики наработки: нет (прошивка HPRT)\n  автостатус ASB:     не проверен\n  FULL STATUS (EOT 20): нет",
         s(&d.fw_version),
         s(&d.vendor),
@@ -1222,6 +1352,11 @@ pub fn fmt_diagnostics(d: &PrinterDiagnostics) -> String {
             Some(_) => "неизвестно",
             None => "нет ответа",
         },
+        label_len_mm.map_or_else(
+            || "не измерена — нужна калибровка".to_string(),
+            |mm| format!("{mm} мм (шаг-скан)"),
+        ),
+        layout_name.unwrap_or("не загружен"),
     )
 }
 

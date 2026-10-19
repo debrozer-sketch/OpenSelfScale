@@ -2055,7 +2055,7 @@ export component MainWindow inherits Window {
 
             Rectangle {
                 x: 8px; y: 8px;
-                width: (parent.width - 24px) / 2;
+                width: (parent.width - 32px) / 3;
                 height: 56px;
                 border-radius: 12px;
                 border-width: 2px;
@@ -2075,17 +2075,39 @@ export component MainWindow inherits Window {
                 prn-r-ta := TouchArea { clicked => { root.menu-tap("prn-refresh"); } }
             }
             Rectangle {
-                x: 16px + (parent.width - 24px) / 2;
+                x: 16px + (parent.width - 32px) / 3;
                 y: 8px;
-                width: (parent.width - 24px) / 2;
+                width: (parent.width - 32px) / 3;
+                height: 56px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: prn-c-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    width: parent.width - 16px;
+                    x: 8px;
+                    height: parent.height;
+                    text: "Калибровка";
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                prn-c-ta := TouchArea { clicked => { root.menu-tap("prn-calib"); } }
+            }
+            Rectangle {
+                x: 24px + 2 * (parent.width - 32px) / 3;
+                y: 8px;
+                width: (parent.width - 32px) / 3;
                 height: 56px;
                 border-radius: 12px;
                 border-width: 2px;
                 border-color: #C9CFD7;
                 background: prn-x-ta.pressed ? #E4E8ED : #FFFFFF;
                 Text {
-                    width: parent.width - 32px;
-                    x: 16px;
+                    width: parent.width - 16px;
+                    x: 8px;
                     height: parent.height;
                     text: "Сброс аварии";
                     font-size: 22px;

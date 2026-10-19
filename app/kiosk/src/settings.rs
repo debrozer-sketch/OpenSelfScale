@@ -683,7 +683,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             Ok(()) => {
                                 log::info!("меню: принтер: авария сброшена");
                                 match print::printer_diagnostics(&cfg) {
-                                    Ok(d) => print::fmt_diagnostics(&d),
+                                    Ok(d) => {
+                                        let (len, layout) = label_info(&cfg);
+                                        print::fmt_diagnostics(&d, len, layout.as_deref())
+                                    }
                                     Err(e) => format!("Авария сброшена.\nОпрос статуса: {e}"),
                                 }
                             }
@@ -694,9 +697,61 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                 )
                             }
                         };
-                        if let Some(ui) = ui_handle.upgrade() {
-                            ui.set_prn_diag_text(text.into());
-                        }
+                        // Weak::upgrade с set_* допустим только в UI-потоке:
+                        // из фонового обновляем текст через invoke_from_event_loop.
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_prn_diag_text(text.into());
+                            }
+                        })
+                        .ok();
+                    });
+                }
+                "prn-calib" => {
+                    let cfg = cfg.clone();
+                    let ui_handle = ui_handle.clone();
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_prn_diag_text(
+                            "Калибровка: подача этикетки шагами.\nЗаймёт до минуты, не трогайте принтер…".into(),
+                        );
+                    }
+                    std::thread::spawn(move || {
+                        let text = match print::calibrate_label(&cfg) {
+                            Ok(mm) => {
+                                log::info!("меню: калибровка: длина этикетки {mm} мм");
+                                match datastore::open(&cfg.db_path) {
+                                    Ok(conn) => {
+                                        if let Err(e) = datastore::set_calibration(
+                                            &conn,
+                                            "label_length_mm",
+                                            mm as i64,
+                                        ) {
+                                            log::warn!("меню: калибровка: запись в базу: {e}");
+                                        }
+                                    }
+                                    Err(e) => log::warn!("меню: калибровка: база: {e}"),
+                                }
+                                match print::printer_diagnostics(&cfg) {
+                                    Ok(d) => {
+                                        let (len, layout) = label_info(&cfg);
+                                        print::fmt_diagnostics(&d, len, layout.as_deref())
+                                    }
+                                    Err(e) => format!("Калибровка: {mm} мм.\nОпрос статуса: {e}"),
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("меню: принтер: калибровка: {e}");
+                                format!(
+                                    "Калибровка не удалась: {e}\n\nПроверьте заправку этикеток\nи повторите. Если не помогает — сервис."
+                                )
+                            }
+                        };
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_prn_diag_text(text.into());
+                            }
+                        })
+                        .ok();
                     });
                 }
                 "testprint" => {
@@ -1033,7 +1088,10 @@ fn refresh_printer_diag(cfg: &crate::config::Config, ui_handle: &slint::Weak<Mai
     let ui_handle = ui_handle.clone();
     std::thread::spawn(move || {
         let text = match print::printer_diagnostics(&cfg) {
-            Ok(d) => print::fmt_diagnostics(&d),
+            Ok(d) => {
+                let (len, layout) = label_info(&cfg);
+                print::fmt_diagnostics(&d, len, layout.as_deref())
+            }
             Err(e) => format!("Опрос не удался: {e}\n\nЕсли принтер отключён в конфиге,\nэкран недоступен."),
         };
         slint::invoke_from_event_loop(move || {
@@ -1043,6 +1101,18 @@ fn refresh_printer_diag(cfg: &crate::config::Config, ui_handle: &slint::Weak<Mai
         })
         .ok();
     });
+}
+
+/// Информация об этикетке для отчёта: длина из калибровки и имя загруженного
+/// шаблона раскладки. База — короткое чтение ключей, ошибки молча в None.
+fn label_info(cfg: &crate::config::Config) -> (Option<i64>, Option<String>) {
+    let conn = match datastore::open(&cfg.db_path) {
+        Ok(c) => c,
+        Err(_) => return (None, None),
+    };
+    let len = datastore::get_calibration(&conn, "label_length_mm").ok().flatten();
+    let layout = datastore::get_setting(&conn, "label_layout_name").ok().flatten();
+    (len, layout)
 }
 
 fn build_report(cfg: &crate::config::Config, period: usize, kind: usize) -> String {

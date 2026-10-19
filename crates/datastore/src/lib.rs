@@ -78,6 +78,10 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              key   TEXT PRIMARY KEY NOT NULL,
              value INTEGER NOT NULL
          );
+         CREATE TABLE IF NOT EXISTS app_settings (
+             key   TEXT PRIMARY KEY NOT NULL,
+             value TEXT NOT NULL
+         );
          CREATE TABLE IF NOT EXISTS print_log (
              id       INTEGER PRIMARY KEY AUTOINCREMENT,
              ts       INTEGER NOT NULL,
@@ -433,6 +437,22 @@ pub fn get_calibration(conn: &Connection, key: &str) -> Result<Option<i64>, Stor
 pub fn set_calibration(conn: &Connection, key: &str, value: i64) -> Result<(), StoreError> {
     conn.execute(
         "INSERT OR REPLACE INTO calibration (key, value) VALUES (?1, ?2)",
+        rusqlite::params![key, value],
+    )?;
+    Ok(())
+}
+
+/// Текстовая настройка (имя загруженной раскладки и т.п.). calibration
+/// хранит только INTEGER, для строк отдельная таблица.
+pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>, StoreError> {
+    let mut stmt = conn.prepare("SELECT value FROM app_settings WHERE key = ?1")?;
+    let mut rows = stmt.query([key])?;
+    Ok(rows.next()?.map(|r| r.get(0)).transpose()?)
+}
+
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
         rusqlite::params![key, value],
     )?;
     Ok(())
@@ -1026,6 +1046,22 @@ mod tests {
         assert_eq!(get_calibration(&conn, "backward_space").unwrap(), Some(91));
         set_calibration(&conn, "backward_space", 107).unwrap(); // перезапись
         assert_eq!(get_calibration(&conn, "backward_space").unwrap(), Some(107));
+    }
+
+    #[test]
+    fn settings_roundtrip_and_missing_is_none() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        assert_eq!(get_setting(&conn, "label_layout_name").unwrap(), None);
+        set_setting(&conn, "label_layout_name", "58x40").unwrap();
+        assert_eq!(
+            get_setting(&conn, "label_layout_name").unwrap(),
+            Some("58x40".to_string())
+        );
+        set_setting(&conn, "label_layout_name", "58x30").unwrap(); // перезапись
+        assert_eq!(
+            get_setting(&conn, "label_layout_name").unwrap(),
+            Some("58x30".to_string())
+        );
     }
 
     #[test]

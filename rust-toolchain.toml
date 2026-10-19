@@ -1,3 +1,4 @@
 [toolchain]
-# Минимум 1.89: edition 2024 в Cargo.lock (is_multiple_of и др.).
-channel = "stable"
+# Минимум 1.89: edition 2024 и Cargo.lock (is_multiple_of и др.).
+# Зафиксировано точно, чтобы stable «не уехал» вперёд без проверки.
+channel = "1.99.1"
