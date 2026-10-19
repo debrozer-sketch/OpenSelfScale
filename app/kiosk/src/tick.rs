@@ -126,6 +126,9 @@ pub fn start(
                     if let Some(p) = k.pending.clone() {
                         let r = trade.rounding.get();
                         ui.set_popup_empty(ws == 0);
+                        ui.set_popup_under_min(
+                            snap.mass_kg > 0.0 && snap.mass_kg < trade.min_weight_g.get() / 1000.0,
+                        );
                         ui.set_popup_weight(format!("{:.3} кг", snap.mass_kg).into());
                         let g = (snap.mass_kg.max(0.0) * 1000.0).round() as u32;
                         ui.set_popup_sum(sum_str(round_sum(sum_kopecks(p.price, g), r)).into());

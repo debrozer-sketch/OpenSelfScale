@@ -318,6 +318,8 @@ export component MainWindow inherits Window {
     in property <string> popup-sum;
     in property <string> popup-card-sum;
     in property <bool> popup-empty: true;
+    // Вес на платформе есть, но ниже минимального веса печати.
+    in property <bool> popup-under-min: false;
     callback plu-confirm();
     callback plu-cancel();
     in property <length> dept-font: 30px; // единый кегль подписи отдела
@@ -1040,11 +1042,11 @@ export component MainWindow inherits Window {
             if root.popup-empty : Text {
                 x: 24px; y: 320px;
                 width: 672px; height: 56px;
-                text: "Положите товар на весы";
+                text: root.popup-under-min ? "Вес слишком мал" : "Положите товар на весы";
                 font-size: 24px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-                color: #707A86;
+                color: root.popup-under-min ? #B3261E : #707A86;
             }
 
             // Кнопки: отмена и переход к печати.
