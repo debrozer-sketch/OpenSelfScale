@@ -43,13 +43,13 @@ pub fn start(
         let refresh_data = refresh_data;
         let tick_cache = tick_cache.clone();
         let go_root = go_root.clone();
-        // Сторож systemd: пинг из UI-потока — завис поток, нет пинга, рестарт.
-        let mut wd = crate::watchdog::Watchdog::from_env();
+        // Внутренний сторож: каждый тик отмечает живой UI-поток
+        // (watchdog.rs); надзиратель убивает процесс при замерзании UI.
         timer.start(
             slint::TimerMode::Repeated,
             Duration::from_millis(100),
             move || {
-                wd.ping();
+                crate::watchdog::beat();
                 let Some(ui) = ui_handle.upgrade() else { return };
                 let snap = app_state.snapshot();
                 let ws = weight_state(&snap);

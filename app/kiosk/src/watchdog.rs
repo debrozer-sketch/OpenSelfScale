@@ -1,77 +1,55 @@
-//! Сторожевой таймер systemd без внешних крейтов.
+//! Внутренний сторож UI-потока.
 //!
-//! UI-поток раз в несколько секунд шлёт `WATCHDOG=1` в сокет `NOTIFY_SOCKET`.
-//! Если поток завис, systemd через `WatchdogSec` перезапустит киоск. Вне
-//! systemd (разработка, CLI-режимы) переменных окружения нет, пинг — пустая
-//! операция. На не-unix платформах (хост-сборка для тестов) — заглушка.
+//! Тик UI раз в 100 мс ставит метку `beat()`; поток-надзиратель проверяет
+//! свежесть метки: застыла дольше UI_STALE — процесс аварийно завершается,
+//! systemd (Restart=always) поднимает киоск заново. Зачем не sd_notify:
+//! PAM-сессия (PAMName=login) переносит процессы киоска в session-scope,
+//! и systemd атрибутирует дейтаграмму scope-юниту, где WATCHDOG=1
+//! игнорируется («unexpected unit type») — проверено на стенде 19.10.
 
-#[cfg(unix)]
-mod imp {
-    use std::os::unix::net::UnixDatagram;
-    use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
-    pub struct Watchdog {
-        every: Option<Duration>,
-        last: Instant,
-    }
+/// Начало отсчёта монотонных миллисекунд.
+static START: OnceLock<Instant> = OnceLock::new();
+/// Последний тик UI в миллисекундах от START.
+static BEAT_MS: AtomicU64 = AtomicU64::new(0);
+/// Надзиратель запущен.
+static ARMED: AtomicBool = AtomicBool::new(false);
 
-    impl Watchdog {
-        /// Период пинга — треть `WATCHDOG_USEC`; нет переменной — сторож выключен.
-        pub fn from_env() -> Self {
-            let every = std::env::var("WATCHDOG_USEC")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .filter(|&us| us > 0)
-                .map(|us| Duration::from_micros(us / 3).max(Duration::from_secs(1)));
-            if let Some(e) = every {
-                log::info!("systemd watchdog включён, пинг каждые {} с", e.as_secs());
-                notify("READY=1");
-            }
-            Self { every, last: Instant::now() }
-        }
+/// Застывший UI дольше этого = киоск мёртв для покупателя.
+const UI_STALE: Duration = Duration::from_secs(25);
+/// Период проверки надзирателем.
+const CHECK_EVERY: Duration = Duration::from_secs(5);
 
-        /// Вызывать из тика UI-потока; сам ограничивает частоту отправки.
-        pub fn ping(&mut self) {
-            if let Some(every) = self.every {
-                if self.last.elapsed() >= every {
-                    notify("WATCHDOG=1");
-                    self.last = Instant::now();
-                }
-            }
-        }
-    }
-
-    fn notify(msg: &str) {
-        let Ok(path) = std::env::var("NOTIFY_SOCKET") else { return };
-        let Ok(sock) = UnixDatagram::unbound() else { return };
-        let res = if let Some(name) = path.strip_prefix('@') {
-            // Абстрактный сокет (так systemd обычно и передаёт).
-            use std::os::linux::net::SocketAddrExt;
-            std::os::unix::net::SocketAddr::from_abstract_name(name.as_bytes())
-                .and_then(|a| sock.send_to_addr(msg.as_bytes(), &a))
-                .map(|_| ())
-        } else {
-            sock.send_to(msg.as_bytes(), &path).map(|_| ())
-        };
-        if let Err(e) = res {
-            log::warn!("watchdog: не удалось отправить {msg}: {e}");
-        }
+/// Отметка живого UI-тика. Первый вызов запускает надзирателя.
+pub fn beat() {
+    let start = START.get_or_init(Instant::now);
+    BEAT_MS.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+    if !ARMED.swap(true, Ordering::Relaxed) {
+        std::thread::Builder::new()
+            .name("watchdog".into())
+            .spawn(supervisor_loop)
+            .expect("watchdog thread");
     }
 }
 
-#[cfg(not(unix))]
-mod imp {
-    /// Заглушка: на хосте systemd нет, пинг — пустая операция.
-    pub struct Watchdog;
-
-    impl Watchdog {
-        pub fn from_env() -> Self {
-            Self
+fn supervisor_loop() {
+    let start = START.get_or_init(Instant::now);
+    loop {
+        std::thread::sleep(CHECK_EVERY);
+        let last = BEAT_MS.load(Ordering::Relaxed);
+        let now = start.elapsed().as_millis() as u64;
+        // 0 = UI ещё ни разу не тикнул (старт): не убивать.
+        if last == 0 || now.saturating_sub(last) <= UI_STALE.as_millis() as u64 {
+            continue;
         }
-
-        pub fn ping(&mut self) {}
+        log::error!(
+            "watchdog: UI-поток молчит {} с — аварийное завершение для перезапуска",
+            (now - last) / 1000
+        );
+        // systemd перезапустит сервис (Restart=always).
+        std::process::abort();
     }
 }
-
-pub use imp::Watchdog;
-
