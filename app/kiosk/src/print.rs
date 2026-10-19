@@ -270,7 +270,8 @@ const FAULT_CONFIRM: u8 = 2;
 const SILENT_CONFIRM: u8 = 3;
 /// Сколько ждать выдачи этикетки после задания (ожидание — для контроля
 /// аварии и журнала, не для блокировки покупателя дольше необходимого).
-const PRESENT_WAIT: Duration = Duration::from_secs(6);
+/// На стенде детект выдачи стабильно ~600 мс, 3 с — пятикратный запас.
+const PRESENT_WAIT: Duration = Duration::from_secs(3);
 /// Задание печати старше этого срока не печатается (экран покупателя
 /// сдаётся по таймауту 30 с, поэтому берём чуть меньше).
 const STALE_JOB: Duration = Duration::from_secs(25);
