@@ -526,9 +526,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         log::info!("меню: округление цены: режим {v}");
                     });
                 }
-                // Минимальный вес печати: 5 / 10 / 20 / 50 г.
+                // Минимальный вес печати: 10 / 20 / 50 г. Шага 5 г нет:
+                // шум пустой платформы −6 г, Min торговых весов выше.
                 "minweight" => {
-                    const STEPS: [i64; 4] = [5, 10, 20, 50];
+                    const STEPS: [i64; 3] = [10, 20, 50];
                     let cur = trade.min_weight_g.get() as i64;
                     let next = *STEPS.iter().find(|s| **s > cur).unwrap_or(&STEPS[0]);
                     let trade = trade.clone();
@@ -909,10 +910,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         trade.rounding.set(v.clamp(0, 2));
                     }
                     if let Some(v) = f.min_weight_g {
-                        trade.min_weight_g.set(v.clamp(1, 1000) as f64);
+                        trade.min_weight_g.set(v.clamp(10, 1000) as f64);
                     }
                     if let Some(v) = f.idle_timeout_secs {
-                        idle_secs.set(v.clamp(10, 600) as u64);
+                        idle_secs.set(v.clamp(10, 60) as u64);
                     }
                     refresh_data();
                     refresh_setting_labels(&ui_handle, &trade, &idle_secs);
@@ -1004,9 +1005,14 @@ fn build_report(cfg: &crate::config::Config, period: usize, kind: usize) -> Stri
         Ok(r) => r,
         Err(e) => return format!("Журнал: {e}"),
     };
+    // Реальное число операций с теми же фильтрами — без LIMIT 20.
+    let total = match datastore::print_log_count_filtered(&conn, since, ok) {
+        Ok(n) => n,
+        Err(e) => return format!("Журнал: {e}"),
+    };
     let mut text = match (period, kind) {
-        (4, 0) => format!("Операций всего: {}\n", rows.len()),
-        _ => format!("Операций за период: {}\n", rows.len()),
+        (4, 0) => format!("Операций всего: {total}\n"),
+        _ => format!("Операций за период: {total}\n"),
     };
     if rows.len() == 20 {
         text.push_str("(показаны последние 20)\n");

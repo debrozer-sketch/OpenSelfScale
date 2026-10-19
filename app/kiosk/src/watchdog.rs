@@ -24,9 +24,12 @@ const UI_STALE: Duration = Duration::from_secs(25);
 const CHECK_EVERY: Duration = Duration::from_secs(5);
 
 /// Отметка живого UI-тика. Первый вызов запускает надзирателя.
+/// Метка никогда не 0: ноль зарезервирован под «UI ещё не тикнул», а
+/// зависший сразу после первого тика UI обязан ловиться.
 pub fn beat() {
     let start = START.get_or_init(Instant::now);
-    BEAT_MS.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+    let ms = (start.elapsed().as_millis() as u64).max(1);
+    BEAT_MS.store(ms, Ordering::Relaxed);
     if !ARMED.swap(true, Ordering::Relaxed) {
         std::thread::Builder::new()
             .name("watchdog".into())

@@ -45,6 +45,10 @@ pub struct PluItem {
 /// в том числе в тике интерфейса) — повторное открытие пропускает их.
 pub fn open(path: &Path) -> Result<Connection, StoreError> {
     let conn = Connection::open(path)?;
+    // Явное ожидание занятой БД: киоск пишет журнал/калибровки, синхронизация
+    // — каталог; без таймаута SQLite вернул бы SQLITE_BUSY сразу, с ним —
+    // обе стороны переживают короткую блокировку без ошибок.
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     let key = path.to_string_lossy().into_owned();
     // БД в памяти живёт ровно одно соединение — миграции всегда нужны.
     let already = key != ":memory:"
@@ -82,7 +86,8 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              weight_g INTEGER,
              sum_kop  INTEGER,
              ok       INTEGER NOT NULL
-         );",
+         );
+         CREATE INDEX IF NOT EXISTS idx_print_log_ts ON print_log (ts);",
     )?;
     // Миграция: скидочная цена (по карте). NULL = второй цены нет, показываем
     // только обычную. Появилась позже выгрузки старого ПО — колонка добавляется.
@@ -461,6 +466,34 @@ pub fn print_log_count_since(conn: &Connection, ts: i64) -> Result<i64, StoreErr
         "SELECT COUNT(*) FROM print_log WHERE ok = 1 AND ts >= ?1",
         [ts],
         |r| r.get(0),
+    )
+    .map_err(StoreError::from)
+}
+
+/// Число операций с теми же фильтрами, что у print_log_filtered: граница
+/// времени (None — всё время) и статус (None — все, Some(true) — успешные,
+/// Some(false) — ошибки). Отчёт показывает реальное число, не LIMIT.
+pub fn print_log_count_filtered(
+    conn: &Connection,
+    since_ts: Option<i64>,
+    ok: Option<bool>,
+) -> Result<i64, StoreError> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM print_log
+         WHERE (?1 IS NULL OR ts >= ?1) AND (?2 IS NULL OR ok = ?2)",
+        rusqlite::params![since_ts, ok.map(|v| v as i64)],
+        |r| r.get(0),
+    )
+    .map_err(StoreError::from)
+}
+
+/// Чистка журнала печатей: записи старше 90 дней удаляются. Вызывается
+/// периодически вызывающей стороной (не на каждой вставке).
+pub fn print_log_prune(conn: &Connection, now_ts: i64) -> Result<usize, StoreError> {
+    const RETENTION_SECS: i64 = 90 * 86_400;
+    conn.execute(
+        "DELETE FROM print_log WHERE ts < ?1",
+        [now_ts - RETENTION_SECS],
     )
     .map_err(StoreError::from)
 }

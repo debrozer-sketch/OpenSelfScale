@@ -313,7 +313,7 @@ fn run_kiosk(cfg: config::Config) {
             sort_alpha: std::rc::Rc::new(std::cell::Cell::new(cal("dept_sort_alpha").unwrap_or(1) != 0)),
             rounding: std::rc::Rc::new(std::cell::Cell::new(cal("price_rounding").unwrap_or(0).clamp(0, 2))),
             min_weight_g: std::rc::Rc::new(std::cell::Cell::new(
-                cal("min_weight_g").map(|v| v.clamp(1, 1000) as f64).unwrap_or(10.0),
+                cal("min_weight_g").map(|v| v.clamp(10, 1000) as f64).unwrap_or(10.0),
             )),
         }
     };

@@ -28,9 +28,9 @@ pub fn start(
     // Начальные значения повторяют дефолты UI-свойств (false/0/-1): иначе
     // первый тик с поднятой связью не ставит scales_ok и полоса остаётся
     // красной («Ошибка весов») при работающих весах.
-    type TickCache = (String, i32, bool, bool, i32, bool);
+    type TickCache = (String, i32, bool, bool, i32, bool, bool);
     let tick_cache: Rc<RefCell<TickCache>> =
-        Rc::new(RefCell::new((String::new(), -1, false, false, -1, false)));
+        Rc::new(RefCell::new((String::new(), -1, false, false, -1, false, false)));
     let timer = slint::Timer::default();
     {
         let kiosk = ctx.kiosk.clone();
@@ -89,6 +89,10 @@ pub fn start(
                     if c.5 != ph.label_waiting {
                         c.5 = ph.label_waiting;
                         ui.set_label_waiting(ph.label_waiting);
+                    }
+                    if c.6 != ph.power_cycle_hint {
+                        c.6 = ph.power_cycle_hint;
+                        ui.set_printer_power_hint(ph.power_cycle_hint);
                     }
                 }
                 // Модальная блокировка «лента закончилась»: пока принтер в

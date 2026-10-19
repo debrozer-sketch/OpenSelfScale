@@ -294,18 +294,23 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             let mut gd_map: std::collections::HashMap<String, String> =
                 gd_pairs.into_iter().collect();
             // Группы без отдела уходят в «ПРОЧЕЕ», а не пропадают из меню.
+            // route_unmapped_groups создаёт отдел в БД — список отделов
+            // перечитываем, иначе новый «ПРОЧЕЕ» не виден до пересборки.
+            let mut depts = depts;
             if let Ok(conn) = datastore::open(&cfg.db_path) {
                 match datastore::route_unmapped_groups(&conn, &mut gd_map, &all_groups) {
                     Ok(un) if !un.is_empty() => {
                         for g in &un {
                             log::warn!("группа без отдела: {g} → {}", datastore::FALLBACK_DEPT);
                         }
+                        if let Ok(d) = datastore::depts_list(&conn) {
+                            depts = d;
+                        }
                     }
                     Ok(_) => {}
                     Err(e) => log::error!("раскладка: группы без отдела: {e}"),
                 }
             }
-            let mut depts = depts;
             if trade.sort_alpha.get() {
                 depts.sort_by(|a, b| a.name.cmp(&b.name));
             }

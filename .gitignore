@@ -34,3 +34,4 @@ __pycache__/
 ready.flg
 audit/prod-backup/
 probe_ssh.py
+deploy/vnc_passwd

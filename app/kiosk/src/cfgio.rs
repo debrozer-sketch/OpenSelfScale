@@ -105,7 +105,7 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
         dept_sort_alpha: Some(sort != 0),
         idle_timeout_secs: Some(idle),
         price_rounding: Some(rounding.clamp(0, 2)),
-        min_weight_g: Some(minw.clamp(1, 1000)),
+        min_weight_g: Some(minw.clamp(10, 1000)),
         depts,
     };
     let dir = export_dir(cfg);
@@ -134,8 +134,21 @@ pub fn list(cfg: &Config) -> Vec<PathBuf> {
 }
 
 /// Чтение и разбор файла. Неверная версия формата — ошибка (не рискуем
-/// применить непонятное).
+/// применить непонятное). Размер ограничен: каталог доступен по FTP,
+/// гигантский файл не должен осмысленно разбираться.
+pub const MAX_FILE_BYTES: u64 = 256 * 1024;
+
 pub fn parse(path: &Path) -> Result<ConfigFile, String> {
+    let len = std::fs::metadata(path)
+        .map_err(|e| format!("чтение {}: {e}", path.display()))?
+        .len();
+    if len > MAX_FILE_BYTES {
+        return Err(format!(
+            "файл {} КБ — слишком большой (лимит {} КБ)",
+            len / 1024,
+            MAX_FILE_BYTES / 1024
+        ));
+    }
     let body = std::fs::read_to_string(path)
         .map_err(|e| format!("чтение {}: {e}", path.display()))?;
     let parsed: ConfigFile =
@@ -159,7 +172,7 @@ pub fn preview(f: &ConfigFile) -> String {
         2 => "до 1 руб",
         _ => "нет",
     };
-    let minw = f.min_weight_g.unwrap_or(10).clamp(1, 1000);
+    let minw = f.min_weight_g.unwrap_or(10).clamp(10, 1000);
     let colored = f
         .depts
         .iter()
@@ -173,22 +186,43 @@ pub fn preview(f: &ConfigFile) -> String {
 }
 
 /// Запись настроек из файла в БД. Возвращает краткий итог для попапа.
+/// Всё применяется в одной транзакции: сбой на середине не оставляет
+/// наполовину изменённой конфигурации.
 pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
+    const MAX_DEPTS: usize = 64;
+    const MAX_NAME_CHARS: usize = 24;
+    if f.depts.len() > MAX_DEPTS {
+        return Err(format!(
+            "отделов в файле {} — лимит {MAX_DEPTS}",
+            f.depts.len()
+        ));
+    }
+    for e in &f.depts {
+        if e.name().chars().count() > MAX_NAME_CHARS {
+            return Err(format!(
+                "название отдела «{}» длиннее {MAX_NAME_CHARS} символов",
+                e.name()
+            ));
+        }
+    }
     let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("транзакция: {e}"))?;
     if let Some(v) = f.dept_cols {
-        datastore::set_calibration(&conn, "dept_cols", v.clamp(1, 5)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "dept_cols", v.clamp(1, 5)).map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.dept_sort_alpha {
-        datastore::set_calibration(&conn, "dept_sort_alpha", i64::from(v)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "dept_sort_alpha", i64::from(v)).map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.idle_timeout_secs {
-        datastore::set_calibration(&conn, "idle_timeout_secs", v.clamp(10, 60)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "idle_timeout_secs", v.clamp(10, 60)).map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.price_rounding {
-        datastore::set_calibration(&conn, "price_rounding", v.clamp(0, 2)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "price_rounding", v.clamp(0, 2)).map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.min_weight_g {
-        datastore::set_calibration(&conn, "min_weight_g", v.clamp(1, 1000)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "min_weight_g", v.clamp(10, 1000)).map_err(|e| e.to_string())?;
     }
     if !f.depts.is_empty() {
         let entries: Vec<(String, Option<String>, Option<String>)> = f
@@ -205,22 +239,23 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
             .collect();
         let names: Vec<String> = entries.iter().map(|(n, _, _)| n.clone()).collect();
         for (i, (name, _, _)) in entries.iter().enumerate() {
-            conn.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO depts (name, ord) VALUES (?1, ?2)",
                 rusqlite::params![name, i as i64],
             )
             .map_err(|e| e.to_string())?;
         }
-        datastore::dept_reorder(&conn, &names).map_err(|e| format!("порядок отделов: {e}"))?;
+        datastore::dept_reorder(&tx, &names).map_err(|e| format!("порядок отделов: {e}"))?;
         let mut colored = 0usize;
         for (name, bg, fg) in &entries {
             if bg.is_none() && fg.is_none() {
                 continue;
             }
-            datastore::dept_style(&conn, name, None, bg.as_deref().map(Some), fg.as_deref().map(Some))
+            datastore::dept_style(&tx, name, None, bg.as_deref().map(Some), fg.as_deref().map(Some))
                 .map_err(|e| format!("цвет отдела {name}: {e}"))?;
             colored += 1;
         }
+        tx.commit().map_err(|e| format!("запись: {e}"))?;
         return Ok(format!(
             "Импортировано: отделов {}, с цветом {}, колонок {}, округление, минимум веса",
             entries.len(),
@@ -228,6 +263,7 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
             f.dept_cols.unwrap_or(2).clamp(1, 5)
         ));
     }
+    tx.commit().map_err(|e| format!("запись: {e}"))?;
     Ok(format!(
         "Импортировано: отделов 0, колонок {}, округление, минимум веса",
         f.dept_cols.unwrap_or(2).clamp(1, 5)

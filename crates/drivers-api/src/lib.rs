@@ -69,6 +69,10 @@ pub struct PrinterProfile {
     /// (разбор аварий). В боевом режиме выключен: дамп включает ASB принтера
     /// и занимает порт почти на 2 с каждые 10 с.
     pub debug_dump: bool,
+    /// Сколько секунд ждать выдачи этикетки после задания. На стенде детект
+    /// ~600 мс; длинная этикетка или логотип могут печататься дольше — при
+    /// «этикетка не выдана» на реально напечатанной этикетке увеличить.
+    pub present_wait_secs: u32,
 }
 
 impl Default for PrinterProfile {
@@ -79,6 +83,7 @@ impl Default for PrinterProfile {
             baud: 19_200,
             enabled: true,
             debug_dump: false,
+            present_wait_secs: 3,
         }
     }
 }

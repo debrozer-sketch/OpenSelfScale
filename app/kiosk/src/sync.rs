@@ -65,23 +65,48 @@ fn parse_canonical_json(text: &str) -> Result<(Vec<datastore::PluItem>, usize), 
             Err(_) => skipped += 1,
         }
     }
+    // Правило как у plu.xml: больше 10% битых записей — файл отвергается,
+    // конвертер поставщика явно сломался.
+    if skipped > 0 && (items.is_empty() || skipped * 10 > items.len() + skipped) {
+        return Err(format!(
+            "канонический JSON: битых записей {skipped} из {} — файл отвергнут",
+            items.len() + skipped
+        ));
+    }
     Ok((items, skipped))
 }
 
 /// Запуск внешнего конвертера: аргумент — файл поставщика, stdout —
-/// канонический JSON. Вывод уходит во временный файл (безопасно для любого
-/// объёма), процесс снимается по таймауту.
+/// канонический JSON. Вывод уходит во временный файл рядом с входным
+/// (каталог обмена принадлежит сервису, /tmp общий — там симлинк-атаки),
+/// создаётся эксклюзивно. stderr не читается — в null, иначе конвертер
+/// с многословным выводом зависнет в переполненном пайпе до таймаута.
+/// Лимит вывода: 32 МБ.
+const EXTERNAL_MAX_OUT: u64 = 32 * 1024 * 1024;
+
 fn run_external(cmd: &str, input: &Path) -> Result<String, String> {
     let cmd = cmd.trim();
     if cmd.is_empty() {
         return Err("[center].external_cmd не задан".into());
     }
-    let out_path = std::env::temp_dir().join(format!("scalefw-canonical-{}.json", std::process::id()));
-    let out = std::fs::File::create(&out_path).map_err(|e| format!("temp: {e}"))?;
+    let dir = input.parent().unwrap_or_else(|| Path::new("."));
+    let out_path = dir.join(format!(
+        "scalefw-canonical-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0)
+    ));
+    let out = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&out_path)
+        .map_err(|e| format!("temp {}: {e}", out_path.display()))?;
     let mut child = std::process::Command::new(cmd)
         .arg(input)
         .stdout(std::process::Stdio::from(out))
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
         .spawn()
         .map_err(|e| format!("запуск {cmd}: {e}"))?;
     let deadline = std::time::Instant::now() + EXTERNAL_TIMEOUT;
@@ -97,13 +122,20 @@ fn run_external(cmd: &str, input: &Path) -> Result<String, String> {
             Err(e) => break Err(format!("ожидание конвертера: {e}")),
         }
     };
-    let data = std::fs::read_to_string(&out_path).unwrap_or_default();
+    let raw = std::fs::read(&out_path).unwrap_or_default();
     let _ = std::fs::remove_file(&out_path);
     let status = status?;
     if !status.success() {
         return Err(format!("конвертер завершился с ошибкой ({status})"));
     }
-    Ok(data)
+    if raw.len() as u64 > EXTERNAL_MAX_OUT {
+        return Err(format!(
+            "вывод конвертера {} МБ — лимит {} МБ",
+            raw.len() / (1024 * 1024),
+            EXTERNAL_MAX_OUT / (1024 * 1024)
+        ));
+    }
+    String::from_utf8(raw).map_err(|_| "вывод конвертера — не UTF-8".into())
 }
 
 /// Архив выгрузки: исходные plu.xml/layout.xml с датой в имени
@@ -275,6 +307,13 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         let n = cfg.center.external_input.trim();
         if n.is_empty() {
             return Err("protocol = \"external\", но [center].external_input не задан".into());
+        }
+        // Только имя файла в каталоге обмена: абсолютный путь или «..»
+        // вывели бы чтение/конвертацию за пределы incoming_dir.
+        if n.contains('/') || n.contains('\\') || n == ".." || n.starts_with('.') {
+            return Err(format!(
+                "[center].external_input = \"{n}\": ожидается просто имя файла в каталоге обмена"
+            ));
         }
         std::path::PathBuf::from(n)
     } else {
@@ -601,16 +640,31 @@ mod tests {
 
     #[test]
     fn canonical_json_skips_bad_rows() {
+        // 2 битых из 22 (~9%) — ниже порога 10%, файл принимается.
+        let mut rows: Vec<String> = Vec::new();
+        for i in 0..20 {
+            rows.push(format!(r#"{{"plu":"9{i:02}","name":"ТОВАР {i}","price_kop":100}}"#));
+        }
+        rows.push(r#"{"plu":"","name":"БЕЗ КОДА","price_kop":100}"#.into());
+        rows.push(r#"{"plu":"31","name":"","price_kop":-5}"#.into());
+        let s = format!("[{}]", rows.join(","));
+        let (items, skipped) = parse_canonical_json(&s).unwrap();
+        assert_eq!(skipped, 2);
+        assert_eq!(items.len(), 20);
+        assert_eq!(items[0].plu, "900");
+    }
+
+    #[test]
+    fn canonical_json_rejects_mostly_broken() {
+        // >10% битых записей — файл отвергается, как у plu.xml.
         let s = r#"[
             {"plu":"","name":"БЕЗ КОДА","price_kop":100},
             {"plu":"31","name":"","price_kop":100},
             {"plu":"32","name":"ХОРОШИЙ","price_kop":-5},
             {"plu":"33","name":"ГОДНЫЙ","price_kop":5000}
         ]"#;
-        let (items, skipped) = parse_canonical_json(s).unwrap();
-        assert_eq!(skipped, 3);
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].plu, "33");
+        let e = parse_canonical_json(s).unwrap_err();
+        assert!(e.contains("отвергнут"), "{e}");
     }
 
     #[test]

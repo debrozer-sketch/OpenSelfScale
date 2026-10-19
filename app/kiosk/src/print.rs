@@ -241,6 +241,9 @@ pub struct PrinterHealth {
     pub paper_end: bool,
     pub paper_near_end: bool,
     pub label_waiting: bool,
+    /// Лестница восстановления исчерпана (стенд: клин 0x12 снимается только
+    /// питанием) — попап просит выключить и включить питание принтера.
+    pub power_cycle_hint: bool,
 }
 
 /// Запрос демону принтера. Порт — его собственность, обращаться только
@@ -364,13 +367,17 @@ const FAULT_CONFIRM: u8 = 2;
 const SILENT_CONFIRM: u8 = 3;
 /// Сколько ждать выдачи этикетки после задания (ожидание — для контроля
 /// аварии и журнала, не для блокировки покупателя дольше необходимого).
-/// На стенде детект выдачи стабильно ~600 мс, 3 с — пятикратный запас.
-const PRESENT_WAIT: Duration = Duration::from_secs(3);
+/// Значение из конфига ([printer] present_wait_secs, дефолт 3): на стенде
+/// детект выдачи ~600 мс; длинная этикетка/логотип печатаются дольше.
+const PRESENT_WAIT_MAX: Duration = Duration::from_secs(20);
 /// Задание печати старше этого срока не печатается (экран покупателя
 /// сдаётся по таймауту 30 с, поэтому берём чуть меньше).
 const STALE_JOB: Duration = Duration::from_secs(25);
 /// Повтор лестницы восстановления из фонового опроса не чаще этого.
 const RECOVER_COOLDOWN: Duration = Duration::from_secs(10);
+/// Сколько лестниц подряд пробовать, прежде чем просить питание принтера:
+/// стенд доказал, клин 0x12 программно не снимается.
+const RECOVER_MAX: u8 = 3;
 /// Таймаут чтения одного ответа DLE EOT (реальный ответ — единицы мс).
 const L4_READ_TIMEOUT: Duration = Duration::from_millis(300);
 
@@ -401,6 +408,10 @@ struct Monitor {
     silent_streak: u8,
     label_since: Option<std::time::Instant>,
     last_recover: Option<std::time::Instant>,
+    /// Подряд неудачных лестниц восстановления. Стенд показал: клин 0x12
+    /// программно не снимается, повторять бесконечно бессмысленно — после
+    /// RECOVER_MAX попыток просим питание и ждём события от принтера.
+    recover_attempts: u8,
     health: PrinterHealth,
 }
 
@@ -413,6 +424,12 @@ impl Monitor {
                 self.fault_streak =
                     if escpos::l4_fault(b) { self.fault_streak.saturating_add(1) } else { 0 };
                 self.health.fault = self.fault_streak >= FAULT_CONFIRM;
+                if !escpos::l4_fault(b) {
+                    // Принтер вышел из аварии (заправка, снятие этикетки):
+                    // счётчик лестниц и подсказка про питание сбрасываются.
+                    self.recover_attempts = 0;
+                    self.health.power_cycle_hint = false;
+                }
                 let in_tray = escpos::label_in_tray(b);
                 if in_tray && !self.health.label_waiting {
                     self.label_since = Some(std::time::Instant::now());
@@ -544,6 +561,7 @@ fn print_job(
     port: &mut Box<dyn serialport::SerialPort>,
     bytes: &[u8],
     mon: &mut Monitor,
+    present_wait: Duration,
 ) -> Result<(), Fail> {
     ensure_ready(port)?;
     drain_port_rx(port);
@@ -554,7 +572,7 @@ fn print_job(
     let mut fault_hits = 0u8;
     let mut presented = false;
     let mut last = None;
-    while t0.elapsed() < PRESENT_WAIT {
+    while t0.elapsed() < present_wait {
         std::thread::sleep(Duration::from_millis(250));
         let s = read_l4(port, 1);
         trace.push_str(&format!("{}ms:{} ", t0.elapsed().as_millis(), fmt_l4(s)));
@@ -601,7 +619,23 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
     // закрывает: принтер отвечает, порт исправен.
     let mut prn: Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>> = None;
     let mut mon = Monitor::default();
+    // Чистка журнала печатей: при старте демона и раз в 6 часов.
+    let mut next_prune = std::time::Instant::now();
     loop {
+        if std::time::Instant::now() >= next_prune {
+            if let Ok(conn) = datastore::open(&cfg.db_path) {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                match datastore::print_log_prune(&conn, now) {
+                    Ok(n) if n > 0 => log::info!("журнал печатей: удалено записей: {n}"),
+                    Ok(_) => {}
+                    Err(e) => log::error!("журнал печатей: чистка: {e}"),
+                }
+            }
+            next_prune = std::time::Instant::now() + Duration::from_secs(6 * 3600);
+        }
         match rx.recv_timeout(mon.next_probe()) {
             Ok(PrinterRequest::Print { bytes, ack, queued_at, meta }) => {
                 if queued_at.elapsed() > STALE_JOB {
@@ -612,10 +646,19 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                     finish(ack, Err("задание печати устарело".into()), "печать");
                     continue;
                 }
-                let res = with_port(cfg, &mut prn, |p| print_job(p.port_mut(), &bytes, &mut mon));
+                let wait = Duration::from_secs(cfg.printer.present_wait_secs.max(1) as u64)
+                    .min(PRESENT_WAIT_MAX);
+                let res = with_port(cfg, &mut prn, |p| {
+                    print_job(p.port_mut(), &bytes, &mut mon, wait)
+                });
                 if res.is_err() {
                     mon.note_failure();
                 }
+                let print_ok = res.is_ok();
+                // Покупатель получает ответ до записи журнала: открытие БД
+                // и вставка могут ждать синхронизацию, UI не должен ждать
+                // вместе с ними.
+                finish(ack, res, "печать");
                 // Журнал печатей: пишется независимо от результата, ошибки
                 // журнала печать не трогают.
                 if let Some(m) = meta {
@@ -631,12 +674,11 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                                 name: Some(m.name),
                                 weight_g: Some(m.weight_g as i64),
                                 sum_kop: Some(m.sum_kop),
-                                ok: res.is_ok(),
+                                ok: print_ok,
                             },
                         );
                     }
                 }
-                finish(ack, res, "печать");
             }
             Ok(PrinterRequest::Feed { ack }) => {
                 let res = with_port(cfg, &mut prn, |p| {
@@ -855,16 +897,32 @@ fn probe(
         }
         // Подтверждённая авария с живым ответом: пробуем лестницу восстановления
         // прямо из фонового опроса (с кулдауном) — после заправки ленты попап
-        // уходит сам, без печати и без «Подачи».
+        // уходит сам, без печати и без «Подачи». После RECOVER_MAX неудач
+        // лестница прекращается: на стенде клин 0x12 снимается только питанием,
+        // бесконечные повторы ничего не дают — попап просит питание.
         if s.is_some_and(escpos::l4_fault) {
             let due = mon
                 .last_recover
                 .is_none_or(|t| t.elapsed() >= RECOVER_COOLDOWN);
-            if due {
+            if due && mon.recover_attempts < RECOVER_MAX {
                 mon.last_recover = Some(std::time::Instant::now());
-                log::warn!("принтер: авария в фоне (L4 = {}), пробую восстановить", fmt_l4(s));
+                mon.recover_attempts += 1;
+                log::warn!(
+                    "принтер: авария в фоне (L4 = {}), восстановление {}/{}",
+                    fmt_l4(s),
+                    mon.recover_attempts,
+                    RECOVER_MAX
+                );
                 let rec = recover_printer(port);
                 mon.feed(rec);
+            } else if due && mon.recover_attempts >= RECOVER_MAX {
+                mon.last_recover = Some(std::time::Instant::now());
+                mon.health.power_cycle_hint = true;
+                set_health(mon.health);
+                log::error!(
+                    "принтер: восстановление не помогло {} раз — требуется выключить и включить питание принтера",
+                    RECOVER_MAX
+                );
             }
         }
         mon.feed(s);
