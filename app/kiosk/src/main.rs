@@ -309,6 +309,25 @@ fn run_kiosk(cfg: config::Config) {
         }
     };
 
+    // Палитра плиток: из конфига ([kiosk] dept_palette, "RRGGBB:RRGGBB"),
+    // пусто — встроенная пастель. Невалидные записи — предупреждение.
+    let mut palette_warn = Vec::new();
+    let mut pairs = cfg.kiosk.palette_pairs(&mut palette_warn);
+    let palette_custom = !pairs.is_empty();
+    if pairs.is_empty() {
+        pairs = crate::tiles::stock_palette();
+    }
+    let palette_names: Vec<String> = if palette_custom {
+        (1..=pairs.len()).map(|i| format!("Цвет {i}")).collect()
+    } else {
+        admin::PALETTE_NAMES.iter().map(|s| s.to_string()).collect()
+    };
+    for w in &palette_warn {
+        log::warn!("конфиг: {w}");
+    }
+    let palette = std::rc::Rc::new(pairs);
+    let palette_names = std::rc::Rc::new(palette_names);
+
     let ctx = AppContext {
         ui: ui.as_weak(),
         cfg: cfg.clone(),
@@ -322,6 +341,8 @@ fn run_kiosk(cfg: config::Config) {
         items_all,
         group_dept,
         idle_secs,
+        palette,
+        palette_names,
     };
 
     // Поток покупателя и меню настроек регистрируют свои колбэки на UI.

@@ -265,6 +265,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let depts_all = depts_all.clone();
         let group_dept = group_dept.clone();
         let img_dir = img_dir.clone();
+        let palette = ctx.palette.clone();
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
             let (depts, gd_pairs, all_groups) = match datastore::open(&cfg.db_path) {
@@ -310,7 +311,8 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             }
             *group_dept.borrow_mut() = gd_map;
             let gd = group_dept.borrow();
-            *depts_all.borrow_mut() = tiles::dept_tiles(&depts, &gd, &all_groups, &img_dir);
+            *depts_all.borrow_mut() =
+                tiles::dept_tiles(&depts, &gd, &all_groups, &img_dir, &palette);
             drop(gd);
 
             // Геометрия ряда: колонок может стать меньше/больше без

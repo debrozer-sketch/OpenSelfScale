@@ -42,4 +42,8 @@ pub struct AppContext {
     pub items_all: Rc<RefCell<Vec<PluTile>>>,
     pub group_dept: Rc<RefCell<HashMap<String, String>>>,
     pub idle_secs: Rc<std::cell::Cell<u64>>,
+    /// Палитра плиток отделов (bg, fg): из конфига или сток. Имена —
+    /// подписи цикла в редакторе («Зелёный»/«Цвет N»).
+    pub palette: Rc<Vec<(u32, u32)>>,
+    pub palette_names: Rc<Vec<String>>,
 }

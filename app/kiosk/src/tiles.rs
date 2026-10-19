@@ -116,6 +116,12 @@ pub(crate) const DEPT_PALETTE: &[(u32, u32, u32)] = &[
     (0xF5E9E0, 0x6B4433, 0xECDBCE), // персиковый
 ];
 
+/// Стоковая палитра в виде пар (bg, fg) — для вызовов dept_tiles и цикла
+/// редактора, пока пользователь не задал свою в конфиге.
+pub(crate) fn stock_palette() -> Vec<(u32, u32)> {
+    DEPT_PALETTE.iter().map(|p| (p.0, p.1)).collect()
+}
+
 fn parse_hex(s: &str) -> Option<u32> {
     u32::from_str_radix(s.trim_start_matches('#'), 16).ok().filter(|&v| v <= 0xFF_FFFF)
 }
@@ -128,6 +134,7 @@ pub fn dept_tiles(
     group_dept: &std::collections::HashMap<String, String>,
     counts: &[(String, i64)],
     img_dir: &Path,
+    palette: &[(u32, u32)],
 ) -> Vec<crate::DeptDef> {
     // Число видимых товаров по отделам за один проход (вместо O(D*G)).
     let mut per_dept: std::collections::HashMap<&str, i64> = std::collections::HashMap::new();
@@ -140,14 +147,16 @@ pub fn dept_tiles(
     }
     // Индекс палитры — по отфильтрованному списку: скрытые пустые отделы
     // не сдвигают цвета (иначе палитра «прыгает» между синхронизациями).
+    // Кастомная палитра из конфига пустой не бывает: вызывающая сторона
+    // подставляет DEPT_PALETTE.
     depts.iter()
         .filter(|d| per_dept.contains_key(d.name.as_str()))
         .enumerate()
         .map(|(i, d)| {
-            // Цвет: из БД (bg/fg), иначе авто-палитра по позиции. Фон нажатия —
+            // Цвет: из БД (bg/fg), иначе палитра по позиции. Фон нажатия —
             // фоновый цвет, затемнённый на 8% (вручную задан не будет: pastel
             // + затемнение = стабильный pressed без ручного третьего цвета).
-            let auto = DEPT_PALETTE[i % DEPT_PALETTE.len()];
+            let auto = palette[i % palette.len()];
             let bg = d.bg.as_deref().and_then(parse_hex).unwrap_or(auto.0);
             let fg = d.fg.as_deref().and_then(parse_hex).unwrap_or(auto.1);
             let darken = |c: u32| -> u32 {
@@ -233,7 +242,8 @@ mod tests {
         ];
         let gd = [("ВИНОГРАД".to_string(), "ФРУКТЫ".to_string())].into_iter().collect();
         let counts = [("ВИНОГРАД".to_string(), 3i64)];
-        let tiles = dept_tiles(&depts, &gd, &counts, Path::new("/nonexistent"));
+        let tiles =
+            dept_tiles(&depts, &gd, &counts, Path::new("/nonexistent"), &stock_palette());
         assert_eq!(tiles.len(), 1);
         assert_eq!(tiles[0].id, "ФРУКТЫ");
     }

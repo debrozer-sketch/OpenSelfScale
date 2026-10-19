@@ -141,6 +141,9 @@ pub struct KioskProfile {
     pub idle_timeout_secs: u64,
     /// Каталог обмена конфигурацией (экспорт/импорт, «Настройки весов»).
     pub cfg_export_dir: PathBuf,
+    /// Кастомная палитра плиток отделов, записи "RRGGBB:RRGGBB" (фон:текст).
+    /// Пусто — встроенная пастельная палитра.
+    pub dept_palette: Vec<String>,
 }
 
 impl Default for KioskProfile {
@@ -149,7 +152,35 @@ impl Default for KioskProfile {
             return_to_root_after_print: true,
             idle_timeout_secs: 30,
             cfg_export_dir: PathBuf::from("/var/ftp/scale/cfg"),
+            dept_palette: Vec::new(),
         }
+    }
+}
+
+impl KioskProfile {
+    /// Разбор кастомной палитры. Невалидные записи пропускаются с
+    /// предупреждением (в config.warnings), пустой результат = сток.
+    pub fn palette_pairs(&self, warnings: &mut Vec<String>) -> Vec<(u32, u32)> {
+        let mut out = Vec::new();
+        for (i, entry) in self.dept_palette.iter().enumerate() {
+            let (bg, fg) = match entry.split_once(':') {
+                Some((b, f)) => (b.trim(), f.trim()),
+                None => {
+                    warnings.push(format!(
+                        "kiosk.dept_palette[{i}]: нет разделителя ':' — запись пропущена"
+                    ));
+                    continue;
+                }
+            };
+            let parse = |s: &str| u32::from_str_radix(s.trim_start_matches('#'), 16).ok().filter(|v| *v <= 0xFF_FFFF);
+            match (parse(bg), parse(fg)) {
+                (Some(b), Some(f)) => out.push((b, f)),
+                _ => warnings.push(format!(
+                    "kiosk.dept_palette[{i}]: ожидается RRGGBB:RRGGBB — запись пропущена"
+                )),
+            }
+        }
+        out
     }
 }
 
@@ -202,7 +233,10 @@ const KNOWN_SECTIONS: &[(&str, &[&str])] = &[
         "ui",
         &["screen_width", "screen_height", "fullscreen", "img_dir", "max_cols"],
     ),
-    ("kiosk", &["return_to_root_after_print", "idle_timeout_secs", "cfg_export_dir"]),
+    (
+        "kiosk",
+        &["return_to_root_after_print", "idle_timeout_secs", "cfg_export_dir", "dept_palette"],
+    ),
     (
         "center",
         &[

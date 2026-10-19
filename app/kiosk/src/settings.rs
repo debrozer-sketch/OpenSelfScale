@@ -85,10 +85,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     let admin_reload = {
         let ui_handle = ui_handle.clone();
         let cfg = cfg.clone();
+        let palette = ctx.palette.clone();
+        let palette_names = ctx.palette_names.clone();
         move || {
             if let Some(ui) = ui_handle.upgrade() {
                 match datastore::open(&cfg.db_path) {
-                    Ok(conn) => admin::admin_rows_set(&ui, &conn),
+                    Ok(conn) => admin::admin_rows_set(&ui, &conn, &palette, &palette_names),
                     Err(e) => log::error!("меню: база: {e}"),
                 }
             }
@@ -439,8 +441,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let cfg = cfg.clone();
         let admin_reload = admin_reload.clone();
         let relayout = relayout.clone();
+        let palette = ctx.palette.clone();
+        let palette_names = ctx.palette_names.clone();
         move |name| {
-            if admin::admin_color_next(&cfg, &name) {
+            if admin::admin_color_next(&cfg, &name, &palette, &palette_names) {
                 admin_reload();
                 relayout();
             }
