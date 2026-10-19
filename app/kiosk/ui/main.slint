@@ -2057,7 +2057,7 @@ export component MainWindow inherits Window {
                 background: #FFFFFF;
                 Text {
                     x: 16px;
-                    width: parent.width - 340px;
+                    width: 220px;
                     height: parent.height;
                     text: r.name;
                     font-size: 24px;
@@ -2067,8 +2067,9 @@ export component MainWindow inherits Window {
                     overflow: elide;
                 }
                 // Цвет плитки: цикл Авто → пресеты палитры, тап — следующий.
+                // Кнопка стоит сразу после имени, вдали от стрелок порядка.
                 Rectangle {
-                    x: parent.width - 306px;
+                    x: 250px;
                     y: 8px;
                     width: 88px;
                     height: 48px;
