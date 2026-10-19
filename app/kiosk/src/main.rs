@@ -84,6 +84,15 @@ fn main() {
         Mode::Diag => {
             println!("{}", diag::collect(&cfg));
         }
+        Mode::LabelProbe => {
+            match print::label_probe(&cfg) {
+                Ok(report) => println!("{report}"),
+                Err(e) => {
+                    eprintln!("label-probe: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Mode::Weight => {
             // Разовое чтение: ждём стабильный вес до 15 секунд, потом отдаём
             // последнее значение с пометкой. Для проверки обмена по железу.

@@ -22,6 +22,8 @@ pub enum Mode {
     DeptMove(String, Option<i64>),
     /// Привязать группу к отделу: `группа отдел`.
     GroupAssign(String, String),
+    /// Спайк датчика зазора: измерение длины этикетки шаговой подачей.
+    LabelProbe,
 }
 
 pub struct Cli {
@@ -105,6 +107,7 @@ pub fn parse_cli() -> Cli {
                 let d = req_arg(&mut args, "--group-assign");
                 cli.mode = Mode::GroupAssign(g, d);
             }
+            "--label-probe" => cli.mode = Mode::LabelProbe,
             "--version" => {
                 println!("ScaleFW kiosk {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
@@ -128,6 +131,7 @@ pub fn parse_cli() -> Cli {
                 eprintln!("  --dept-remove ИМЯ          убрать отдел");
                 eprintln!("  --dept-move ИМЯ N|alpha    позиция отдела (0 = первый)");
                 eprintln!("  --group-assign ГРУППА ОТДЕЛ  привязать группу к отделу");
+                eprintln!("  --label-probe              измерение длины этикетки (диагностика)");
                 std::process::exit(2);
             }
         }

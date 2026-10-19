@@ -724,6 +724,97 @@ fn finish(ack: mpsc::Sender<Result<(), String>>, res: Result<(), String>, what: 
     let _ = ack.send(out);
 }
 
+/// Спайк датчика зазора: опрос уровней статуса DLE EOT, затем шаговая
+/// подача (ESC J 1 — один дот) с опросом после каждого шага. Отчёт:
+/// сырые байты уровней и индексы шагов, где байт менялся. По расстоянию
+/// между переходами считается длина этикетки в дотах и мм.
+pub fn label_probe(cfg: &crate::config::Config) -> Result<String, String> {
+    use std::io::{Read as _, Write as _};
+    let mut port = serialport::new(&cfg.printer.port, cfg.printer.baud)
+        .timeout(Duration::from_millis(400))
+        .open()
+        .map_err(|e| format!("{}: {e}", cfg.printer.port))?;
+    let _ = port.write_all(&escpos::build_init());
+    let _ = port.flush();
+    drain_port_rx(&mut port);
+
+    let started = std::time::Instant::now();
+    let mut report = String::new();
+    // 1. Базовые байты всех уровней 1..8 (какие живые — увидим по ответам).
+    report.push_str("DLE EOT уровни:\n");
+    for level in 1..=8u8 {
+        let _ = port.write_all(&escpos::build_status_query(level));
+        let _ = port.flush();
+        let mut buf = [0u8; 1];
+        match port.read(&mut buf) {
+            Ok(1) => report.push_str(&format!(
+                "  n={level}: 0x{:02X} (valid_l4={})\n",
+                buf[0],
+                escpos::is_valid_l4(buf[0])
+            )),
+            _ => report.push_str(&format!("  n={level}: нет ответа\n")),
+        }
+    }
+
+    // 2. Шаговая подача: ESC J 1 = 1 дот (~0.125 мм при 8 дот/мм).
+    // Опрашиваем L2/L3 после каждого шага (L1/L4 статичны); переходы
+    // байта = граница этикетки. Жёсткий дедлайн 180 с: зависший датчик
+    // не держит диагностику вечно.
+    report.push_str("\nШаговая подача (ESC J 1, до 600 шагов):\n");
+    let _ = port.set_timeout(Duration::from_millis(100));
+    let mut last: [Option<u8>; 2] = [None, None];
+    let mut transitions: Vec<(u32, usize, u8)> = Vec::new();
+    let steps: u32 = 600;
+    for step in 0..steps {
+        if started.elapsed() > Duration::from_secs(180) {
+            report.push_str("\n(дедлайн 180 с — остановлено)\n");
+            break;
+        }
+        let _ = port.write_all(&[escpos::ESC, b'J', 1]);
+        let _ = port.flush();
+        // Считаем дот и ждём: у датчика есть механическая задержка.
+        std::thread::sleep(Duration::from_millis(2));
+        for (li, level) in [2u8, 3].into_iter().enumerate() {
+            let _ = port.write_all(&escpos::build_status_query(level));
+            let _ = port.flush();
+            let mut buf = [0u8; 1];
+            if matches!(port.read(&mut buf), Ok(1)) {
+                if last[li].is_some_and(|b| b != buf[0]) || (last[li].is_none() && step == 0) {
+                    transitions.push((step, li, buf[0]));
+                    report.push_str(&format!(
+                        "  шаг {}: L{} = 0x{:02X}\n",
+                        step,
+                        li + 2,
+                        buf[0]
+                    ));
+                }
+                last[li] = Some(buf[0]);
+            }
+        }
+    }
+    if transitions.len() >= 3 {
+        // Расстояния между последовательными переходами = длины сегментов;
+        // между границами этикетки — длина этикетки, между этикетками — зазор.
+        report.push_str("\nПереходы (шаг):");
+        let mut prev = transitions[0].0;
+        for (step, li, byte) in &transitions {
+            report.push_str(&format!(
+                "\n  {} L{} 0x{:02X} (от предыдущего {} дот ≈ {} мм)",
+                step,
+                li + 2,
+                byte,
+                step - prev,
+                (step - prev) as f32 / 8.0
+            ));
+            prev = *step;
+        }
+        report.push('\n');
+    } else {
+        report.push_str("\nПереходов не найдено — датчик зазора не меняет статус.\n");
+    }
+    Ok(report)
+}
+
 /// Фоновый опрос: один замер L4 (при `[printer].debug_dump = true` ещё и
 /// полный диагностический дамп). Результат проходит через Monitor.
 fn probe(
