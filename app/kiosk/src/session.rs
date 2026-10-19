@@ -116,6 +116,10 @@ pub struct Kiosk {
     pub imp_files: Vec<std::path::PathBuf>,
     /// Файл импорта, ожидающий подтверждения «ПРИМЕНИТЬ».
     pub imp_pending: String,
+    /// Отчёты: индекс периода (0 сегодня, 1 три дня, 2 неделя, 3 месяц,
+    /// 4 всё время) и типа событий (0 все, 1 успешные, 2 ошибки).
+    pub report_period: usize,
+    pub report_kind: usize,
 }
 
 impl Kiosk {
@@ -170,6 +174,8 @@ impl Kiosk {
             restart_requested: false,
             imp_files: Vec::new(),
             imp_pending: String::new(),
+            report_period: 0,
+            report_kind: 0,
         }
     }
 }

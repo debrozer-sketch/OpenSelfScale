@@ -423,6 +423,8 @@ export component MainWindow inherits Window {
     callback imp-popup-close();
     // Отчёты: текст собирается в фоне.
     in property <string> report-text;
+    in property <string> report-period: "Сегодня";
+    in property <string> report-kind: "Все события";
     // Данные сети заполнены и корректны — кнопка ПРИМЕНИТЬ активна.
     in property <bool> net-valid: false;
     callback net-mode(bool);
@@ -1975,13 +1977,59 @@ export component MainWindow inherits Window {
             width: parent.width;
             height: parent.height - 84px;
 
+            // Фильтры: период и тип событий — циклы, отчёт пересобирается.
+            Rectangle {
+                x: 8px; y: 8px;
+                width: (parent.width - 24px) / 2;
+                height: 56px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: rep-p-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    width: parent.width - 32px;
+                    x: 16px;
+                    height: parent.height;
+                    text: "Период: " + root.report-period;
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                rep-p-ta := TouchArea { clicked => { root.menu-tap("report-period"); } }
+            }
+            Rectangle {
+                x: 16px + (parent.width - 24px) / 2;
+                y: 8px;
+                width: (parent.width - 24px) / 2;
+                height: 56px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: rep-k-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    width: parent.width - 32px;
+                    x: 16px;
+                    height: parent.height;
+                    text: root.report-kind;
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                rep-k-ta := TouchArea { clicked => { root.menu-tap("report-kind"); } }
+            }
+
             Text {
                 x: 24px;
-                y: 16px;
+                y: 76px;
                 width: parent.width - 48px;
-                height: parent.height - 32px;
+                height: parent.height - 92px;
                 text: root.report-text;
-                font-size: 24px;
+                font-size: 19px;
+                font-family: "DejaVu Sans Mono";
                 color: #1A1E24;
                 vertical-alignment: top;
                 wrap: word-wrap;

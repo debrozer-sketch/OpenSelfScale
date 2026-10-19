@@ -492,6 +492,39 @@ pub fn print_log_recent(conn: &Connection, limit: usize) -> Result<Vec<PrintLogR
     Ok(rows)
 }
 
+/// Журнал с фильтрами: граница времени (None — без ограничения по
+/// времени) и статус (None — все, Some(true) — только успешные,
+/// Some(false) — только ошибки). Свежие сверху.
+pub fn print_log_filtered(
+    conn: &Connection,
+    since_ts: Option<i64>,
+    ok: Option<bool>,
+    limit: usize,
+) -> Result<Vec<PrintLogRow>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT ts, plu, name, weight_g, sum_kop, ok
+         FROM print_log
+         WHERE (?1 IS NULL OR ts >= ?1) AND (?2 IS NULL OR ok = ?2)
+         ORDER BY id DESC LIMIT ?3",
+    )?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params![since_ts, ok.map(|v| v as i64), limit as i64],
+            |r| {
+                Ok(PrintLogRow {
+                    ts: r.get(0)?,
+                    plu: r.get(1)?,
+                    name: r.get(2)?,
+                    weight_g: r.get(3)?,
+                    sum_kop: r.get(4)?,
+                    ok: r.get::<_, i64>(5)? != 0,
+                })
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
 /// Импорт пачки товаров: один батч, возвращает применённое число.
 /// Скидочная цена: выгрузка — полное зеркало каталога центра, поэтому
 /// нет атрибута или cardprice="0" — скидки нет (NULL); иначе — значение.

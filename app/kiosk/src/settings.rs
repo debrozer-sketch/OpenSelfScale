@@ -568,20 +568,31 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 }
                 "reports" => {
                     kiosk.borrow_mut().admin_stage = 16;
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_report_text("Собираю отчёт…".into());
+                    {
+                        let mut k = kiosk.borrow_mut();
+                        k.report_period = 0;
+                        k.report_kind = 0;
                     }
-                    let cfg = cfg.clone();
-                    let ui_handle = ui_handle.clone();
-                    std::thread::spawn(move || {
-                        let text = build_report(&cfg);
-                        slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = ui_handle.upgrade() {
-                                ui.set_report_text(text.into());
-                            }
-                        })
-                        .ok();
-                    });
+                    refresh_report(&cfg, &kiosk, &ui_handle);
+                }
+                // Период и тип событий отчёта: циклы, отчёт пересобирается.
+                "report-period" | "report-kind" => {
+                    const PERIODS: [&str; 5] =
+                        ["Сегодня", "3 дня", "Неделя", "Месяц", "Всё время"];
+                    const KINDS: [&str; 3] = ["Все события", "Успешные", "Ошибки"];
+                    {
+                        let mut k = kiosk.borrow_mut();
+                        if id == "report-period" {
+                            k.report_period = (k.report_period + 1) % PERIODS.len();
+                        } else {
+                            k.report_kind = (k.report_kind + 1) % KINDS.len();
+                        }
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_report_period(PERIODS[k.report_period].into());
+                            ui.set_report_kind(KINDS[k.report_kind].into());
+                        }
+                    }
+                    refresh_report(&cfg, &kiosk, &ui_handle);
                 }
                 // Возврат на главный экран: цикл 10..60 с шагом 10, дефолт 30.
                 "idletimeout" => {
@@ -927,43 +938,88 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
 
 /// Текст отчёта для экрана 17: счётчики печатей и последние операции.
 /// Сбор — в фоновом потоке (открытие БД), ошибки — строкой в отчёте.
-fn build_report(cfg: &crate::config::Config) -> String {
+/// Отчёт печатей: сборка в фоне (SQLite — короткая транзакция),
+/// результат — в текстовый экран через invoke_from_event_loop.
+fn refresh_report(
+    cfg: &crate::config::Config,
+    kiosk: &std::rc::Rc<std::cell::RefCell<crate::session::Kiosk>>,
+    ui_handle: &slint::Weak<MainWindow>,
+) {
+    let (period, kind) = {
+        let k = kiosk.borrow();
+        (k.report_period, k.report_kind)
+    };
+    if let Some(ui) = ui_handle.upgrade() {
+        ui.set_report_text("Собираю отчёт…".into());
+    }
+    let cfg = cfg.clone();
+    let ui_handle = ui_handle.clone();
+    std::thread::spawn(move || {
+        let text = build_report(&cfg, period, kind);
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_report_text(text.into());
+            }
+        })
+        .ok();
+    });
+}
+
+fn build_report(cfg: &crate::config::Config, period: usize, kind: usize) -> String {
     let conn = match datastore::open(&cfg.db_path) {
         Ok(c) => c,
         Err(e) => return format!("Отчёт недоступен: база: {e}"),
     };
-    let today = print::today_start();
-    let n_today = datastore::print_log_count_since(&conn, today).unwrap_or(0);
-    let n_all = datastore::print_log_count_all(&conn).unwrap_or(0);
-    let mut text = format!("Этикеток сегодня: {n_today}\nВсего печатей: {n_all}\n");
-    match datastore::print_log_recent(&conn, 8) {
-        Ok(rows) if !rows.is_empty() => {
-            text.push_str("\nПоследние операции:\n");
-            for r in rows {
-                let name = r.name.unwrap_or_default();
-                let name = if name.chars().count() > 22 {
-                    format!("{}…", name.chars().take(22).collect::<String>())
-                } else {
-                    name
-                };
-                match (r.weight_g, r.sum_kop, r.ok) {
-                    (Some(w), Some(s), true) => {
-                        text.push_str(&format!(
-                            "{}  {:<22} {} г  {}\n",
-                            print::local_hms(r.ts),
-                            name,
-                            w,
-                            crate::session::sum_str(s)
-                        ));
-                    }
-                    _ => {
-                        text.push_str(&format!("{}  {:<22} — ошибка\n", print::local_hms(r.ts), name));
-                    }
-                }
+    // Граница периода: локальная полночь хоста минус полные сутки.
+    let since = match period {
+        0 => Some(print::today_start()),
+        1 => Some(print::today_start() - 2 * 86_400),
+        2 => Some(print::today_start() - 6 * 86_400),
+        3 => Some(print::today_start() - 29 * 86_400),
+        _ => None,
+    };
+    let ok = match kind {
+        1 => Some(true),
+        2 => Some(false),
+        _ => None,
+    };
+    let rows = match datastore::print_log_filtered(&conn, since, ok, 20) {
+        Ok(r) => r,
+        Err(e) => return format!("Журнал: {e}"),
+    };
+    let mut text = match (period, kind) {
+        (4, 0) => format!("Операций всего: {}\n", rows.len()),
+        _ => format!("Операций за период: {}\n", rows.len()),
+    };
+    if rows.len() == 20 {
+        text.push_str("(показаны последние 20)\n");
+    }
+    if rows.is_empty() {
+        text.push_str("\nЗаписей нет.");
+        return text;
+    }
+    text.push_str("\nВремя       Товар                  Вес      Сумма\n");
+    for r in rows {
+        let name = r.name.unwrap_or_default();
+        let name = if name.chars().count() > 22 {
+            format!("{}…", name.chars().take(22).collect::<String>())
+        } else {
+            name
+        };
+        match (r.weight_g, r.sum_kop, r.ok) {
+            (Some(w), Some(s), true) => {
+                text.push_str(&format!(
+                    "{}  {:<22} {:>6} г  {}\n",
+                    print::local_hms(r.ts),
+                    name,
+                    w,
+                    crate::session::sum_str(s)
+                ));
+            }
+            _ => {
+                text.push_str(&format!("{}  {:<22} — ошибка\n", print::local_hms(r.ts), name));
             }
         }
-        Ok(_) => text.push_str("\nПечатей ещё не было."),
-        Err(e) => text.push_str(&format!("\nЖурнал: {e}")),
     }
     text
 }
