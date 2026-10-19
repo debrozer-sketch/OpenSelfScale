@@ -756,62 +756,84 @@ pub fn label_probe(cfg: &crate::config::Config) -> Result<String, String> {
         }
     }
 
-    // 2. Шаговая подача: ESC J 1 = 1 дот (~0.125 мм при 8 дот/мм).
-    // Опрашиваем L2/L3 после каждого шага (L1/L4 статичны); переходы
-    // байта = граница этикетки. Жёсткий дедлайн 180 с: зависший датчик
-    // не держит диагностику вечно.
-    report.push_str("\nШаговая подача (ESC J 1, до 600 шагов):\n");
-    let _ = port.set_timeout(Duration::from_millis(100));
-    let mut last: [Option<u8>; 2] = [None, None];
-    let mut transitions: Vec<(u32, usize, u8)> = Vec::new();
-    let steps: u32 = 600;
-    for step in 0..steps {
-        if started.elapsed() > Duration::from_secs(180) {
-            report.push_str("\n(дедлайн 180 с — остановлено)\n");
+    // 2. Кандидаты команд статуса: печатаем сырые ответы.
+    report.push_str("\nКандидаты команд:\n");
+    let candidates: Vec<(&str, Vec<u8>)> = vec![
+        ("ESC v", vec![escpos::ESC, b'v']),
+        ("GS r 1", vec![0x1D, b'r', 1]),
+        ("GS r 2", vec![0x1D, b'r', 2]),
+        ("DLE DC4 1 1", vec![0x10, 0x14, 0x01, 0x01]),
+        ("GS a 0 (ASB off)", vec![0x1D, b'a', 0]),
+    ];
+    for (name, cmd) in candidates {
+        let _ = port.write_all(&cmd);
+        let _ = port.flush();
+        let mut buf = [0u8; 4];
+        let mut got = 0;
+        for b in buf.iter_mut() {
+            match port.read(std::slice::from_mut(b)) {
+                Ok(1) => got += 1,
+                _ => break,
+            }
+        }
+        let hex: Vec<String> = buf[..got].iter().map(|b| format!("{b:02X}")).collect();
+        report.push_str(&format!("  {name}: [{}]\n", hex.join(" ")));
+    }
+
+    // 3. ASB-поток при шаговой подаче: включаем автоматический статус
+    // (GS a 0xFF) и собираем все входящие байты, пока двигаем бумагу.
+    // Зазор, если он виден, появится как смена байта(ов) ASB.
+    report.push_str("\nASB при шаговой подаче (600 дот):\n");
+    let _ = port.write_all(&[0x1D, b'a', 0xFF]);
+    let _ = port.flush();
+    std::thread::sleep(Duration::from_millis(150));
+    drain_port_rx(&mut port);
+    let mut seen: Vec<(u8, u32)> = Vec::new(); // байт → число появлений
+    for _step in 0..600u32 {
+        if started.elapsed() > Duration::from_secs(150) {
+            report.push_str("(дедлайн — остановлено)\n");
             break;
         }
         let _ = port.write_all(&[escpos::ESC, b'J', 1]);
         let _ = port.flush();
-        // Считаем дот и ждём: у датчика есть механическая задержка.
-        std::thread::sleep(Duration::from_millis(2));
-        for (li, level) in [2u8, 3].into_iter().enumerate() {
-            let _ = port.write_all(&escpos::build_status_query(level));
-            let _ = port.flush();
-            let mut buf = [0u8; 1];
-            if matches!(port.read(&mut buf), Ok(1)) {
-                if last[li].is_some_and(|b| b != buf[0]) || (last[li].is_none() && step == 0) {
-                    transitions.push((step, li, buf[0]));
-                    report.push_str(&format!(
-                        "  шаг {}: L{} = 0x{:02X}\n",
-                        step,
-                        li + 2,
-                        buf[0]
-                    ));
+        std::thread::sleep(Duration::from_millis(3));
+        let mut buf = [0u8; 16];
+        if let Ok(n) = port.read(&mut buf) {
+            for b in &buf[..n] {
+                match seen.iter_mut().find(|(v, _)| v == b) {
+                    Some((_, c)) => *c += 1,
+                    None => seen.push((*b, 1)),
                 }
-                last[li] = Some(buf[0]);
             }
         }
     }
-    if transitions.len() >= 3 {
-        // Расстояния между последовательными переходами = длины сегментов;
-        // между границами этикетки — длина этикетки, между этикетками — зазор.
-        report.push_str("\nПереходы (шаг):");
-        let mut prev = transitions[0].0;
-        for (step, li, byte) in &transitions {
-            report.push_str(&format!(
-                "\n  {} L{} 0x{:02X} (от предыдущего {} дот ≈ {} мм)",
-                step,
-                li + 2,
-                byte,
-                step - prev,
-                (step - prev) as f32 / 8.0
-            ));
-            prev = *step;
-        }
-        report.push('\n');
+    let _ = port.write_all(&[0x1D, b'a', 0]);
+    let _ = port.flush();
+    drain_port_rx(&mut port);
+    if seen.is_empty() {
+        report.push_str("  ASB: байтов нет (не включился или не поддержан)\n");
     } else {
-        report.push_str("\nПереходов не найдено — датчик зазора не меняет статус.\n");
+        let mut list: Vec<String> =
+            seen.iter().map(|(b, c)| format!("{b:02X}×{c}")).collect();
+        list.sort();
+        report.push_str(&format!("  уникальные байты: {}\n", list.join(" ")));
     }
+
+    // 4. Замер времени подачи FF (в label-режиме FF = подать до начала
+    // следующей этикетки). Время → оценка длины при известной скорости.
+    report.push_str("\nЗамер FF ×3:\n");
+    for i in 1..=3 {
+        let t0 = std::time::Instant::now();
+        let _ = port.write_all(&[0x0C]);
+        let _ = port.flush();
+        std::thread::sleep(Duration::from_millis(80));
+        drain_port_rx(&mut port);
+        // Ждём, пока механика закончит: окончание = нет признака занятости
+        // по статусу; простая эвристика — фиксированная пауза после FF.
+        std::thread::sleep(Duration::from_millis(1200));
+        report.push_str(&format!("  FF {}: {} мс\n", i, t0.elapsed().as_millis()));
+    }
+
     Ok(report)
 }
 
