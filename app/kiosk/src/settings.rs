@@ -708,6 +708,18 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     });
                 }
                 "prn-calib" => {
+                    // На время скана демон порта занят и покупательская
+                    // печать простаивает: при весе на платформе не запускать.
+                    let snap = app_state.snapshot();
+                    if snap.mass_kg >= 0.01 {
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_prn_diag_text(
+                                "Калибровка невозможна: на платформе вес.\nСнимите товар и повторите.".into(),
+                            );
+                        }
+                        log::info!("меню: калибровка отклонена: на платформе вес ({:.3} кг)", snap.mass_kg);
+                        return;
+                    }
                     let cfg = cfg.clone();
                     let ui_handle = ui_handle.clone();
                     if let Some(ui) = ui_handle.upgrade() {

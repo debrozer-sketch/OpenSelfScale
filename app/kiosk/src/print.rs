@@ -610,6 +610,8 @@ fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, 
         scan_phase(port, true, GAP_CAP, "выравнивание", started, TOTAL_DEADLINE)?;
         Ok(len)
     })();
+    // Восстановление единиц на ЛЮБОМ исходе: при обрыве порта запись уйдёт
+    // в никуда и не навредит, а при живом порте вернёт дефолт до ESC @.
     set_unit(port, 0);
     res
 }
@@ -915,13 +917,21 @@ fn with_port<T>(
     f: impl FnOnce(&mut escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>) -> Result<T, Fail>,
 ) -> Result<T, String> {
     if prn.is_none() {
-        let port = serialport::new(&cfg.printer.port, cfg.printer.baud)
+        let mut port = serialport::new(&cfg.printer.port, cfg.printer.baud)
             .timeout(Duration::from_millis(1500))
             .open()
             .map_err(|e| {
                 set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
                 format!("{}: {e}", cfg.printer.port)
             })?;
+        // Свежий порт — в базовое состояние. Без ESC @ принтер, переживший
+        // оборванный шаг-скан калибровки, остался бы с единицей подачи 254
+        // (GS P 0 254) и печатал бы этикетки со сдвинутыми размерами до
+        // выключения питания. Если сброс не проходит — порт считать мёртвым.
+        if port.write_all(&[escpos::ESC, 0x40]).and_then(|_| port.flush()).is_err() {
+            set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
+            return Err(format!("{}: ESC @ после открытия не прошёл", cfg.printer.port));
+        }
         *prn = Some(escpos::EscPosPrinter::new(port));
     }
     let res = match prn.as_mut() {
