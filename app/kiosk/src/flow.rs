@@ -507,6 +507,24 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 .enumerate()
                 .map(|(i, p)| (p.name.to_uppercase(), i))
                 .collect();
+            // Открытая карточка с устаревшей ценой/названием закрывается:
+            // на этикетке цена берётся из базы, и на экране покупатель
+            // видел бы другую сумму.
+            if let Ok(mut k) = kiosk.try_borrow_mut() {
+                if let Some(p) = k.pending.clone() {
+                    let changed = match catalog.borrow().iter().find(|e| e.plu == p.plu) {
+                        Some(f) => {
+                            f.price != p.price || f.card_price != p.card_price || f.name != p.name
+                        }
+                        None => true,
+                    };
+                    if changed {
+                        log::info!("карточка PLU {} закрыта: товар изменён синхронизацией", p.plu);
+                        k.pending = None;
+                        ui.set_popup_open(false);
+                    }
+                }
+            }
             let mut gd_map: std::collections::HashMap<String, String> =
                 gd_pairs.into_iter().collect();
             // Группы без отдела уходят в «ПРОЧЕЕ», а не пропадают из меню.

@@ -171,7 +171,7 @@ fn display_name(first: &str, second: &str) -> String {
 /// Все товары с экранной группой.
 pub fn load_all(conn: &Connection) -> Result<Vec<PluEntry>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT plu, namefirst, namesecond, price, card_price, COALESCE(\"group\", '') FROM plucodes ORDER BY namefirst",
+        "SELECT plu, COALESCE(namefirst, ''), COALESCE(namesecond, ''), price, card_price, COALESCE(\"group\", '') FROM plucodes ORDER BY namefirst",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok(PluEntry {
@@ -188,7 +188,8 @@ pub fn load_all(conn: &Connection) -> Result<Vec<PluEntry>, StoreError> {
 /// Товар по PLU целиком (печать, диалог товара).
 pub fn get_item(conn: &Connection, plu: &str) -> Result<Option<PluItem>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT plu, price, card_price, itemcode, groupcode, namefirst, namesecond, shelflife
+        "SELECT plu, price, card_price, COALESCE(itemcode, ''), COALESCE(groupcode, ''),
+                COALESCE(namefirst, ''), COALESCE(namesecond, ''), COALESCE(shelflife, '')
          FROM plucodes WHERE plu = ?1",
     )?;
     let mut rows = stmt.query([plu])?;
@@ -996,5 +997,19 @@ mod tests {
         assert_eq!(gd.get("КИНЗА").map(String::as_str), Some(FALLBACK_DEPT));
         assert!(!gd.contains_key("ПУСТО"), "пустая группа не маршрутизируется");
         assert!(depts_list(&conn).unwrap().iter().any(|d| d.name == FALLBACK_DEPT));
+    }
+
+    #[test]
+    fn rows_with_null_names_are_not_dropped() {
+        let conn = open(std::path::Path::new(":memory:")).unwrap();
+        conn.execute(
+            "INSERT INTO plucodes (plu, namefirst, namesecond, price, itemcode, groupcode, shelflife) \
+             VALUES ('7', NULL, NULL, 500, NULL, NULL, NULL)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(load_all(&conn).unwrap().len(), 1);
+        let it = get_item(&conn, "7").unwrap().expect("item");
+        assert_eq!((it.namefirst.as_str(), it.itemcode.as_str()), ("", ""));
     }
 }

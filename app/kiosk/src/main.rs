@@ -24,6 +24,7 @@ mod settings;
 mod sync;
 mod tick;
 mod tiles;
+mod watchdog;
 mod weight;
 
 use std::sync::Arc;
@@ -74,6 +75,9 @@ fn main() {
         }
     }));
     log::info!("ScaleFW старт: cfg={:?}", cfg.summary());
+    for w in &cfg.warnings {
+        log::warn!("конфиг: {w}");
+    }
 
     match cli.mode {
         Mode::Diag => {

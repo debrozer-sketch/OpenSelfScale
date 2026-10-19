@@ -2,6 +2,13 @@
 # Путь по умолчанию: /etc/scalefw/config.toml.
 # Все поля необязательны: пропуск = значение по умолчанию (эталонная весы).
 
+# Ключи БЕЗ секции — только до первого [заголовка], иначе TOML отнесёт их
+# к предыдущей таблице и киоск молча возьмёт дефолт.
+# Приём данных и хранилище:
+incoming_dir = "/var/ftp/scale"
+db_path = "/home/scales/plu.db"
+log_file = "/var/log/scalefw/kiosk.log"
+
 [scales]
 kind = "shtrih-slim"        # имя драйвера из фабрики (crates/)
 port = "/dev/scales"        # udev-алиас NXP тензомодуля
@@ -18,13 +25,6 @@ baud = 19200
 #[kiosk]
 #return_to_root_after_print = true
 #idle_timeout_secs = 60
-
-# Ключи БЕЗ секции — только до первого [заголовка], иначе TOML отнесёт их
-# к предыдущей таблице и киоск молча возьмёт дефолт.
-# Приём данных и хранилище:
-incoming_dir = "/var/ftp/scale"
-db_path = "/home/scales/plu.db"
-log_file = "/var/log/scalefw/kiosk.log"
 
 # Приём выгрузки «как старое ПО»: сервер магазина сам пушит plu.xml/layout.xml
 # и ready.flg в incoming_dir (FTP-сервер весов, chroot /var/ftp), lftp-зеркало

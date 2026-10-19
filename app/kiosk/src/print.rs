@@ -196,14 +196,14 @@ pub fn health() -> PrinterHealth {
     *HEALTH
         .get_or_init(|| std::sync::Mutex::new(PrinterHealth::default()))
         .lock()
-        .expect("printer health mutex")
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 fn set_health(h: PrinterHealth) {
     *HEALTH
         .get_or_init(|| std::sync::Mutex::new(PrinterHealth::default()))
         .lock()
-        .expect("printer health mutex") = h;
+        .unwrap_or_else(|e| e.into_inner()) = h;
 }
 
 /// Запрос демону с ожиданием результата. Демон поднимается при старте UI;

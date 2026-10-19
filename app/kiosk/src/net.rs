@@ -1,7 +1,8 @@
 //! Экран «Сеть»: чтение и применение настроек главного адреса.
 
 use std::net::Ipv4Addr;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 const IFACE: &str = "enp3s0";
 
@@ -22,14 +23,41 @@ impl NetConfig {
     }
 }
 
+/// Запуск короткой системной команды с жёстким пределом 2 с: вызывается из
+/// UI-потока, зависшая `ip` не должна замораживать экран.
 fn run(cmd: &str, args: &[&str]) -> String {
-    Command::new(cmd)
+    use std::io::Read;
+    let Ok(mut child) = Command::new(cmd)
         .args(args)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return String::new();
+    };
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(st)) => {
+                if !st.success() {
+                    return String::new();
+                }
+                let mut out = String::new();
+                if let Some(mut o) = child.stdout.take() {
+                    let _ = o.read_to_string(&mut out);
+                }
+                return out;
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                log::warn!("сеть: `{cmd}` не ответила за 2 с, прервана");
+                return String::new();
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(_) => return String::new(),
+        }
+    }
 }
 
 /// Маска в точечном виде из префикса (/24 → 255.255.255.0).
@@ -106,8 +134,10 @@ pub fn validate(
         }
         bits.count_ones() as u8
     };
-    if pre > 32 {
-        return Err(format!("неверная маска: {mask}"));
+    // /0 и /32 для адреса весов бессмысленны, /31 и /32 не оставляют места
+    // шлюзу: допускаем /8 … /30.
+    if !(8..=30).contains(&pre) {
+        return Err(format!("маска вне диапазона /8–/30: {mask}"));
     }
     let gateway: Ipv4Addr = gateway
         .parse()
@@ -115,6 +145,23 @@ pub fn validate(
     let dns: Ipv4Addr = dns
         .parse()
         .map_err(|_| format!("неверный DNS: {dns}"))?;
+    let m = u32::MAX << (32 - pre as u32);
+    let host = |a: Ipv4Addr| u32::from(a) & !m;
+    if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() || ip.is_broadcast() {
+        return Err(format!("недопустимый IP: {ip}"));
+    }
+    if host(ip) == 0 || host(ip) == !m {
+        return Err(format!("IP {ip} — адрес сети или широковещательный"));
+    }
+    if gateway == ip || host(gateway) == 0 || host(gateway) == !m || gateway.is_unspecified() {
+        return Err(format!("недопустимый шлюз: {gateway}"));
+    }
+    if u32::from(gateway) & m != u32::from(ip) & m {
+        return Err(format!("шлюз {gateway} вне подсети {ip}/{pre}"));
+    }
+    if dns.is_unspecified() || dns.is_broadcast() || dns.is_multicast() {
+        return Err(format!("недопустимый DNS: {dns}"));
+    }
     Ok((ip, pre, gateway, dns))
 }
 
@@ -181,6 +228,18 @@ mod tests {
         assert!(validate("203.0.113.10", "255.0.255.0", "203.0.113.1", "198.51.100.53").is_err());
         assert!(validate("не ip", "255.255.255.0", "203.0.113.1", "198.51.100.53").is_err());
         assert!(validate("203.0.113.10", "255.255.255.0", "шлюз", "198.51.100.53").is_err());
+    }
+
+    #[test]
+    fn nonsense_settings_are_rejected() {
+        let ok = |ip, m, g| validate(ip, m, g, "198.51.100.53");
+        assert!(ok("203.0.113.10", "/24", "203.0.113.1").is_ok());
+        assert!(ok("0.0.0.0", "/24", "203.0.113.1").is_err(), "нулевой IP");
+        assert!(ok("203.0.113.10", "/32", "203.0.113.1").is_err(), "маска /32");
+        assert!(ok("203.0.113.10", "/0", "203.0.113.1").is_err(), "маска /0");
+        assert!(ok("203.0.113.10", "/24", "203.0.114.1").is_err(), "шлюз вне подсети");
+        assert!(ok("203.0.113.255", "/24", "203.0.113.1").is_err(), "IP-broadcast");
+        assert!(ok("203.0.113.10", "/24", "203.0.113.10").is_err(), "шлюз = IP");
     }
 
     #[test]

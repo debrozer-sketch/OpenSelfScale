@@ -14,6 +14,10 @@ TTYVHangup=yes
 ExecStart=/usr/local/bin/scale-kiosk-start.sh
 Restart=always
 RestartSec=3
+# Сторож: киоск пингует из UI-потока (watchdog.rs); завис — перезапуск.
+# NotifyAccess=all: пингует дочерний процесс xinit, а не главный PID.
+WatchdogSec=30
+NotifyAccess=all
 
 [Install]
 WantedBy=graphical.target

@@ -11,6 +11,9 @@ use crate::print;
 use crate::session::FACTORY_PIN;
 use crate::MainWindow;
 
+/// Идёт применение сетевых настроек (защита от двойного нажатия).
+static NET_APPLYING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Регистрирует все колбэки меню настроек.
 pub fn install(ctx: &AppContext) {
     let ui = ctx.ui.upgrade().expect("UI init");
@@ -536,6 +539,12 @@ pub fn install(ctx: &AppContext) {
         let kiosk = kiosk.clone();
         let show_net_result = show_net_result.clone();
         move || {
+            // Один помощник за раз: два параллельных `scale-net-apply` портят
+            // резервную копию и файл interfaces.
+            if NET_APPLYING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                log::info!("сеть: применение уже идёт, повторное нажатие проигнорировано");
+                return;
+            }
             let (dhcp, buf) = {
                 let k = kiosk.borrow();
                 // Копия, не take: поля не пустеют на время применения
@@ -577,6 +586,7 @@ pub fn install(ctx: &AppContext) {
                         }
                     }
                 };
+                NET_APPLYING.store(false, std::sync::atomic::Ordering::SeqCst);
                 show(ok, text);
             });
             // Поля обновятся из фактического состояния при закрытии попапа —

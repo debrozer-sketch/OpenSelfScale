@@ -149,6 +149,10 @@ pub struct Config {
     pub db_path: PathBuf,
     /// Файл журнала киоска.
     pub log_file: PathBuf,
+    /// Замечания при загрузке (неизвестные ключи, исправленные значения).
+    /// Журнал на этот момент ещё не открыт: пишет их киоск после старта.
+    #[serde(skip)]
+    pub warnings: Vec<String>,
 }
 
 impl Default for Config {
@@ -163,8 +167,51 @@ impl Default for Config {
             incoming_dir: PathBuf::from("/var/ftp/scale"),
             db_path: PathBuf::from("/home/scales/plu.db"),
             log_file: PathBuf::from("/var/log/scalefw/kiosk.log"),
+            warnings: Vec::new(),
         }
     }
+}
+
+/// Допустимые ключи config.toml: опечатка (`debug_dumps`) иначе молча
+/// игнорируется, и настройка «не работает» без единого сообщения.
+const KNOWN_TOP: &[&str] =
+    &["scales", "printer", "ui", "kiosk", "center", "incoming_dir", "db_path", "log_file"];
+const KNOWN_SECTIONS: &[(&str, &[&str])] = &[
+    ("scales", &["kind", "port", "baud"]),
+    ("printer", &["kind", "port", "baud", "enabled", "debug_dump"]),
+    (
+        "ui",
+        &["screen_width", "screen_height", "fullscreen", "img_dir", "max_cols"],
+    ),
+    ("kiosk", &["return_to_root_after_print", "idle_timeout_secs"]),
+    (
+        "center",
+        &[
+            "protocol", "host", "port", "user", "password", "plu_path", "layout_path", "img_dir",
+            "img_local_dir", "history_dir", "interval_secs", "timeout_secs",
+        ],
+    ),
+];
+
+fn unknown_keys(text: &str) -> Vec<String> {
+    let Ok(toml::Value::Table(root)) = text.parse::<toml::Value>() else { return Vec::new() };
+    let mut out = Vec::new();
+    for (k, v) in &root {
+        if !KNOWN_TOP.contains(&k.as_str()) {
+            out.push(format!("неизвестный ключ `{k}`"));
+            continue;
+        }
+        if let (Some((_, keys)), toml::Value::Table(t)) =
+            (KNOWN_SECTIONS.iter().find(|(s, _)| s == k), v)
+        {
+            for kk in t.keys() {
+                if !keys.contains(&kk.as_str()) {
+                    out.push(format!("неизвестный ключ `{k}.{kk}`"));
+                }
+            }
+        }
+    }
+    out
 }
 
 impl Config {
@@ -190,7 +237,45 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self, String> {
         let text =
             std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        toml::from_str(&text).map_err(|e| e.to_string())
+        let mut cfg: Config = toml::from_str(&text).map_err(|e| e.to_string())?;
+        cfg.warnings = unknown_keys(&text);
+        cfg.sanitize();
+        Ok(cfg)
+    }
+
+    /// Недопустимые значения заменяются безопасными, причина — в `warnings`.
+    /// Нулевой таймаут сети в std — ошибка, период синхронизации в секунды
+    /// превращал бы цикл в непрерывную долбёжку центра.
+    fn sanitize(&mut self) {
+        let mut note = |s: String| self.warnings.push(s);
+        if self.center.timeout_secs == 0 || self.center.timeout_secs > 600 {
+            note(format!("center.timeout_secs={} → 30", self.center.timeout_secs));
+            self.center.timeout_secs = 30;
+        }
+        if self.center.interval_secs != 0 && self.center.interval_secs < 30 {
+            note(format!("center.interval_secs={} → 30", self.center.interval_secs));
+            self.center.interval_secs = 30;
+        }
+        if self.scales.baud == 0 {
+            note("scales.baud=0 → 115200".into());
+            self.scales.baud = 115_200;
+        }
+        if self.printer.baud == 0 {
+            note("printer.baud=0 → 19200".into());
+            self.printer.baud = 19_200;
+        }
+        if self.ui.max_cols == 0 {
+            note("ui.max_cols=0 → 1".into());
+            self.ui.max_cols = 1;
+        }
+        if self.ui.screen_width < 320 || self.ui.screen_height < 240 {
+            note(format!(
+                "ui.screen_width/height={}x{} слишком малы → 1024x768",
+                self.ui.screen_width, self.ui.screen_height
+            ));
+            self.ui.screen_width = 1024;
+            self.ui.screen_height = 768;
+        }
     }
 
     // Файл по умолчанию; на платформах без него — встроенные дефолты.
@@ -264,5 +349,29 @@ baud = 115200
     fn kiosk_profile_defaults_to_root_return() {
         let c = Config::default();
         assert!(c.kiosk.return_to_root_after_print);
+    }
+
+    #[test]
+    fn typo_in_key_is_reported() {
+        let w = unknown_keys("[printer]\ndebug_dumps = true\n[nope]\nx = 1\n");
+        assert_eq!(w.len(), 2, "{w:?}");
+        assert!(w[0].contains("printer.debug_dumps") || w[1].contains("printer.debug_dumps"));
+    }
+
+    #[test]
+    fn example_config_has_no_unknown_keys() {
+        let text = include_str!("../../../config.example.toml");
+        assert!(unknown_keys(text).is_empty(), "{:?}", unknown_keys(text));
+    }
+
+    #[test]
+    fn zero_values_are_replaced_with_safe_ones() {
+        let mut c = Config::default();
+        c.center.timeout_secs = 0;
+        c.center.interval_secs = 5;
+        c.printer.baud = 0;
+        c.sanitize();
+        assert_eq!((c.center.timeout_secs, c.center.interval_secs, c.printer.baud), (30, 30, 19_200));
+        assert_eq!(c.warnings.len(), 3);
     }
 }

@@ -70,7 +70,7 @@ impl WeightSource {
     }
 
     pub fn snapshot(&self) -> Snapshot {
-        *self.inner.lock().expect("weight mutex")
+        *self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Обнуление/тарирование: флаг читает поток опроса, команда уходит с
@@ -207,7 +207,7 @@ fn poll_loop(
                     match driver.poll_once(Duration::from_millis(900)) {
                         Ok(sample) => {
                             silent = 0;
-                            let mut s = out.lock().expect("weight mutex");
+                            let mut s = out.lock().unwrap_or_else(|e| e.into_inner());
                             s.mass_kg = sample.mass_g as f64 / 1000.0;
                             s.stable = sample.stable;
                             s.port_up = true;
@@ -219,7 +219,7 @@ fn poll_loop(
                             // увидит чужой вес), сбрасываем в ноль. Печать всё
                             // равно требует stable, следующий кадр вернёт данные.
                             silent += 1;
-                            let mut s = out.lock().expect("weight mutex");
+                            let mut s = out.lock().unwrap_or_else(|e| e.into_inner());
                             s.mass_kg = 0.0;
                             s.stable = false;
                             if silent == SILENT_LIMIT {
@@ -231,7 +231,7 @@ fn poll_loop(
                             log::warn!("опрос весов: {e}; переподключение");
                             // Старые масса и stable при переподключении не
                             // оставляем: иначе до 3 с можно напечатать чужой вес.
-                            let mut s = out.lock().expect("weight mutex");
+                            let mut s = out.lock().unwrap_or_else(|e| e.into_inner());
                             s.mass_kg = 0.0;
                             s.stable = false;
                             s.port_up = false;
@@ -246,7 +246,7 @@ fn poll_loop(
                 if was_up.swap(false, Ordering::Relaxed) {
                     log::warn!("весы недоступны: {e}");
                 }
-                let mut s = out.lock().expect("weight mutex");
+                let mut s = out.lock().unwrap_or_else(|e| e.into_inner());
                 s.port_up = false;
                 s.stable = false;
             }

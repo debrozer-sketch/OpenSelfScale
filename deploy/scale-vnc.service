@@ -6,7 +6,7 @@ Requires=scale-kiosk.service
 [Service]
 User=administrator
 Environment=XAUTHORITY=/run/scale-kiosk/X.auth
-ExecStart=/usr/bin/x11vnc -display :0 -rfbport 5900 -rfbauth /home/administrator/.config/tigervnc/passwd -forever -shared
+ExecStart=/usr/bin/x11vnc -display :0 -rfbport 5900 -localhost -rfbauth /home/administrator/.config/tigervnc/passwd -forever -shared
 Restart=always
 RestartSec=3
 
