@@ -250,11 +250,20 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             "вход: пароль принят, роль {}",
                             if role == datastore::auth::Role::Admin { "admin" } else { "staff" }
                         );
-                        // Заводской пароль — обязательная смена, дальше меню
-                        // не пускаем (защита от «12345» на всём парке).
+                        // Заводской пароль требует смены, пока пароль не
+                        // меняли ни разу (флаг pin_changed в базе). После
+                        // первой смены вход с «12345» пускает в меню.
                         let factory = match datastore::open(&cfg.db_path) {
-                            Ok(conn) => datastore::auth::pin_is(&conn, FACTORY_PIN)
-                                .unwrap_or(false),
+                            Ok(conn) => {
+                                let is_factory = datastore::auth::pin_is(&conn, FACTORY_PIN)
+                                    .unwrap_or(false);
+                                let changed = datastore::get_calibration(&conn, "pin_changed")
+                                    .ok()
+                                    .flatten()
+                                    .unwrap_or(0)
+                                    != 0;
+                                is_factory && !changed
+                            }
                             Err(_) => false,
                         };
                         k.pin_forced = factory;
@@ -336,6 +345,20 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             match res {
                 Ok(Ok(())) => {
                     log::info!("смена пароля: выполнена");
+                    // Флаг «пароль уже меняли»: заводской пин больше не
+                    // требует обязательной смены при каждом входе.
+                    match datastore::open(&cfg.db_path) {
+                        Ok(conn) => {
+                            if let Err(e) = datastore::set_calibration(
+                                &conn,
+                                "pin_changed",
+                                1,
+                            ) {
+                                log::error!("смена пароля: флаг: {e}");
+                            }
+                        }
+                        Err(e) => log::error!("смена пароля: флаг: база: {e}"),
+                    }
                     k.pin_new.clear();
                     k.pin_forced = false;
                     k.admin_stage = 2;
