@@ -332,7 +332,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 .map(|d| d.name.chars().count())
                 .max()
                 .unwrap_or(4) as f32;
-            let font_px = ((colw - 32) as f32 / (maxlen * 0.82)).floor().max(18.0).min(60.0);
+            let font_px = ((colw - 32) as f32 / (maxlen * 0.82)).floor().clamp(18.0, 60.0);
             ui.set_dept_font(font_px);
             log::info!("отделы: {cols} колонок × {colw} px, шрифт {font_px} px");
             let page = kiosk.borrow().dept_page.min(pages_total - 1);

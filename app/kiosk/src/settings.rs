@@ -370,29 +370,39 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             };
         }
     });
+    // Правки порядка/состава отделов применяются к главному экрану сразу:
+    // relayout перечитывает БД (при ручном режиме — порядок ord) и
+    // перестраивает плитки без ожидания следующей синхронизации.
+    let relayout = flow.relayout.clone();
     ui.on_admin_up({
         let cfg = cfg.clone();
         let admin_reload = admin_reload.clone();
+        let relayout = relayout.clone();
         move |name| {
             admin::admin_step(&cfg, &name, -1);
             admin_reload();
+            relayout();
         }
     });
     ui.on_admin_down({
         let cfg = cfg.clone();
         let admin_reload = admin_reload.clone();
+        let relayout = relayout.clone();
         move |name| {
             admin::admin_step(&cfg, &name, 1);
             admin_reload();
+            relayout();
         }
     });
     ui.on_admin_del({
         let cfg = cfg.clone();
         let admin_reload = admin_reload.clone();
+        let relayout = relayout.clone();
         move |name| {
             log::info!("меню: удаление отдела {name}");
             admin::admin_delete(&cfg, &name);
             admin_reload();
+            relayout();
         }
     });
     // Пункты меню: диспетчеризация по id строки MenuRow. Печать/подача —
