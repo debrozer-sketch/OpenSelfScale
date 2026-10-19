@@ -430,6 +430,7 @@ export component MainWindow inherits Window {
     in property <string> report-text;
     in property <string> report-period: "Сегодня";
     in property <string> report-kind: "Все события";
+    in property <string> prn-diag-text: "Идёт опрос принтера…";
     // Данные сети заполнены и корректны — кнопка ПРИМЕНИТЬ активна.
     in property <bool> net-valid: false;
     callback net-mode(bool);
@@ -1185,6 +1186,7 @@ export component MainWindow inherits Window {
                     : root.screen == 15 ? "НАСТРОЙКИ · ОБСЛУЖИВАНИЕ"
                     : root.screen == 16 ? "НАСТРОЙКИ · ИМПОРТ"
                     : root.screen == 17 ? "ОТЧЁТЫ"
+                    : root.screen == 18 ? "ПРИНТЕР · ДИАГНОСТИКА"
                     : "МЕНЮ НАСТРОЕК";
                 font-size: 26px;
                 font-weight: 700;
@@ -1194,7 +1196,8 @@ export component MainWindow inherits Window {
             }
             if (root.screen == 4 || root.screen == 8 || root.screen == 9
                 || root.screen == 12 || root.screen == 13
-                || root.screen == 14 || root.screen == 16 || root.screen == 17)
+                || root.screen == 14 || root.screen == 16 || root.screen == 17
+                || root.screen == 18)
                 && !root.pin-forced : Rectangle {
                 x: parent.width - 336px;
                 y: 8px;
@@ -1689,6 +1692,7 @@ export component MainWindow inherits Window {
 
             property <[MenuRow]> rows: [
                 { label: "Диагностика", id: "diag", admin: false },
+                { label: "Принтер", id: "printerdiag", admin: false },
                 { label: "Протяжка ленты", id: "feed", admin: false },
                 { label: "Тестовая печать", id: "testprint", admin: false },
             ];
@@ -2035,6 +2039,70 @@ export component MainWindow inherits Window {
                 width: parent.width - 48px;
                 height: parent.height - 92px;
                 text: root.report-text;
+                font-size: 19px;
+                font-family: "DejaVu Sans Mono";
+                color: #1A1E24;
+                vertical-alignment: top;
+                wrap: word-wrap;
+            }
+        }
+
+        // ---------- Экран 18: принтер · диагностика ----------
+        if root.screen == 18 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            Rectangle {
+                x: 8px; y: 8px;
+                width: (parent.width - 24px) / 2;
+                height: 56px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: prn-r-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    width: parent.width - 32px;
+                    x: 16px;
+                    height: parent.height;
+                    text: "Обновить";
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                prn-r-ta := TouchArea { clicked => { root.menu-tap("prn-refresh"); } }
+            }
+            Rectangle {
+                x: 16px + (parent.width - 24px) / 2;
+                y: 8px;
+                width: (parent.width - 24px) / 2;
+                height: 56px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: prn-x-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    width: parent.width - 32px;
+                    x: 16px;
+                    height: parent.height;
+                    text: "Сброс аварии";
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                prn-x-ta := TouchArea { clicked => { root.menu-tap("prn-reset"); } }
+            }
+
+            Text {
+                x: 24px;
+                y: 76px;
+                width: parent.width - 48px;
+                height: parent.height - 92px;
+                text: root.prn-diag-text;
                 font-size: 19px;
                 font-family: "DejaVu Sans Mono";
                 color: #1A1E24;

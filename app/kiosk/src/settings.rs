@@ -136,6 +136,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     k.admin_stage = 14;
                     return;
                 }
+                17 => {
+                    k.admin_stage = 6;
+                    return;
+                }
                 _ => {}
             }
             // подтверждаем только реальным весом, иначе ожидание висит
@@ -395,6 +399,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 11 => 2,
                 15 => 12,
                 16 => 14,
+                17 => 6,
                 3 | 12 | 13 | 14 => 11,
                 _ => 2,
             };
@@ -626,6 +631,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 "equip" => {
                     kiosk.borrow_mut().admin_stage = 6;
                 }
+                "printerdiag" => {
+                    kiosk.borrow_mut().admin_stage = 17;
+                    refresh_printer_diag(&cfg, &ui_handle);
+                }
                 "changepin" => {
                     let mut k = kiosk.borrow_mut();
                     k.pin_pending.clear();
@@ -656,6 +665,38 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     std::thread::spawn(move || match print::feed_label(&cfg) {
                         Ok(()) => log::info!("меню: подача до метки"),
                         Err(e) => log::warn!("меню: подача: {e}"),
+                    });
+                }
+                // Принтер: обновить диагностику / сбросить аварию. Опрос
+                // занимает ~3 с на порту — фоновый поток, результат в UI.
+                "prn-refresh" => {
+                    refresh_printer_diag(&cfg, &ui_handle);
+                }
+                "prn-reset" => {
+                    let cfg = cfg.clone();
+                    let ui_handle = ui_handle.clone();
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_prn_diag_text("Сброс аварии: лестница восстановления…".into());
+                    }
+                    std::thread::spawn(move || {
+                        let text = match print::reset_printer(&cfg) {
+                            Ok(()) => {
+                                log::info!("меню: принтер: авария сброшена");
+                                match print::printer_diagnostics(&cfg) {
+                                    Ok(d) => print::fmt_diagnostics(&d),
+                                    Err(e) => format!("Авария сброшена.\nОпрос статуса: {e}"),
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("меню: принтер: сброс аварии: {e}");
+                                format!(
+                                    "Сброс не помог: {e}\n\nВыключите и включите питание принтера.\nЕсли проблема повторяется — обратитесь в сервис."
+                                )
+                            }
+                        };
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_prn_diag_text(text.into());
+                        }
                     });
                 }
                 "testprint" => {
@@ -977,6 +1018,27 @@ fn refresh_report(
         slint::invoke_from_event_loop(move || {
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_report_text(text.into());
+            }
+        })
+        .ok();
+    });
+}
+
+/// Опрос принтера в фоне, результат — в текст экрана диагностики.
+fn refresh_printer_diag(cfg: &crate::config::Config, ui_handle: &slint::Weak<MainWindow>) {
+    if let Some(ui) = ui_handle.upgrade() {
+        ui.set_prn_diag_text("Идёт опрос принтера…".into());
+    }
+    let cfg = cfg.clone();
+    let ui_handle = ui_handle.clone();
+    std::thread::spawn(move || {
+        let text = match print::printer_diagnostics(&cfg) {
+            Ok(d) => print::fmt_diagnostics(&d),
+            Err(e) => format!("Опрос не удался: {e}\n\nЕсли принтер отключён в конфиге,\nэкран недоступен."),
+        };
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_prn_diag_text(text.into());
             }
         })
         .ok();

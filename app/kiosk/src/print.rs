@@ -57,6 +57,8 @@ pub enum PrintError {
     WeightLimit(u32),
     #[error("принтер отключён в конфиге ([printer].enabled = false)")]
     PrinterDisabled,
+    #[error("{0}")]
+    Printer(String),
 }
 
 use thiserror::Error;
@@ -264,6 +266,10 @@ pub enum PrinterRequest {
     Feed { ack: mpsc::Sender<Result<(), String>> },
     /// Тестовая этикетка (готовые байты из calib).
     Test { bytes: Vec<u8>, ack: mpsc::Sender<Result<(), String>> },
+    /// Диагностический опрос: статусы, GS r, ESC v, идентификация.
+    Diagnostics { ack: mpsc::Sender<PrinterDiagnostics> },
+    /// Сброс аварии: лестница DLE ENQ 1 → 2 → ESC @ (вручную из меню).
+    Reset { ack: mpsc::Sender<Result<(), String>> },
 }
 
 /// Журнальные данные печати: заполняются сборщиком задания, пишутся
@@ -274,6 +280,26 @@ pub struct PrintMeta {
     pub name: String,
     pub weight_g: u32,
     pub sum_kop: i64,
+}
+
+/// Результат диагностического опроса принтера (экран «Оборудование»).
+/// None — команда не поддержана прошивкой/нет ответа.
+#[derive(Debug, Clone, Default)]
+pub struct PrinterDiagnostics {
+    pub l1: Option<u8>,
+    pub l2: Option<u8>,
+    pub l3: Option<u8>,
+    pub l4: Option<u8>,
+    pub gs_r: Option<u8>,
+    pub esc_v: Option<u8>,
+    /// GS I 65 — версия прошивки («_1.03.17 ESC/POS»).
+    pub fw_version: Option<String>,
+    /// GS I 66 — производитель («_HPRT»).
+    pub vendor: Option<String>,
+    /// GS I 67 — модель («_PT561»).
+    pub model: Option<String>,
+    /// GS I 68 — серийный номер.
+    pub serial: Option<String>,
 }
 
 use std::sync::mpsc;
@@ -717,6 +743,61 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 }
                 finish(ack, res, "тестовая печать");
             }
+            Ok(PrinterRequest::Diagnostics { ack }) => {
+                let mut d = PrinterDiagnostics::default();
+                let _ = with_port(cfg, &mut prn, |p| {
+                    let port = p.port_mut();
+                    // Статусы DLE EOT 1..4 (валидный фильтр), затем GS r,
+                    // ESC v (однобайтовые ответы без валидной маски),
+                    // идентификационные строки GS I 65/66/67/68.
+                    for (_level, slot) in
+                        [(1u8, &mut d.l1), (2, &mut d.l2), (3, &mut d.l3), (4, &mut d.l4)]
+                    {
+                        *slot = read_l4(port, 2);
+                    }
+                    d.gs_r = query_byte(port, &[escpos::GS, b'r', 1]);
+                    d.esc_v = query_byte(port, &[escpos::ESC, b'v']);
+                    d.fw_version = query_string(port, &escpos::build_printer_info(65));
+                    d.vendor = query_string(port, &escpos::build_printer_info(66));
+                    d.model = query_string(port, &escpos::build_printer_info(67));
+                    d.serial = query_string(port, &escpos::build_printer_info(68));
+                    // Опрос не меняет состояние аварий; свежий L4 — в Monitor.
+                    mon.feed(d.l4);
+                    Ok(())
+                });
+                log::info!(
+                    "принтер: диагностика: L1={:?} L2={:?} L3={:?} L4={:?} GSr={:?} fw={:?} vendor={:?} model={:?}",
+                    d.l1, d.l2, d.l3, d.l4, d.gs_r, d.fw_version, d.vendor, d.model
+                );
+                let _ = ack.send(d);
+            }
+            Ok(PrinterRequest::Reset { ack }) => {
+                let res = with_port(cfg, &mut prn, |p| {
+                    let port = p.port_mut();
+                    ensure_ready(port)?;
+                    log::info!("принтер: сброс аварии вручную (лестница восстановления)");
+                    let s = recover_printer(port);
+                    match s {
+                        Some(b) if !escpos::l4_fault(b) => {
+                            mon.recover_attempts = 0;
+                            mon.health.power_cycle_hint = false;
+                            mon.feed(Some(b));
+                            Ok(())
+                        }
+                        s => {
+                            mon.feed(s);
+                            Err(Fail::Printer(
+                                "принтер не восстановился — выключите и включите питание принтера"
+                                    .into(),
+                            ))
+                        }
+                    }
+                });
+                if res.is_err() {
+                    mon.note_failure();
+                }
+                finish(ack, res, "сброс аварии");
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 probe(cfg, &mut prn, &mut mon);
             }
@@ -1023,6 +1104,125 @@ pub fn feed_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     }
     request(|ack| PrinterRequest::Feed { ack }).map_err(std::io::Error::other)?;
     Ok(())
+}
+
+/// Запрос одного байта без валидной маски (GS r, ESC v): байты ответа
+/// 0x03/0x00 не проходят фильтр DLE EOT.
+fn query_byte(
+    port: &mut Box<dyn serialport::SerialPort>,
+    payload: &[u8],
+) -> Option<u8> {
+    drain_port_rx(port);
+    if port.write_all(payload).is_err() || port.flush().is_err() {
+        return None;
+    }
+    std::thread::sleep(Duration::from_millis(120));
+    let mut b = [0u8; 1];
+    match Read::read(port.as_mut(), &mut b) {
+        Ok(1) => Some(b[0]),
+        _ => None,
+    }
+}
+
+/// Запрос ASCII-строки (GS I n): читается до NUL/паузы, NUL и ведущий
+/// подчёркивания вырезаются.
+fn query_string(
+    port: &mut Box<dyn serialport::SerialPort>,
+    payload: &[u8],
+) -> Option<String> {
+    drain_port_rx(port);
+    if port.write_all(payload).is_err() || port.flush().is_err() {
+        return None;
+    }
+    let mut buf = Vec::new();
+    let deadline = std::time::Instant::now() + Duration::from_millis(500);
+    while std::time::Instant::now() < deadline {
+        let mut b = [0u8; 1];
+        match Read::read(port.as_mut(), &mut b) {
+            Ok(1) => {
+                if b[0] == 0 {
+                    break;
+                }
+                buf.push(b[0]);
+            }
+            Ok(_) if !buf.is_empty() => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    if buf.is_empty() {
+        return None;
+    }
+    let s: String = buf
+        .into_iter()
+        .filter(|b| (32..127).contains(b))
+        .map(|b| b as char)
+        .collect();
+    let s = s.trim_start_matches('_').trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
+/// Диагностический опрос принтера (экран «Оборудование → Принтер»).
+/// Выполняет демон; вызов блокируется до результата (~3 с).
+pub fn printer_diagnostics(cfg: &crate::config::Config) -> Result<PrinterDiagnostics, PrintError> {
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
+    let tx = PRINTER_TX.get().ok_or(PrintError::PrinterDisabled)?;
+    let (ack_tx, ack_rx) = mpsc::channel();
+    tx.send(PrinterRequest::Diagnostics { ack: ack_tx })
+        .map_err(|_| std::io::Error::other("демон принтера остановлен"))?;
+    ack_rx
+        .recv_timeout(Duration::from_secs(30))
+        .map_err(|_| PrintError::Printer("демон принтера не ответил".into()))
+}
+
+/// Ручной сброс аварии принтера (лестница восстановления из меню).
+pub fn reset_printer(cfg: &crate::config::Config) -> Result<(), PrintError> {
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
+    request(|ack| PrinterRequest::Reset { ack }).map_err(std::io::Error::other)?;
+    Ok(())
+}
+
+/// Текстовый отчёт диагностики для экрана (моно, расшифровка по мануалу
+/// HPRT; неподдержанные команды — «—»).
+pub fn fmt_diagnostics(d: &PrinterDiagnostics) -> String {
+    let b = |v: Option<u8>| v.map_or_else(|| "—".into(), |x| format!("{x:#04X}"));
+    let s = |v: &Option<String>| v.clone().unwrap_or_else(|| "—".into());
+    format!(
+        "ПРОШИВКА\n  версия:     {}\n  производ.:  {}\n  модель:     {}\n  серийный:   {}\n\n\
+         СТАТУСЫ (DLE EOT)\n  L1 (принтер):    {} — {}\n  L2 (offline):    {} — {}\n  L3 (ошибки):     {} — {}\n  L4 (сенсоры):    {} — {}\n\n\
+         ДАТЧИКИ\n  GS r  (бумага):  {} — {}\n  ESC v (печать):  {} — {}\n\n\
+         ПОДДЕРЖКА КОМАНД\n  счётчики наработки: нет (прошивка HPRT)\n  автостатус ASB:     не проверен\n  FULL STATUS (EOT 20): нет",
+        s(&d.fw_version),
+        s(&d.vendor),
+        s(&d.model),
+        s(&d.serial),
+        b(d.l1),
+        d.l1.map_or_else(|| "нет ответа".into(), escpos::decode_l1),
+        b(d.l2),
+        d.l2.map_or_else(|| "нет ответа".into(), escpos::decode_l2),
+        b(d.l3),
+        d.l3.map_or_else(|| "нет ответа".into(), escpos::decode_l3),
+        b(d.l4),
+        d.l4.map_or_else(|| "нет ответа".into(), escpos::decode_l4),
+        b(d.gs_r),
+        match d.gs_r {
+            Some(0x00) => "бумага есть (по GS r)",
+            Some(0x03) => "бумага near-end",
+            Some(0x12) => "бумаги нет",
+            Some(_) => "неизвестно",
+            None => "нет ответа",
+        },
+        b(d.esc_v),
+        match d.esc_v {
+            Some(0x00) => "бумага есть",
+            Some(_) => "неизвестно",
+            None => "нет ответа",
+        },
+    )
 }
 
 /// Тестовая этикетка качества печати (паттерн — см. calib::test_label_bytes).

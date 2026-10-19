@@ -247,6 +247,48 @@ pub fn label_in_tray(level4_byte: u8) -> bool {
     level4_byte & 0x60 == 0
 }
 
+/// Запрос идентификационной строки GS I n (1D 49 n): 65 — прошивка,
+/// 66 — производитель, 67 — модель, 68 — серийный номер. Ответ — ASCII
+/// строка с NUL-терминатором (проверено live на HPRT PT561).
+pub fn build_printer_info(n: u8) -> [u8; 3] {
+    [GS, b'I', n]
+}
+
+/// Расшифровка L1 (DLE EOT 1) по мануалу HPRT (fw 1.03.17): bit3 = offline.
+pub fn decode_l1(byte: u8) -> String {
+    if byte & 0x08 != 0 { "offline".into() } else { "онлайн".into() }
+}
+
+/// L2 (DLE EOT 2): bit2 = крышка открыта, bit5 = стоп по концу бумаги,
+/// bit6 = авария. Фиксированные биты 0x12.
+pub fn decode_l2(byte: u8) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if byte & 0x04 != 0 { parts.push("крышка открыта".into()); }
+    if byte & 0x20 != 0 { parts.push("стоп по концу бумаги".into()); }
+    if byte & 0x40 != 0 { parts.push("ошибка".into()); }
+    if parts.is_empty() { "норма".into() } else { parts.join(", ") }
+}
+
+/// L3 (DLE EOT 3): bit3 = ошибка каттера, bit5 = невосстановимая
+/// (питание), bit6 = перегрев головки (сам восстанавливается).
+pub fn decode_l3(byte: u8) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if byte & 0x08 != 0 { parts.push("каттер".into()); }
+    if byte & 0x20 != 0 { parts.push("питание".into()); }
+    if byte & 0x40 != 0 { parts.push("перегрев головки".into()); }
+    if parts.is_empty() { "норма".into() } else { parts.join(", ") }
+}
+
+/// L4 (DLE EOT 4): bits2-3 = рулон near-end, bits5-6 = бумаги нет.
+/// Трактовка лотка — эмпирика стенда (см. label_in_tray).
+pub fn decode_l4(byte: u8) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if byte & 0x0C != 0 { parts.push("рулон near-end".into()); }
+    if byte & 0x60 != 0 { parts.push("бумаги нет".into()); }
+    parts.push(if label_in_tray(byte) { "этикетка в лотке" } else { "лоток пуст" }.into());
+    parts.join(", ")
+}
+
 /// ESC @ — инициализация принтера (сброс режима, буфера страницы).
 pub fn build_init() -> [u8; 2] {
     [ESC, b'@']
@@ -431,6 +473,30 @@ mod tests {
         assert!(!l4_fault(0x7E));
         assert!(!l4_fault(0x1E));
         assert!(l4_fault(0x72));
+    }
+
+    #[test]
+    fn decode_matches_hprt_manual() {
+        // Наблюдённые на стенде 19.10 (HPRT PT561, fw 1.03.17):
+        // норма: 0x00/0x12/0x12/0x1E (рулон near-end, этикетка в лотке).
+        assert_eq!(decode_l1(0x00), "онлайн");
+        assert_eq!(decode_l1(0x08), "offline");
+        assert_eq!(decode_l2(0x12), "норма");
+        assert_eq!(decode_l2(0x16), "крышка открыта");
+        assert_eq!(decode_l3(0x12), "норма");
+        assert_eq!(decode_l3(0x52), "перегрев головки");
+        assert_eq!(decode_l3(0x1A), "каттер");
+        let d = decode_l4(0x1E);
+        assert!(d.contains("рулон near-end"), "{d}");
+        assert!(d.contains("этикетка в лотке"), "{d}");
+        let d = decode_l4(0x7E);
+        assert!(d.contains("бумаги нет"), "{d}");
+        assert!(d.contains("лоток пуст"), "{d}");
+    }
+
+    #[test]
+    fn printer_info_frame_is_gs_i() {
+        assert_eq!(build_printer_info(65), [0x1D, b'I', 65]);
     }
 
     #[test]
