@@ -38,12 +38,14 @@ fn show_cfg_popup(
 fn refresh_setting_labels(
     ui_handle: &slint::Weak<MainWindow>,
     trade: &crate::context::TradeSettings,
+    idle_secs: &std::cell::Cell<u64>,
 ) {
     if let Some(ui) = ui_handle.upgrade() {
         ui.set_goods_cols(format!("{}", trade.cols.get().max(1)).into());
         ui.set_goods_sort(
             if trade.sort_alpha.get() { "по алфавиту" } else { "вручную" }.into(),
         );
+        ui.set_goods_idle(format!("{} с", idle_secs.get()).into());
         ui.set_trade_rounding(
             match trade.rounding.get() {
                 1 => "до 10 коп",
@@ -361,7 +363,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             // из отчётов — в «Обслуживание», из сети/оборудования — в меню.
             let mut k = kiosk.borrow_mut();
             k.admin_stage = match k.admin_stage {
-                10 => 12,
                 11 => 2,
                 15 => 12,
                 16 => 14,
@@ -423,15 +424,15 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             match id.as_str() {
                 "scaleset" => {
                     // Хаб настроек: значения пунктов — из живых настроек.
-                    refresh_setting_labels(&ui_handle, &trade);
+                    refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                     kiosk.borrow_mut().admin_stage = 11;
                 }
                 "goods" => {
-                    refresh_setting_labels(&ui_handle, &trade);
+                    refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                     kiosk.borrow_mut().admin_stage = 12;
                 }
                 "trade" => {
-                    refresh_setting_labels(&ui_handle, &trade);
+                    refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                     kiosk.borrow_mut().admin_stage = 13;
                 }
                 "service" => {
@@ -450,7 +451,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     save_setting(&cfg.db_path, "dept_cols", next as i64, |v| {
                         trade.cols.set(v as usize);
                         relayout();
-                        refresh_setting_labels(&ui_handle, &trade);
+                        refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                         log::info!("меню: колонок на экране: {v}");
                     });
                 }
@@ -463,7 +464,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     save_setting(&cfg.db_path, "dept_sort_alpha", i64::from(next), |v| {
                         trade.sort_alpha.set(v != 0);
                         relayout();
-                        refresh_setting_labels(&ui_handle, &trade);
+                        refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                         log::info!(
                             "меню: порядок отделов: {}",
                             if v != 0 { "алфавит" } else { "ручной" }
@@ -477,7 +478,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     let ui_handle = ui_handle.clone();
                     save_setting(&cfg.db_path, "price_rounding", next, |v| {
                         trade.rounding.set(v);
-                        refresh_setting_labels(&ui_handle, &trade);
+                        refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                         log::info!("меню: округление цены: режим {v}");
                     });
                 }
@@ -490,7 +491,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     let ui_handle = ui_handle.clone();
                     save_setting(&cfg.db_path, "min_weight_g", next, |v| {
                         trade.min_weight_g.set(v as f64);
-                        refresh_setting_labels(&ui_handle, &trade);
+                        refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                         log::info!("меню: минимальный вес печати: {v} г");
                     });
                 }
@@ -555,15 +556,16 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         .ok();
                     });
                 }
+                // Возврат на главный экран: цикл 10..60 с шагом 10, дефолт 30.
                 "idletimeout" => {
-                    let mut k = kiosk.borrow_mut();
-                    k.net_buf[0] = idle_secs.get().to_string();
-                    k.net_focus = 0;
-                    k.admin_stage = 10;
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_idle_value(k.net_buf[0].clone().into());
-                        ui.set_idle_valid(true);
-                    }
+                    const STEPS: [u64; 6] = [10, 20, 30, 40, 50, 60];
+                    let cur = idle_secs.get();
+                    let next = *STEPS.iter().find(|s| **s > cur).unwrap_or(&STEPS[0]);
+                    save_setting(&cfg.db_path, "idle_timeout_secs", next as i64, |v| {
+                        idle_secs.set(v as u64);
+                        refresh_setting_labels(&ui_handle, &trade, &idle_secs);
+                        log::info!("меню: возврат на главный экран: {v} с");
+                    });
                 }
                 "equip" => {
                     kiosk.borrow_mut().admin_stage = 6;
@@ -678,28 +680,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let ui_handle = ui_handle.clone();
         move |key: slint::SharedString| {
             let mut k = kiosk.borrow_mut();
-            // Экран «Простой до сброса»: то же поле 0, только цифры до 3 знаков.
-            if k.admin_stage == 10 {
-                let buf = &mut k.net_buf[0];
-                match key.as_str() {
-                    "←" => { buf.pop(); }
-                    "C" => buf.clear(),
-                    ch if ch.bytes().all(|b| b.is_ascii_digit()) && buf.len() < 3 => {
-                        buf.push_str(ch);
-                    }
-                    _ => {}
-                }
-                if let Some(ui) = ui_handle.upgrade() {
-                    ui.set_idle_value(k.net_buf[0].clone().into());
-                    ui.set_idle_valid(
-                        k.net_buf[0]
-                            .parse::<u64>()
-                            .map(|v| (10..=600).contains(&v))
-                            .unwrap_or(false),
-                    );
-                }
-                return;
-            }
             let focus = k.net_focus;
             let buf = &mut k.net_buf[focus];
             match key.as_str() {
@@ -712,32 +692,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
             if let Some(ui) = ui_handle.upgrade() {
                 net_rows_set(&ui, &k);
-            }
-        }
-    });
-    // Сохранение таймаута простоя: в БД (calibration), действует сразу.
-    ui.on_idle_save({
-        let kiosk = kiosk.clone();
-        let cfg = cfg.clone();
-        let idle_secs = idle_secs.clone();
-        move || {
-            let mut k = kiosk.borrow_mut();
-            match k.net_buf[0].parse::<u64>() {
-                Ok(v) if (10..=600).contains(&v) => {
-                    let saved = datastore::open(&cfg.db_path).map(|c| {
-                        datastore::set_calibration(&c, "idle_timeout_secs", v as i64)
-                    });
-                    match saved {
-                        Ok(Ok(())) => {
-                            idle_secs.set(v);
-                            log::info!("меню: таймаут простоя {v} с (сохранён в базу)");
-                            k.admin_stage = 3;
-                        }
-                        Ok(Err(e)) => log::error!("меню: таймаут простоя: запись: {e}"),
-                        Err(e) => log::error!("меню: таймаут простоя: база: {e}"),
-                    }
-                }
-                _ => log::warn!("меню: таймаут простоя вне 10..600"),
             }
         }
     });
@@ -906,7 +860,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         idle_secs.set(v.clamp(10, 600) as u64);
                     }
                     refresh_data();
-                    refresh_setting_labels(&ui_handle, &trade);
+                    refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                     if let Some(ui) = ui_handle.upgrade() {
                         ui.set_imp_confirm(false);
                         ui.set_imp_popup_ok(true);

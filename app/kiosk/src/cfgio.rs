@@ -42,8 +42,8 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
     let cols = cal("dept_cols").unwrap_or(2);
     let sort = cal("dept_sort_alpha").unwrap_or(1);
     let idle = cal("idle_timeout_secs")
-        .map(|v| v.clamp(10, 600))
-        .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 600) as i64);
+        .map(|v| v.clamp(10, 60))
+        .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 60) as i64);
     let rounding = cal("price_rounding").unwrap_or(0);
     let minw = cal("min_weight_g").unwrap_or(10);
     let depts: Vec<String> = datastore::depts_list(&conn)
@@ -105,7 +105,7 @@ pub fn parse(path: &Path) -> Result<ConfigFile, String> {
 /// для превью-подтверждения ещё ДО применения.
 pub fn preview(f: &ConfigFile) -> String {
     let cols = f.dept_cols.unwrap_or(2).clamp(1, 5);
-    let idle = f.idle_timeout_secs.unwrap_or(60).clamp(10, 600);
+    let idle = f.idle_timeout_secs.unwrap_or(30).clamp(10, 60);
     let round = match f.price_rounding.unwrap_or(0).clamp(0, 2) {
         1 => "до 10 коп",
         2 => "до 1 руб",
@@ -129,7 +129,7 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
         datastore::set_calibration(&conn, "dept_sort_alpha", i64::from(v)).map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.idle_timeout_secs {
-        datastore::set_calibration(&conn, "idle_timeout_secs", v.clamp(10, 600)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&conn, "idle_timeout_secs", v.clamp(10, 60)).map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.price_rounding {
         datastore::set_calibration(&conn, "price_rounding", v.clamp(0, 2)).map_err(|e| e.to_string())?;

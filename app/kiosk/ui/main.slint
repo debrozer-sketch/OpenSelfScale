@@ -407,6 +407,7 @@ export component MainWindow inherits Window {
     // минимальный вес. Значения ставит бэкенд при открытии экрана.
     in property <string> goods-cols: "2";
     in property <string> goods-sort: "по алфавиту";
+    in property <string> goods-idle: "30 с";
     in property <string> trade-rounding: "выкл";
     in property <string> trade-minw: "10 г";
     // Импорт: список файлов каталога, подтверждение применения, результат.
@@ -422,10 +423,6 @@ export component MainWindow inherits Window {
     in property <string> report-text;
     // Данные сети заполнены и корректны — кнопка ПРИМЕНИТЬ активна.
     in property <bool> net-valid: false;
-    // Экран «Простой до сброса»: число секунд и валидность (10–600).
-    in property <string> idle-value: "60";
-    in property <bool> idle-valid: true;
-    callback idle-save();
     callback net-mode(bool);
     callback net-tap(int);
     callback net-key(string);
@@ -1164,7 +1161,6 @@ export component MainWindow inherits Window {
                     : root.screen == 8 ? "НАСТРОЙКИ · СЕТЬ"
                     : root.screen == 9 ? "НАСТРОЙКИ · ОБОРУДОВАНИЕ"
                     : root.screen == 10 ? "СМЕНА ПАРОЛЯ"
-                    : root.screen == 11 ? "НАСТРОЙКИ · ПРОСТОЙ"
                     : root.screen == 12 ? "НАСТРОЙКИ ВЕСОВ"
                     : root.screen == 13 ? "НАСТРОЙКИ · ТОВАРЫ И ЭКРАН"
                     : root.screen == 14 ? "НАСТРОЙКИ · ТОРГОВЫЕ ПРАВИЛА"
@@ -1179,7 +1175,7 @@ export component MainWindow inherits Window {
                 overflow: elide;
             }
             if (root.screen == 4 || root.screen == 8 || root.screen == 9
-                || root.screen == 11 || root.screen == 12 || root.screen == 13
+                || root.screen == 12 || root.screen == 13
                 || root.screen == 14 || root.screen == 16 || root.screen == 17)
                 && !root.pin-forced : Rectangle {
                 x: parent.width - 336px;
@@ -1704,86 +1700,6 @@ export component MainWindow inherits Window {
             }
         }
 
-        // ---------- Экран 11: таймаут простоя ----------
-        // Секунды без касаний до сброса на главный экран (10–600).
-        // Сохраняется в БД, действует сразу.
-        if root.screen == 11 : Rectangle {
-            x: 0; y: 84px;
-            width: parent.width;
-            height: parent.height - 84px;
-
-            Text {
-                x: 0; y: 16px;
-                width: parent.width;
-                height: 34px;
-                text: "Возврат на главный экран, сек (10–600)";
-                font-size: 26px;
-                font-weight: 700;
-                color: #1A1E24;
-                horizontal-alignment: center;
-            }
-            Rectangle {
-                x: 262px;
-                y: 56px;
-                width: 500px;
-                height: 64px;
-                border-radius: 14px;
-                border-width: 2px;
-                border-color: root.idle-valid ? #C9CFD7 : #B3261E;
-                background: #FFFFFF;
-                Text {
-                    text: root.idle-value == "" ? "—" : root.idle-value;
-                    font-size: 34px;
-                    font-weight: 700;
-                    color: root.idle-value == "" ? #A6ADB8 : #1A1E24;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-
-            property <[string]> keys: ["7","8","9","4","5","6","1","2","3","C","0","←"];
-            for k[i] in keys : Rectangle {
-                x: 262px + mod(i, 3) * 170px;
-                y: 136px + floor(i / 3) * 100px;
-                width: 160px;
-                height: 92px;
-                border-radius: 14px;
-                background: idle-key-ta.pressed ? #DDE3EA : #FFFFFF;
-                border-width: 2px;
-                border-color: #C9CFD7;
-                Text {
-                    text: k;
-                    font-size: 40px;
-                    font-weight: 700;
-                    color: #1A1E24;
-                }
-                idle-key-ta := TouchArea {
-                    clicked => { root.net-key(k); }
-                }
-            }
-
-            Rectangle {
-                x: 262px;
-                y: 608px;
-                width: 500px;
-                height: 64px;
-                border-radius: 14px;
-                background: !root.idle-valid
-                    ? #DDE1E6
-                    : (idle-save-ta.pressed ? #1E4D3A : #2E7D57);
-                Text {
-                    text: "СОХРАНИТЬ";
-                    font-size: 28px;
-                    font-weight: 700;
-                    color: #FFFFFF;
-                }
-                idle-save-ta := TouchArea {
-                    enabled: root.idle-valid;
-                    clicked => { root.idle-save(); }
-                }
-            }
-        }
-
         // ---------- Экран 12: хаб «Настройки весов» ----------
         if root.screen == 12 : Rectangle {
             x: 0; y: 84px;
@@ -1876,6 +1792,17 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.goods-sort;
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #4A5460;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+                if r.id == "idletimeout" : Text {
+                    x: parent.width - 230px;
+                    width: 190px;
+                    height: parent.height;
+                    text: root.goods-idle;
                     font-size: 26px;
                     font-weight: 700;
                     color: #4A5460;
@@ -2171,30 +2098,6 @@ export component MainWindow inherits Window {
                     Text { text: "✕"; font-size: 26px; font-weight: 700; color: #7A2E2E; }
                     admin-del-ta := TouchArea { clicked => { root.admin-del(r.name); } }
                 }
-            }
-
-            // Таймаут простоя — пункт настроек в этом же разделе, под списком.
-            Rectangle {
-                x: 8px;
-                y: 20px + root.admin-rows.length * 72px;
-                width: parent.width - 16px;
-                height: 64px;
-                border-radius: 12px;
-                border-width: 2px;
-                border-color: #C9CFD7;
-                background: idle-row-ta.pressed ? #E4E8ED : #FFFFFF;
-                Text {
-                    x: 16px;
-                    width: parent.width - 32px;
-                    height: parent.height;
-                    text: "Возврат на главный экран · " + root.idle-value + " с";
-                    font-size: 24px;
-                    font-weight: 700;
-                    color: #1A1E24;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-                idle-row-ta := TouchArea { clicked => { root.menu-tap("idletimeout"); } }
             }
         }
     }

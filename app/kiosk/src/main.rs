@@ -287,8 +287,8 @@ fn run_kiosk(cfg: config::Config) {
             datastore::open(&cfg.db_path)
                 .ok()
                 .and_then(|c| cal_value(&c, "idle_timeout_secs"))
-                .map(|v| v.clamp(10, 600) as u64)
-                .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 600)),
+                .map(|v| v.clamp(10, 60) as u64)
+                .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 60)),
         ),
     );
     // Живые настройки «Товары и экран» и «Торговые правила»: из БД,

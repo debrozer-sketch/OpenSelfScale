@@ -147,7 +147,7 @@ impl Default for KioskProfile {
     fn default() -> Self {
         Self {
             return_to_root_after_print: true,
-            idle_timeout_secs: 60,
+            idle_timeout_secs: 30,
             cfg_export_dir: PathBuf::from("/var/ftp/scale/cfg"),
         }
     }
