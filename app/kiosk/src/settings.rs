@@ -433,6 +433,19 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             relayout();
         }
     });
+    // Цвет плитки отдела: цикл Авто → пресеты, запись в БД и мгновенная
+    // перерисовка (редактор + главный экран).
+    ui.on_admin_color({
+        let cfg = cfg.clone();
+        let admin_reload = admin_reload.clone();
+        let relayout = relayout.clone();
+        move |name| {
+            if admin::admin_color_next(&cfg, &name) {
+                admin_reload();
+                relayout();
+            }
+        }
+    });
     // Пункты меню: диспетчеризация по id строки MenuRow. Печать/подача —
     // в фоновом потоке: открытие tty и передача занимают секунды, в потоке
     // колбэка они замораживали UI; результат виден в логе. Обнуление уходит

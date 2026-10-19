@@ -1,6 +1,9 @@
-//! Экспорт и импорт конфигурации весов (без сетевых настроек): файл TOML
-//! в каталоге обмена. Формат версионированный — при расширении настроек
-//! старые файлы читаются новыми версиями, незнакомые поля игнорируются.
+//! Экспорт и импорт конфигурации весов: файл TOML в каталоге обмена.
+//! В файл НЕ включаются сетевые настройки и IP-адрес весов — они
+//! индивидуальны для устройства и живут только в локальном конфиге.
+//! Передаётся всё остальное: настройки экрана, торговые правила, отделы
+//! с цветами плиток. Формат версионированный — старые файлы читаются
+//! новыми версиями, незнакомые поля игнорируются.
 
 use std::path::{Path, PathBuf};
 
@@ -24,10 +27,51 @@ pub struct ConfigFile {
     pub price_rounding: Option<i64>,
     #[serde(default)]
     pub min_weight_g: Option<i64>,
-    /// Отделы в экранным порядке (имена). Импорт создаёт отсутствующие
-    /// и выставляет порядок; лишние на устройстве не удаляются.
+    /// Отделы в экранным порядке. Совместимость формата: старые файлы —
+    /// строка (имя), новые — таблица { name, bg, fg } с цветами плитки.
+    /// Импорт создаёт отсутствующие, выставляет порядок и применяет цвета;
+    /// лишние на устройстве отделы не удаляются.
     #[serde(default)]
-    pub depts: Vec<String>,
+    pub depts: Vec<DeptEntry>,
+}
+
+/// Элемент списка отделов: строка (старый формат) или таблица с цветами.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DeptEntry {
+    Name(String),
+    Detailed {
+        name: String,
+        #[serde(default)]
+        bg: Option<String>,
+        #[serde(default)]
+        fg: Option<String>,
+    },
+}
+
+impl DeptEntry {
+    pub fn name(&self) -> &str {
+        match self {
+            DeptEntry::Name(n) => n,
+            DeptEntry::Detailed { name, .. } => name,
+        }
+    }
+
+    /// Цвет фона (только для Detailed-варианта), иначе None.
+    pub fn bg_ref(&self) -> Option<&str> {
+        match self {
+            DeptEntry::Name(_) => None,
+            DeptEntry::Detailed { bg, .. } => bg.as_deref(),
+        }
+    }
+
+    /// Цвет текста (только для Detailed-варианта), иначе None.
+    pub fn fg_ref(&self) -> Option<&str> {
+        match self {
+            DeptEntry::Name(_) => None,
+            DeptEntry::Detailed { fg, .. } => fg.as_deref(),
+        }
+    }
 }
 
 /// Каталог обмена конфигурацией (по умолчанию рядом с приёмом выгрузки).
@@ -46,10 +90,14 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
         .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 60) as i64);
     let rounding = cal("price_rounding").unwrap_or(0);
     let minw = cal("min_weight_g").unwrap_or(10);
-    let depts: Vec<String> = datastore::depts_list(&conn)
+    let depts: Vec<DeptEntry> = datastore::depts_list(&conn)
         .map_err(|e| format!("отделы: {e}"))?
         .into_iter()
-        .map(|d| d.name)
+        .map(|d| DeptEntry::Detailed {
+            name: d.name,
+            bg: d.bg,
+            fg: d.fg,
+        })
         .collect();
     let file = ConfigFile {
         format: FORMAT,
@@ -112,8 +160,13 @@ pub fn preview(f: &ConfigFile) -> String {
         _ => "нет",
     };
     let minw = f.min_weight_g.unwrap_or(10).clamp(1, 1000);
+    let colored = f
+        .depts
+        .iter()
+        .filter(|e| e.bg_ref().map(|s| !s.trim().is_empty()).unwrap_or(false))
+        .count();
     format!(
-        "Отделов: {}\nКолонок: {cols}\nВозврат на главный: {idle} с\n\
+        "Отделов: {} (с цветом: {colored})\nКолонок: {cols}\nВозврат на главный: {idle} с\n\
          Округление цены: {round}\nМинимальный вес: {minw} г\nПрименить?",
         f.depts.len()
     )
@@ -138,13 +191,20 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
         datastore::set_calibration(&conn, "min_weight_g", v.clamp(1, 1000)).map_err(|e| e.to_string())?;
     }
     if !f.depts.is_empty() {
-        let names: Vec<String> = f
+        let entries: Vec<(String, Option<String>, Option<String>)> = f
             .depts
             .iter()
-            .filter(|n| !n.trim().is_empty())
-            .map(|n| n.trim().to_uppercase())
+            .filter(|e| !e.name().trim().is_empty())
+            .map(|e| {
+                (
+                    e.name().trim().to_uppercase(),
+                    e.bg_ref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+                    e.fg_ref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+                )
+            })
             .collect();
-        for (i, name) in names.iter().enumerate() {
+        let names: Vec<String> = entries.iter().map(|(n, _, _)| n.clone()).collect();
+        for (i, (name, _, _)) in entries.iter().enumerate() {
             conn.execute(
                 "INSERT OR IGNORE INTO depts (name, ord) VALUES (?1, ?2)",
                 rusqlite::params![name, i as i64],
@@ -152,10 +212,24 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
             .map_err(|e| e.to_string())?;
         }
         datastore::dept_reorder(&conn, &names).map_err(|e| format!("порядок отделов: {e}"))?;
+        let mut colored = 0usize;
+        for (name, bg, fg) in &entries {
+            if bg.is_none() && fg.is_none() {
+                continue;
+            }
+            datastore::dept_style(&conn, name, None, bg.as_deref().map(Some), fg.as_deref().map(Some))
+                .map_err(|e| format!("цвет отдела {name}: {e}"))?;
+            colored += 1;
+        }
+        return Ok(format!(
+            "Импортировано: отделов {}, с цветом {}, колонок {}, округление, минимум веса",
+            entries.len(),
+            colored,
+            f.dept_cols.unwrap_or(2).clamp(1, 5)
+        ));
     }
     Ok(format!(
-        "Импортировано: отделов {}, колонок {}, округление, минимум веса",
-        f.depts.len(),
+        "Импортировано: отделов 0, колонок {}, округление, минимум веса",
         f.dept_cols.unwrap_or(2).clamp(1, 5)
     ))
 }
@@ -173,13 +247,36 @@ mod tests {
             idle_timeout_secs: Some(90),
             price_rounding: Some(1),
             min_weight_g: Some(20),
-            depts: vec!["ОВОЩИ".into(), "ФРУКТЫ".into()],
+            depts: vec![
+                DeptEntry::Name("ОВОЩИ".into()),
+                DeptEntry::Detailed {
+                    name: "ФРУКТЫ".into(),
+                    bg: Some("E4F0DC".into()),
+                    fg: Some("33512C".into()),
+                },
+            ],
         };
         let s = toml::to_string_pretty(&f).unwrap();
         let back: ConfigFile = toml::from_str(&s).unwrap();
         assert_eq!(back.dept_cols, Some(3));
         assert_eq!(back.dept_sort_alpha, Some(false));
         assert_eq!(back.depts.len(), 2);
+        assert_eq!(back.depts[0].name(), "ОВОЩИ");
+        match &back.depts[1] {
+            DeptEntry::Detailed { bg, fg, .. } => {
+                assert_eq!(bg.as_deref(), Some("E4F0DC"));
+                assert_eq!(fg.as_deref(), Some("33512C"));
+            }
+            _ => panic!("expected detailed dept entry"),
+        }
+    }
+
+    #[test]
+    fn legacy_string_depts_still_parse() {
+        let s = "format = 1\ndepts = [\"ОВОЩИ\", \"ФРУКТЫ\"]\n";
+        let f: ConfigFile = toml::from_str(s).unwrap();
+        assert_eq!(f.depts.len(), 2);
+        assert_eq!(f.depts[0].name(), "ОВОЩИ");
     }
 
     #[test]
@@ -199,7 +296,7 @@ mod tests {
             idle_timeout_secs: Some(1),
             price_rounding: Some(5),
             min_weight_g: Some(0),
-            depts: vec!["А".into()],
+            depts: vec![DeptEntry::Name("А".into())],
         };
         let p = preview(&f);
         assert!(p.contains("Колонок: 5"), "{p}");

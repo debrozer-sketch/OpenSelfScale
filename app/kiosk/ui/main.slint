@@ -35,6 +35,9 @@ export struct AdminRow {
     name: string,
     first: bool,
     last: bool,
+    // Цвет плитки отдела: «Авто» или hex пресета — для подписи кнопки.
+    color-label: string,
+    color: color,
 }
 
 export struct MenuRow {
@@ -389,6 +392,7 @@ export component MainWindow inherits Window {
     callback admin-up(string);
     callback admin-down(string);
     callback admin-del(string);
+    callback admin-color(string);
     // Пункт меню (id из MenuRow): диспетчеризация в бэкенде.
     callback menu-tap(string);
 
@@ -2053,7 +2057,7 @@ export component MainWindow inherits Window {
                 background: #FFFFFF;
                 Text {
                     x: 16px;
-                    width: parent.width - 260px;
+                    width: parent.width - 340px;
                     height: parent.height;
                     text: r.name;
                     font-size: 24px;
@@ -2061,6 +2065,37 @@ export component MainWindow inherits Window {
                     color: #1A1E24;
                     vertical-alignment: center;
                     overflow: elide;
+                }
+                // Цвет плитки: цикл Авто → пресеты палитры, тап — следующий.
+                Rectangle {
+                    x: parent.width - 306px;
+                    y: 8px;
+                    width: 88px;
+                    height: 48px;
+                    border-radius: 10px;
+                    background: admin-col-ta.pressed ? #E4E8ED : #EDF0F3;
+                    Rectangle {
+                        x: 10px;
+                        width: 28px;
+                        height: 28px;
+                        y: (parent.height - 28px) / 2;
+                        border-radius: 14px;
+                        border-width: 2px;
+                        border-color: #C9CFD7;
+                        background: r.color;
+                    }
+                    Text {
+                        x: 42px;
+                        width: parent.width - 48px;
+                        height: parent.height;
+                        text: r.color-label;
+                        font-size: 15px;
+                        font-weight: 700;
+                        color: #4A5460;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    admin-col-ta := TouchArea { clicked => { root.admin-color(r.name); } }
                 }
                 if !r.first : Rectangle {
                     x: parent.width - 232px;

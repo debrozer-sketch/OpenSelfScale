@@ -105,7 +105,7 @@ pub fn hl_parts(name: &str, q: &str) -> (String, String, String) {
 
 /// Палитра светлой темы: пастель, ротируется по числу отделов.
 /// (bg, fg, bg-pressed) — только непрозрачные цвета (VNC/depth: без альфы).
-const DEPT_PALETTE: &[(u32, u32, u32)] = &[
+pub(crate) const DEPT_PALETTE: &[(u32, u32, u32)] = &[
     (0xE4F0DC, 0x33512C, 0xD3E5C8), // зелёный
     (0xFDEFD8, 0x6B4A1B, 0xF7E4C4), // янтарный
     (0xF9E3EC, 0x6B2E47, 0xF2D0DE), // розовый
