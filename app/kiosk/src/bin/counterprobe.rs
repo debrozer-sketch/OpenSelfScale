@@ -3,6 +3,7 @@
 
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
+use escpos::{FieldStyle, LabelJob};
 
 fn main() {
     let port_path = std::env::args().nth(1).unwrap_or_else(|| "/dev/ttyS3".into());
@@ -14,6 +15,61 @@ fn main() {
     port.write_data_terminal_ready(true).expect("DTR");
     port.write_request_to_send(true).expect("RTS");
     let mode = std::env::args().nth(2).unwrap_or_default();
+    if mode == "series" {
+        // Серия печатей с опросом L4 после каждой (эмуляция Monitor киоска):
+        // ловим ложные аварии на конкретных этикетках серии (проблема №1).
+        let n: usize = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(10);
+        // Задание как в киоске: GS FF (подача к следующей этикетке) +
+        // page-mode этикетка 448x232 с шахматкой (escpos::calib-эквивалент).
+        let mut job = LabelJob::begin((448, 232));
+        let _ = job.field(0, 0, FieldStyle::Normal, "ТЕСТОВАЯ ПЕЧАТЬ 12345");
+        let cols = 37;
+        let solid = "█".repeat(cols);
+        let up_even: String = (0..cols).map(|i| if i % 2 == 0 { '▀' } else { ' ' }).collect();
+        let up_odd: String = (0..cols).map(|i| if i % 2 == 1 { '▀' } else { ' ' }).collect();
+        let _ = job.field(0, 56, FieldStyle::Normal, &up_even);
+        let _ = job.field(0, 68, FieldStyle::Normal, &up_odd);
+        let _ = job.field(0, 80, FieldStyle::Normal, &"▄".repeat(cols));
+        let _ = job.field(0, 92, FieldStyle::Normal, &solid);
+        let mut job_bytes = vec![0x1D, 0x0C];
+        job_bytes.extend(job.finish());
+        for i in 1..=n {
+            port.write_all(&job_bytes).expect("print job");
+            port.flush().ok();
+            let t0 = Instant::now();
+            let mut fault_reads = 0u32;
+            let mut reads = 0u32;
+            let mut samples: Vec<String> = Vec::new();
+            while t0.elapsed() < Duration::from_secs(12) {
+                std::thread::sleep(Duration::from_millis(500));
+                port.write_all(&[0x10, 0x04, 0x04]).ok();
+                port.flush().ok();
+                let mut b = [0u8; 64];
+                let got = port.read(&mut b).unwrap_or(0);
+                for &byte in &b[..got] {
+                    // валидный L4: маска 0x93 == 0x12
+                    if byte & 0x93 == 0x12 {
+                        reads += 1;
+                        let fault = byte & 0x04 == 0; // как escpos::l4_fault
+                        if fault {
+                            fault_reads += 1;
+                        }
+                        samples.push(format!(
+                            "{:+.1}s {:#04X}{}",
+                            t0.elapsed().as_secs_f32(),
+                            byte,
+                            if fault { "!" } else { "" }
+                        ));
+                    }
+                }
+            }
+            println!(
+                "label {i:02}: reads={reads} fault_reads={fault_reads} [{}]",
+                samples.join(" ")
+            );
+        }
+        return;
+    }
     if mode == "step" {
         // Шаговая подача ESC J n и опрос L4 на каждом шаге: ищем переход
         // «бумага есть → нет → есть» при проходе зазора между этикетками.
