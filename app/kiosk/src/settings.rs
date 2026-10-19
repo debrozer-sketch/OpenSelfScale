@@ -268,9 +268,13 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         };
                         k.pin_forced = factory;
                         k.admin_stage = if factory { 8 } else { 2 };
+                        // Открытая карточка товара закрывается: из меню
+                        // выходим на чистый главный экран.
+                        k.pending = None;
                         if let Some(ui) = ui_handle.upgrade() {
                             ui.set_role(if role == datastore::auth::Role::Admin { 1 } else { 0 });
                             ui.set_pin_forced(factory);
+                            ui.set_popup_open(false);
                         }
                         if factory {
                             log::warn!("вход: действует заводской пароль — требуется смена");
