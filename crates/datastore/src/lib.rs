@@ -73,6 +73,15 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
          CREATE TABLE IF NOT EXISTS calibration (
              key   TEXT PRIMARY KEY NOT NULL,
              value INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS print_log (
+             id       INTEGER PRIMARY KEY AUTOINCREMENT,
+             ts       INTEGER NOT NULL,
+             plu      TEXT,
+             name     TEXT,
+             weight_g INTEGER,
+             sum_kop  INTEGER,
+             ok       INTEGER NOT NULL
          );",
     )?;
     // Миграция: скидочная цена (по карте). NULL = второй цены нет, показываем
@@ -422,6 +431,65 @@ pub fn set_calibration(conn: &Connection, key: &str, value: i64) -> Result<(), S
         rusqlite::params![key, value],
     )?;
     Ok(())
+}
+
+/// Строка журнала печатей: время unix, товар, вес, сумма, успех.
+#[derive(Clone, Debug)]
+pub struct PrintLogRow {
+    pub ts: i64,
+    pub plu: Option<String>,
+    pub name: Option<String>,
+    pub weight_g: Option<i64>,
+    pub sum_kop: Option<i64>,
+    pub ok: bool,
+}
+
+/// Запись в журнал печатей. Ошибки журналирования не роняют печать —
+/// журнал вторичен по отношению к самой операции.
+pub fn print_log_add(conn: &Connection, row: &PrintLogRow) {
+    let _ = conn.execute(
+        "INSERT INTO print_log (ts, plu, name, weight_g, sum_kop, ok)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![row.ts, row.plu, row.name, row.weight_g, row.sum_kop, row.ok as i64],
+    );
+}
+
+/// Число успешных печатей с начала unix-суток ts (локальное время хоста
+/// уже учтено вызывающей стороной: передают границу суток).
+pub fn print_log_count_since(conn: &Connection, ts: i64) -> Result<i64, StoreError> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM print_log WHERE ok = 1 AND ts >= ?1",
+        [ts],
+        |r| r.get(0),
+    )
+    .map_err(StoreError::from)
+}
+
+/// Общее число успешных печатей за всё время.
+pub fn print_log_count_all(conn: &Connection) -> Result<i64, StoreError> {
+    conn.query_row("SELECT COUNT(*) FROM print_log WHERE ok = 1", [], |r| r.get(0))
+        .map_err(StoreError::from)
+}
+
+/// Последние операции журнала (успешные и нет), свежие сверху.
+pub fn print_log_recent(conn: &Connection, limit: usize) -> Result<Vec<PrintLogRow>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT ts, plu, name, weight_g, sum_kop, ok
+         FROM print_log ORDER BY id DESC LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map([limit as i64], |r| {
+            Ok(PrintLogRow {
+                ts: r.get(0)?,
+                plu: r.get(1)?,
+                name: r.get(2)?,
+                weight_g: r.get(3)?,
+                sum_kop: r.get(4)?,
+                ok: r.get::<_, i64>(5)? != 0,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 /// Импорт пачки товаров: один батч, возвращает применённое число.

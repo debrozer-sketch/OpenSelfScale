@@ -126,11 +126,17 @@ pub struct KioskProfile {
     pub return_to_root_after_print: bool,
     /// Простой покупателя без касаний до сброса на главный экран, сек.
     pub idle_timeout_secs: u64,
+    /// Каталог обмена конфигурацией (экспорт/импорт, «Настройки весов»).
+    pub cfg_export_dir: PathBuf,
 }
 
 impl Default for KioskProfile {
     fn default() -> Self {
-        Self { return_to_root_after_print: true, idle_timeout_secs: 60 }
+        Self {
+            return_to_root_after_print: true,
+            idle_timeout_secs: 60,
+            cfg_export_dir: PathBuf::from("/var/ftp/scale/cfg"),
+        }
     }
 }
 
@@ -183,7 +189,7 @@ const KNOWN_SECTIONS: &[(&str, &[&str])] = &[
         "ui",
         &["screen_width", "screen_height", "fullscreen", "img_dir", "max_cols"],
     ),
-    ("kiosk", &["return_to_root_after_print", "idle_timeout_secs"]),
+    ("kiosk", &["return_to_root_after_print", "idle_timeout_secs", "cfg_export_dir"]),
     (
         "center",
         &[

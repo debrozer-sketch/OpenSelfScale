@@ -70,13 +70,18 @@ pub fn build_label(
     layout: LabelLayout,
     date: &str,
     time: &str,
+    rounding: i64,
 ) -> Result<Vec<u8>, PrintError> {
     let mut job = LabelJob::begin(layout.area);
     let kg = format!("{},{:03}", weight_g / 1000, weight_g % 1000);
     let price_r = format!("{},{:02}", item.price / 100, item.price % 100);
     // Сумма с округлением до копейки — общая функция с экраном (session):
     // две реализации «как в старом ПО» разошлись бы при первой же правке.
-    let sum_k = crate::session::sum_kopecks(item.price, weight_g);
+    // Поверх — округление цены покупателя из «Торговых правил».
+    let sum_k = crate::session::round_sum(
+        crate::session::sum_kopecks(item.price, weight_g),
+        rounding,
+    );
     let sum_r = format!("{},{:02}", sum_k / 100, sum_k % 100);
     job.field(layout.name.0, layout.name.1, FieldStyle::Normal, &item.namefirst)?
         .field(layout.date.0, layout.date.1, FieldStyle::FontB, date)?
@@ -153,6 +158,36 @@ fn utc_stamp(secs: i64) -> (String, String) {
     )
 }
 
+/// Локальное время unix-метки в виде ЧЧ:ММ:СС (для журнала печатей).
+pub fn local_hms(ts: i64) -> String {
+    utc_stamp(ts).1
+}
+
+/// Граница текущих локальных суток (unix) — для счётчика «сегодня».
+pub fn today_start() -> i64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    #[cfg(unix)]
+    {
+        unsafe {
+            let mut tm: libc::tm = std::mem::zeroed();
+            let t: libc::time_t = now as libc::time_t;
+            if libc::localtime_r(&t, &mut tm).is_null() {
+                return now / 86_400 * 86_400;
+            }
+            now - i64::from(tm.tm_hour) * 3600
+                - i64::from(tm.tm_min) * 60
+                - i64::from(tm.tm_sec)
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        now / 86_400 * 86_400
+    }
+}
+
 /// Состояние принтера для индикации: fault — не отвечает/офлайн,
 /// paper_* — расходник (этикет-лента), label_waiting — в выходном
 /// лотке лежит напечатанная этикетка. Дефолт — всё false: до первого
@@ -171,12 +206,28 @@ pub enum PrinterRequest {
     /// Готовое задание (этикетка товара): печать + ожидание снятия.
     /// `queued_at` — момент постановки: задание старше STALE_JOB покупатель
     /// уже получил как «ошибка печати», допечатывать его нельзя.
-    Print { bytes: Vec<u8>, ack: mpsc::Sender<Result<(), String>>, queued_at: std::time::Instant },
+    /// `meta` — данные для журнала печатей (нет у тестовой этикетки).
+    Print {
+        bytes: Vec<u8>,
+        ack: mpsc::Sender<Result<(), String>>,
+        queued_at: std::time::Instant,
+        meta: Option<PrintMeta>,
+    },
     /// Подача до метки следующей этикетки (GS FF) с предварительным
     /// recovery: после заправки рулона принтер может сидеть в ошибке.
     Feed { ack: mpsc::Sender<Result<(), String>> },
     /// Тестовая этикетка (готовые байты из calib).
     Test { bytes: Vec<u8>, ack: mpsc::Sender<Result<(), String>> },
+}
+
+/// Журнальные данные печати: заполняются сборщиком задания, пишутся
+/// демоном после фактического результата.
+#[derive(Debug, Clone)]
+pub struct PrintMeta {
+    pub plu: String,
+    pub name: String,
+    pub weight_g: u32,
+    pub sum_kop: i64,
 }
 
 use std::sync::mpsc;
@@ -509,7 +560,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
     let mut mon = Monitor::default();
     loop {
         match rx.recv_timeout(mon.next_probe()) {
-            Ok(PrinterRequest::Print { bytes, ack, queued_at }) => {
+            Ok(PrinterRequest::Print { bytes, ack, queued_at, meta }) => {
                 if queued_at.elapsed() > STALE_JOB {
                     log::warn!(
                         "принтер: задание устарело ({} с в очереди) — пропущено",
@@ -521,6 +572,26 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 let res = with_port(cfg, &mut prn, |p| print_job(p.port_mut(), &bytes, &mut mon));
                 if res.is_err() {
                     mon.note_failure();
+                }
+                // Журнал печатей: пишется независимо от результата, ошибки
+                // журнала печать не трогают.
+                if let Some(m) = meta {
+                    if let Ok(conn) = datastore::open(&cfg.db_path) {
+                        datastore::print_log_add(
+                            &conn,
+                            &datastore::PrintLogRow {
+                                ts: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs() as i64)
+                                    .unwrap_or(0),
+                                plu: Some(m.plu),
+                                name: Some(m.name),
+                                weight_g: Some(m.weight_g as i64),
+                                sum_kop: Some(m.sum_kop),
+                                ok: res.is_ok(),
+                            },
+                        );
+                    }
                 }
                 finish(ack, res, "печать");
             }
@@ -765,10 +836,31 @@ pub fn print_for_plu(
     if weight_g > 99_999 {
         return Err(PrintError::WeightLimit(weight_g));
     }
+    let rounding = datastore::get_calibration(&conn, "price_rounding")
+        .ok()
+        .flatten()
+        .unwrap_or(0)
+        .clamp(0, 2);
     let (date, time) = now_stamp();
-    let bytes = build_label(&item, weight_g, LIVE_LAYOUT, &date, &time)?;
-    request(|ack| PrinterRequest::Print { bytes, ack, queued_at: std::time::Instant::now() })
-        .map_err(std::io::Error::other)?;
+    let bytes = build_label(&item, weight_g, LIVE_LAYOUT, &date, &time, rounding)?;
+    let sum_kop = crate::session::round_sum(
+        crate::session::sum_kopecks(item.price, weight_g),
+        rounding,
+    );
+    request(|ack| {
+        PrinterRequest::Print {
+            bytes,
+            ack,
+            queued_at: std::time::Instant::now(),
+            meta: Some(PrintMeta {
+                plu: item.plu.clone(),
+                name: item.namefirst.clone(),
+                weight_g,
+                sum_kop,
+            }),
+        }
+    })
+    .map_err(std::io::Error::other)?;
     Ok(())
 }
 
@@ -791,7 +883,7 @@ mod tests {
 
     #[test]
     fn label_contains_weight_price_sum_from_dump() {
-        let bytes = build_label(&sample(), 1350, LIVE_LAYOUT, "13.10.26", "18:40:00").unwrap();
+        let bytes = build_label(&sample(), 1350, LIVE_LAYOUT, "13.10.26", "18:40:00", 0).unwrap();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("1,350"), "вес: {text:?}");
         assert!(text.contains("199,99"), "цена: {text:?}");
@@ -808,14 +900,14 @@ mod tests {
     fn empty_shelflife_is_not_printed() {
         let mut item = sample();
         item.shelflife = String::new();
-        let bytes = build_label(&item, 1350, LIVE_LAYOUT, "13.10.26", "18:40:00").unwrap();
+        let bytes = build_label(&item, 1350, LIVE_LAYOUT, "13.10.26", "18:40:00", 0).unwrap();
         let text = String::from_utf8_lossy(&bytes);
         assert!(!text.contains("20/09"), "пустой срок не должен печататься: {text:?}");
     }
 
     #[test]
     fn label_barcode_from_itemcode() {
-        let bytes = build_label(&sample(), 500, LIVE_LAYOUT, "01.09.26", "10:31:53").unwrap();
+        let bytes = build_label(&sample(), 500, LIVE_LAYOUT, "01.09.26", "10:31:53", 0).unwrap();
         let needle = b"\x1dk\x02";
         let pos = bytes.windows(needle.len()).position(|w| w == needle).unwrap();
         assert_eq!(&bytes[pos + 3..pos + 15], b"210213600500");

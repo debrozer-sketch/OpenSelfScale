@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::context::AppContext;
 use crate::print;
-use crate::session::{DONE_TIMEOUT, ERROR_TIMEOUT, sum_kopecks, sum_str, weight_state};
+use crate::session::{DONE_TIMEOUT, ERROR_TIMEOUT, round_sum, sum_kopecks, sum_str, weight_state};
 
 /// Запускает тик. Возвращает таймер (держать живым).
 pub fn start(
@@ -40,6 +40,7 @@ pub fn start(
         let sync_rx = sync_rx;
         let lock_db = lock_db;
         let idle_secs = ctx.idle_secs.clone();
+        let trade = ctx.trade.clone();
         let refresh_data = refresh_data;
         let tick_cache = tick_cache.clone();
         let go_root = go_root.clone();
@@ -52,7 +53,7 @@ pub fn start(
                 crate::watchdog::beat();
                 let Some(ui) = ui_handle.upgrade() else { return };
                 let snap = app_state.snapshot();
-                let ws = weight_state(&snap);
+                let ws = weight_state(&snap, trade.min_weight_g.get() / 1000.0);
                 // Порт отвалился — прошлые показания недостоверны: прочерк
                 // вместо крупной цифры (иначе покупатель читает старый вес
                 // под красной полосой «Ошибка весов»).
@@ -123,13 +124,14 @@ pub fn start(
                 // считаем только от неотрицательного веса.
                 if ui.get_popup_open() {
                     if let Some(p) = k.pending.clone() {
+                        let r = trade.rounding.get();
                         ui.set_popup_empty(ws == 0);
                         ui.set_popup_weight(format!("{:.3} кг", snap.mass_kg).into());
                         let g = (snap.mass_kg.max(0.0) * 1000.0).round() as u32;
-                        ui.set_popup_sum(sum_str(sum_kopecks(p.price, g)).into());
+                        ui.set_popup_sum(sum_str(round_sum(sum_kopecks(p.price, g), r)).into());
                         ui.set_popup_card_sum(
                             p.card_price
-                                .map(|c| sum_str(sum_kopecks(c, g)))
+                                .map(|c| sum_str(round_sum(sum_kopecks(c, g), r)))
                                 .unwrap_or_default()
                                 .into(),
                         );
@@ -258,7 +260,10 @@ pub fn start(
                 // в main.slint). Маппинг stage -> screen: 1 (PIN) -> 5,
                 // 2 (меню) -> 6, 3 (отделы) -> 4, 4 (диагностика) -> 7,
                 // 5 (сеть) -> 8, 6 (оборудование) -> 9, 7/8/9 (смена
-                // пароля) -> 10, 10 (простой) -> 11.
+                // пароля) -> 10, 10 (простой) -> 11, 11 (хаб настроек)
+                // -> 12, 12 (товары и экран) -> 13, 13 (правила) -> 14,
+                // 14 (обслуживание) -> 15, 15 (импорт) -> 16, 16
+                // (отчёты) -> 17.
                 if k.admin_open {
                     let screen = match k.admin_stage {
                         1 => 5,
@@ -269,6 +274,12 @@ pub fn start(
                         6 => 9,
                         7..=9 => 10,
                         10 => 11,
+                        11 => 12,
+                        12 => 13,
+                        13 => 14,
+                        14 => 15,
+                        15 => 16,
+                        16 => 17,
                         _ => 7,
                     };
                     if ui.get_screen() != screen {
@@ -326,7 +337,7 @@ pub fn start(
                     2 => match k.selected.as_ref() {
                         Some(sel) => {
                             let w = k.print_weight_g.unwrap_or(0);
-                            let sum = sum_str(sum_kopecks(sel.price, w));
+                            let sum = sum_str(round_sum(sum_kopecks(sel.price, w), trade.rounding.get()));
                             (
                                 format!(
                                     "Печать: {} · {},{:03} кг · {}",

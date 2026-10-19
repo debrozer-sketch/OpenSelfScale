@@ -1,9 +1,12 @@
-//! Меню настроек: вход по паролю (PIN-флоу), редактор отделов, сеть,
-//! оборудование, смена пароля, таймаут простоя.
+//! Меню настроек: вход по паролю (PIN-флоу), хаб «Настройки весов»
+//! (товары и экран, торговые правила, обслуживание), экспорт/импорт
+//! конфигурации, редактор отделов, сеть, оборудование, смена пароля,
+//! таймаут простоя.
 
 use std::time::Instant;
 
 use crate::admin;
+use crate::cfgio;
 use crate::context::AppContext;
 use crate::diag;
 use crate::net::{self, net_rows_set};
@@ -14,14 +17,66 @@ use crate::MainWindow;
 /// Идёт применение сетевых настроек (защита от двойного нажатия).
 static NET_APPLYING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Всплывающее окно результата (экспорт/импорт/применение настроек).
+fn show_cfg_popup(
+    ui_handle: &slint::Weak<MainWindow>,
+    ok: bool,
+    text: String,
+) {
+    let ui_handle = ui_handle.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(ui) = ui_handle.upgrade() {
+            ui.set_imp_confirm(false);
+            ui.set_imp_popup_ok(ok);
+            ui.set_imp_popup_text(text.into());
+            ui.set_imp_popup_open(true);
+        }
+    });
+}
+
+/// Значения переключаемых пунктов на экранах 13/14 — по живым настройкам.
+fn refresh_setting_labels(
+    ui_handle: &slint::Weak<MainWindow>,
+    trade: &crate::context::TradeSettings,
+) {
+    if let Some(ui) = ui_handle.upgrade() {
+        ui.set_goods_cols(format!("{}", trade.cols.get().max(1)).into());
+        ui.set_goods_sort(
+            if trade.sort_alpha.get() { "по алфавиту" } else { "вручную" }.into(),
+        );
+        ui.set_trade_rounding(
+            match trade.rounding.get() {
+                1 => "до 10 коп",
+                2 => "до 1 руб",
+                _ => "выкл",
+            }
+            .into(),
+        );
+        ui.set_trade_minw(format!("{} г", trade.min_weight_g.get() as i64).into());
+    }
+}
+
+/// Запись калибровки в БД; при успехе — применение в живые Cell.
+/// Ошибка БД не меняет состояние.
+fn save_setting(db_path: &std::path::Path, key: &str, value: i64, apply: impl FnOnce(i64)) {
+    match datastore::open(db_path) {
+        Ok(conn) => match datastore::set_calibration(&conn, key, value) {
+            Ok(()) => apply(value),
+            Err(e) => log::error!("меню: {key}: запись: {e}"),
+        },
+        Err(e) => log::error!("меню: {key}: база: {e}"),
+    }
+}
+
 /// Регистрирует все колбэки меню настроек.
-pub fn install(ctx: &AppContext) {
+pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     let ui = ctx.ui.upgrade().expect("UI init");
     let ui_handle = ctx.ui.clone();
     let kiosk = ctx.kiosk.clone();
     let cfg = ctx.cfg.clone();
     let app_state = ctx.app_state.clone();
     let idle_secs = ctx.idle_secs.clone();
+    let trade = ctx.trade.clone();
 
     // Строки меню настроек (редактор отделов): правки пишутся в БД сразу,
     // главный экран перестраивается при закрытии меню (refresh_data).
@@ -43,21 +98,41 @@ pub fn install(ctx: &AppContext) {
         move || {
             let mut k = kiosk.borrow_mut();
             // Экран диагностики — «ВЫХОД» возвращает в подменю оборудования,
-            // не в меню и не наружу. Смена пароля — в меню (бросить смену
-            // можно; при заводском пароле следующий вход снова потребует её).
-            if k.admin_stage == 4 {
-                k.admin_stage = 6;
-                return;
-            }
-            if (7..=9).contains(&k.admin_stage) {
-                k.admin_stage = 2;
-                k.pin_pending.clear();
-                k.pin_new.clear();
-                if let Some(ui) = ui_handle.upgrade() {
-                    ui.set_pin_forced(false);
-                    ui.set_pin_error("".into());
+            // не в меню и не наружу. Смена пароля — в обслуживание (бросить
+            // смену можно; при заводском пароле следующий вход снова
+            // потребует её). Новые экраны — к своим разделам хаба.
+            match k.admin_stage {
+                4 => {
+                    k.admin_stage = 6;
+                    return;
                 }
-                return;
+                7..=9 => {
+                    k.admin_stage = 14;
+                    k.pin_pending.clear();
+                    k.pin_new.clear();
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_pin_forced(false);
+                        ui.set_pin_error("".into());
+                    }
+                    return;
+                }
+                3 | 12 | 13 | 14 => {
+                    k.admin_stage = 11;
+                    return;
+                }
+                10 => {
+                    k.admin_stage = 12;
+                    return;
+                }
+                15 => {
+                    k.admin_stage = 12;
+                    return;
+                }
+                16 => {
+                    k.admin_stage = 14;
+                    return;
+                }
+                _ => {}
             }
             // подтверждаем только реальным весом, иначе ожидание висит
             k.admin_open = false;
@@ -280,10 +355,10 @@ pub fn install(ctx: &AppContext) {
     ui.on_depts_close({
         let kiosk = kiosk.clone();
         move || {
-            // Из «Возврат на главный экран» назад — в этот же раздел
-            // (настройки весов), из остальных экранов — в меню.
+            // Из «Возврат на главный экран» — в «Товары и экран», из
+            // редактора отделов — в хаб настроек.
             let mut k = kiosk.borrow_mut();
-            k.admin_stage = if k.admin_stage == 10 { 3 } else { 2 };
+            k.admin_stage = if k.admin_stage == 10 { 12 } else { 11 };
         }
     });
     ui.on_admin_up({
@@ -323,8 +398,144 @@ pub fn install(ctx: &AppContext) {
         let ui_handle = ui_handle.clone();
         let admin_reload = admin_reload.clone();
         let idle_secs = idle_secs.clone();
+        let trade = trade.clone();
+        let relayout = flow.relayout.clone();
         move |id: slint::SharedString| {
             match id.as_str() {
+                "scaleset" => {
+                    // Хаб настроек: значения пунктов — из живых настроек.
+                    refresh_setting_labels(&ui_handle, &trade);
+                    kiosk.borrow_mut().admin_stage = 11;
+                }
+                "goods" => {
+                    refresh_setting_labels(&ui_handle, &trade);
+                    kiosk.borrow_mut().admin_stage = 12;
+                }
+                "trade" => {
+                    refresh_setting_labels(&ui_handle, &trade);
+                    kiosk.borrow_mut().admin_stage = 13;
+                }
+                "service" => {
+                    kiosk.borrow_mut().admin_stage = 14;
+                }
+                "layout" => {
+                    admin_reload();
+                    kiosk.borrow_mut().admin_stage = 3;
+                }
+                // Колонки: цикл 1..=5 с записью в БД и пересборкой раскладки.
+                "cols" => {
+                    let next = trade.cols.get().max(1) % 5 + 1;
+                    let relayout = relayout.clone();
+                    let trade = trade.clone();
+                    let ui_handle = ui_handle.clone();
+                    save_setting(&cfg.db_path, "dept_cols", next as i64, |v| {
+                        trade.cols.set(v as usize);
+                        relayout();
+                        refresh_setting_labels(&ui_handle, &trade);
+                        log::info!("меню: колонок на экране: {v}");
+                    });
+                }
+                // Порядок отделов: алфавит ↔ ручной (порядок из редактора).
+                "sortalpha" => {
+                    let next = !trade.sort_alpha.get();
+                    let relayout = relayout.clone();
+                    let trade = trade.clone();
+                    let ui_handle = ui_handle.clone();
+                    save_setting(&cfg.db_path, "dept_sort_alpha", i64::from(next), |v| {
+                        trade.sort_alpha.set(v != 0);
+                        relayout();
+                        refresh_setting_labels(&ui_handle, &trade);
+                        log::info!(
+                            "меню: порядок отделов: {}",
+                            if v != 0 { "алфавит" } else { "ручной" }
+                        );
+                    });
+                }
+                // Округление цены: выкл → 10 коп → 1 руб → выкл.
+                "rounding" => {
+                    let next = (trade.rounding.get() + 1) % 3;
+                    let trade = trade.clone();
+                    let ui_handle = ui_handle.clone();
+                    save_setting(&cfg.db_path, "price_rounding", next, |v| {
+                        trade.rounding.set(v);
+                        refresh_setting_labels(&ui_handle, &trade);
+                        log::info!("меню: округление цены: режим {v}");
+                    });
+                }
+                // Минимальный вес печати: 5 / 10 / 20 / 50 г.
+                "minweight" => {
+                    const STEPS: [i64; 4] = [5, 10, 20, 50];
+                    let cur = trade.min_weight_g.get() as i64;
+                    let next = *STEPS.iter().find(|s| **s > cur).unwrap_or(&STEPS[0]);
+                    let trade = trade.clone();
+                    let ui_handle = ui_handle.clone();
+                    save_setting(&cfg.db_path, "min_weight_g", next, |v| {
+                        trade.min_weight_g.set(v as f64);
+                        refresh_setting_labels(&ui_handle, &trade);
+                        log::info!("меню: минимальный вес печати: {v} г");
+                    });
+                }
+                "export" => {
+                    let cfg = cfg.clone();
+                    let ui_handle = ui_handle.clone();
+                    std::thread::spawn(move || match cfgio::export(&cfg) {
+                        Ok(path) => {
+                            log::info!("меню: экспорт конфигурации: {}", path.display());
+                            show_cfg_popup(
+                                &ui_handle,
+                                true,
+                                format!("Файл создан:\n{}", path.display()),
+                            );
+                        }
+                        Err(e) => {
+                            log::warn!("меню: экспорт: {e}");
+                            show_cfg_popup(&ui_handle, false, format!("Экспорт не удался:\n{e}"));
+                        }
+                    });
+                }
+                "import" => {
+                    let cfg = cfg.clone();
+                    let files = cfgio::list(&cfg);
+                    if files.is_empty() {
+                        log::info!("меню: импорт: каталог обмена пуст");
+                    } else {
+                        let names: Vec<slint::SharedString> = files
+                            .iter()
+                            .map(|p| {
+                                slint::SharedString::from(
+                                    p.file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_default(),
+                                )
+                            })
+                            .collect();
+                        // Полные пути параллельно именам: apply берёт по имени.
+                        kiosk.borrow_mut().imp_files = files;
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_imp_files(slint::ModelRc::new(slint::VecModel::from(
+                                names,
+                            )));
+                        }
+                    }
+                    kiosk.borrow_mut().admin_stage = 15;
+                }
+                "reports" => {
+                    kiosk.borrow_mut().admin_stage = 16;
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_report_text("Собираю отчёт…".into());
+                    }
+                    let cfg = cfg.clone();
+                    let ui_handle = ui_handle.clone();
+                    std::thread::spawn(move || {
+                        let text = build_report(&cfg);
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_report_text(text.into());
+                            }
+                        })
+                        .ok();
+                    });
+                }
                 "idletimeout" => {
                     let mut k = kiosk.borrow_mut();
                     k.net_buf[0] = idle_secs.get().to_string();
@@ -348,15 +559,6 @@ pub fn install(ctx: &AppContext) {
                         ui.set_pin_forced(false);
                         ui.set_pin_error("".into());
                     }
-                }
-                "depts" => {
-                    admin_reload();
-                    let mut k = kiosk.borrow_mut();
-                    // Значение таймаута в строке раздела — актуальное.
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_idle_value(idle_secs.get().to_string().into());
-                    }
-                    k.admin_stage = 3;
                 }
                 "net" => {
                     let (ui, mut k) = (ui_handle.upgrade(), kiosk.borrow_mut());
@@ -607,6 +809,163 @@ pub fn install(ctx: &AppContext) {
             }
         }
     });
+    // Импорт: тап по файлу — разбор в фоне, превью в попапе; «ПРИМЕНИТЬ» —
+    // запись настроек и пересборка экрана. Файл с ошибкой формата не
+    // применяется, попап показывает причину.
+    ui.on_import_tap({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
+        move |name: slint::SharedString| {
+            let path = {
+                let k = kiosk.borrow();
+                k.imp_files
+                    .iter()
+                    .find(|p| {
+                        p.file_name().map(|n| n.to_string_lossy()).as_deref() == Some(name.as_str())
+                    })
+                    .cloned()
+            };
+            let Some(path) = path else { return };
+            kiosk.borrow_mut().imp_pending = path.to_string_lossy().to_string();
+            match cfgio::parse(&path) {
+                Ok(f) => {
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_imp_confirm(true);
+                        ui.set_imp_popup_ok(true);
+                        ui.set_imp_popup_text(cfgio::preview(&f).into());
+                        ui.set_imp_popup_open(true);
+                    }
+                }
+                Err(e) => {
+                    log::warn!("меню: импорт: {e}");
+                    show_cfg_popup(&ui_handle, false, format!("Файл не читается:\n{e}"));
+                }
+            }
+        }
+    });
+    ui.on_import_apply({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
+        let cfg = cfg.clone();
+        let trade = trade.clone();
+        let refresh_data = flow.refresh_data.clone();
+        let idle_secs = idle_secs.clone();
+        move || {
+            let path = kiosk.borrow().imp_pending.clone();
+            if path.is_empty() {
+                if let Some(ui) = ui_handle.upgrade() {
+                    ui.set_imp_popup_open(false);
+                    ui.set_imp_confirm(false);
+                }
+                return;
+            }
+            // Разбор и запись — несколько коротких SQL-операций и чтение
+            // небольшого файла: в callback, как и сохранение калибровок.
+            match cfgio::parse(std::path::Path::new(&path))
+                .and_then(|f| cfgio::apply(&cfg, &f).map(|_| f))
+            {
+                Ok(f) => {
+                    log::info!(
+                        "меню: импорт применён: отделов {}, колонок {:?}",
+                        f.depts.len(),
+                        f.dept_cols
+                    );
+                    // Живые настройки — из данных файла, экраны пересобрать.
+                    if let Some(v) = f.dept_cols {
+                        trade.cols.set(v.clamp(1, 5) as usize);
+                    }
+                    if let Some(v) = f.dept_sort_alpha {
+                        trade.sort_alpha.set(v);
+                    }
+                    if let Some(v) = f.price_rounding {
+                        trade.rounding.set(v.clamp(0, 2));
+                    }
+                    if let Some(v) = f.min_weight_g {
+                        trade.min_weight_g.set(v.clamp(1, 1000) as f64);
+                    }
+                    if let Some(v) = f.idle_timeout_secs {
+                        idle_secs.set(v.clamp(10, 600) as u64);
+                    }
+                    refresh_data();
+                    refresh_setting_labels(&ui_handle, &trade);
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_imp_confirm(false);
+                        ui.set_imp_popup_ok(true);
+                        ui.set_imp_popup_text(
+                            format!(
+                                "Применено: отделов {}, колонок {}",
+                                f.depts.len(),
+                                f.dept_cols.unwrap_or(2).clamp(1, 5)
+                            )
+                            .into(),
+                        );
+                        ui.set_imp_popup_open(true);
+                    }
+                }
+                Err(e) => {
+                    log::warn!("меню: импорт: {e}");
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_imp_confirm(false);
+                        ui.set_imp_popup_ok(false);
+                        ui.set_imp_popup_text(format!("Не применено:\n{e}").into());
+                        ui.set_imp_popup_open(true);
+                    }
+                }
+            }
+        }
+    });
+    ui.on_imp_popup_close({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_imp_popup_open(false);
+                ui.set_imp_confirm(false);
+            }
+        }
+    });
+}
+
+/// Текст отчёта для экрана 17: счётчики печатей и последние операции.
+/// Сбор — в фоновом потоке (открытие БД), ошибки — строкой в отчёте.
+fn build_report(cfg: &crate::config::Config) -> String {
+    let conn = match datastore::open(&cfg.db_path) {
+        Ok(c) => c,
+        Err(e) => return format!("Отчёт недоступен: база: {e}"),
+    };
+    let today = print::today_start();
+    let n_today = datastore::print_log_count_since(&conn, today).unwrap_or(0);
+    let n_all = datastore::print_log_count_all(&conn).unwrap_or(0);
+    let mut text = format!("Этикеток сегодня: {n_today}\nВсего печатей: {n_all}\n");
+    match datastore::print_log_recent(&conn, 8) {
+        Ok(rows) if !rows.is_empty() => {
+            text.push_str("\nПоследние операции:\n");
+            for r in rows {
+                let name = r.name.unwrap_or_default();
+                let name = if name.chars().count() > 22 {
+                    format!("{}…", name.chars().take(22).collect::<String>())
+                } else {
+                    name
+                };
+                match (r.weight_g, r.sum_kop, r.ok) {
+                    (Some(w), Some(s), true) => {
+                        text.push_str(&format!(
+                            "{}  {:<22} {} г  {}\n",
+                            print::local_hms(r.ts),
+                            name,
+                            w,
+                            crate::session::sum_str(s)
+                        ));
+                    }
+                    _ => {
+                        text.push_str(&format!("{}  {:<22} — ошибка\n", print::local_hms(r.ts), name));
+                    }
+                }
+            }
+        }
+        Ok(_) => text.push_str("\nПечатей ещё не было."),
+        Err(e) => text.push_str(&format!("\nЖурнал: {e}")),
+    }
+    text
 }
 
 /// Текст попапа после применения: фактические настройки с системы,

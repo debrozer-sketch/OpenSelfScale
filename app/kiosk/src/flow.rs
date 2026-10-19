@@ -15,6 +15,10 @@ use crate::{DeptDef, PluTile};
 pub struct FlowHandles {
     pub go_root: Rc<dyn Fn()>,
     pub refresh_data: Rc<dyn Fn()>,
+    /// Пересборка раскладки: отделы из БД, геометрия, срез страницы.
+    /// Вызывается на старте, после синхронизации и при смене настроек
+    /// «Товары и экран» — без перезапуска киоска.
+    pub relayout: Rc<dyn Fn()>,
 }
 
 /// Регистрирует все колбэки потока покупателя и возвращает go_root /
@@ -29,7 +33,6 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
     let depts_all = ctx.depts_all.clone();
     let items_all = ctx.items_all.clone();
     let img_dir = ctx.img_dir.clone();
-    let max_cols = ctx.max_cols;
 
     // Касание товара: открываем детальную карточку (экран 5) с живым весом
     // и стоимостью; печать — по кнопке «ПЕЧАТЬ →» (plu-confirm).
@@ -64,6 +67,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
     ui.on_plu_confirm({
         let kiosk = kiosk.clone();
         let app_state = ctx.app_state.clone();
+        let trade = ctx.trade.clone();
         let ui_handle = ui_handle.clone();
         move || {
             let mut k = kiosk.borrow_mut();
@@ -71,7 +75,8 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             // (кнопка погасла, вес ещё не стабилен) карточка осталась бы
             // открытой с мёртвым товаром — повторное ПЕЧАТЬ не работало бы.
             let Some(entry) = k.pending.clone() else { return };
-            let ws = weight_state(&app_state.snapshot());
+            let min_kg = trade.min_weight_g.get() / 1000.0;
+            let ws = weight_state(&app_state.snapshot(), min_kg);
             if ws != 2 {
                 return;
             }
@@ -180,15 +185,16 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let ui_handle = ui_handle.clone();
         let depts_all = depts_all.clone();
         let kiosk = kiosk.clone();
+        let cols = ctx.trade.cols.clone();
         move |page: usize| {
             let Some(ui) = ui_handle.upgrade() else { return };
-            let pages_total = depts_all.borrow().len().div_ceil(max_cols).max(1);
+            let pages_total = depts_all.borrow().len().div_ceil(cols.get()).max(1);
             let page = page.min(pages_total - 1);
             let tiles: Vec<DeptDef> = depts_all
                 .borrow()
                 .iter()
-                .skip(page * max_cols)
-                .take(max_cols)
+                .skip(page * cols.get())
+                .take(cols.get())
                 .cloned()
                 .collect();
             ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles.clone())));
@@ -217,9 +223,10 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let kiosk = kiosk.clone();
         let depts_all = depts_all.clone();
         let set_dept_slice = set_dept_slice.clone();
+        let cols = ctx.trade.cols.clone();
         move || {
             kiosk.borrow_mut().idle_since = None;
-            let pages = depts_all.borrow().len().div_ceil(max_cols).max(1);
+            let pages = depts_all.borrow().len().div_ceil(cols.get()).max(1);
             let next = (kiosk.borrow().dept_page + 1).min(pages - 1);
             set_dept_slice(next);
         }
@@ -246,6 +253,105 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             }
         }
     });
+
+    // Раскладка главного экрана: отделы из БД, сортировка по текущему
+    // режиму, геометрия колонок, шрифт, срез страницы. Ошибки БД не
+    // затирают модели пустотой — остаётся прежняя раскладка.
+    let relayout = {
+        let ui_handle = ui_handle.clone();
+        let cfg = ctx.cfg.clone();
+        let trade = ctx.trade.clone();
+        let kiosk = kiosk.clone();
+        let depts_all = depts_all.clone();
+        let group_dept = group_dept.clone();
+        let img_dir = img_dir.clone();
+        move || {
+            let Some(ui) = ui_handle.upgrade() else { return };
+            let (depts, gd_pairs, all_groups) = match datastore::open(&cfg.db_path) {
+                Ok(conn) => match (
+                    datastore::depts_list(&conn),
+                    datastore::group_depts(&conn),
+                    datastore::groups_alpha(&conn),
+                ) {
+                    (Ok(d), Ok(g), Ok(gr)) => (d, g, gr),
+                    (a, b, c) => {
+                        for (name, e) in
+                            [("отделы", a.err()), ("привязки", b.err()), ("группы", c.err())]
+                        {
+                            if let Some(e) = e {
+                                log::error!("раскладка: {name}: {e}");
+                            }
+                        }
+                        return;
+                    }
+                },
+                Err(e) => {
+                    log::error!("раскладка: база: {e}");
+                    return;
+                }
+            };
+            let mut gd_map: std::collections::HashMap<String, String> =
+                gd_pairs.into_iter().collect();
+            // Группы без отдела уходят в «ПРОЧЕЕ», а не пропадают из меню.
+            if let Ok(conn) = datastore::open(&cfg.db_path) {
+                match datastore::route_unmapped_groups(&conn, &mut gd_map, &all_groups) {
+                    Ok(un) if !un.is_empty() => {
+                        for g in &un {
+                            log::warn!("группа без отдела: {g} → {}", datastore::FALLBACK_DEPT);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => log::error!("раскладка: группы без отдела: {e}"),
+                }
+            }
+            let mut depts = depts;
+            if trade.sort_alpha.get() {
+                depts.sort_by(|a, b| a.name.cmp(&b.name));
+            }
+            *group_dept.borrow_mut() = gd_map;
+            let gd = group_dept.borrow();
+            *depts_all.borrow_mut() = tiles::dept_tiles(&depts, &gd, &all_groups, &img_dir);
+            drop(gd);
+
+            // Геометрия ряда: колонок может стать меньше/больше без
+            // перезапуска — ширина, шрифт и срез пересчитываются здесь же.
+            let cols = trade.cols.get().max(1);
+            let n = depts_all.borrow().len();
+            let pages_total = n.div_ceil(cols).max(1);
+            let win_w = ui.get_screen_w() as i32;
+            let win_h = ui.get_screen_h() as i32;
+            let row_w = win_w - 16;
+            let pager_h: i32 = if pages_total > 1 { 64 } else { 0 };
+            let tile_h = win_h - 160 - 16 - pager_h;
+            let colw = (row_w - (cols as i32 - 1) * 8) / cols as i32;
+            ui.set_col_w(colw as f32);
+            ui.set_tile_h(tile_h as f32);
+            let maxlen = depts_all
+                .borrow()
+                .iter()
+                .map(|d| d.name.chars().count())
+                .max()
+                .unwrap_or(4) as f32;
+            let font_px = ((colw - 32) as f32 / (maxlen * 0.82)).floor().max(18.0);
+            ui.set_dept_font(font_px);
+            log::info!("отделы: {cols} колонок × {colw} px, шрифт {font_px} px");
+            let page = kiosk.borrow().dept_page.min(pages_total - 1);
+            let tiles: Vec<DeptDef> = depts_all
+                .borrow()
+                .iter()
+                .skip(page * cols)
+                .take(cols)
+                .cloned()
+                .collect();
+            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles.clone())));
+            ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+            ui.set_page_no(page as i32);
+            ui.set_pages_total(pages_total as i32);
+            ui.set_dept_pages_total(pages_total as i32);
+            kiosk.borrow_mut().dept_page = page;
+        }
+    };
+    let relayout: Rc<dyn Fn()> = Rc::new(relayout);
     // Поиск: ввод по экранной клавиатуре, живая выдача (до 5 строк).
     let search_query = Rc::new(RefCell::new(String::new()));
     let search_apply = {
@@ -360,6 +466,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let depts_all = depts_all.clone();
         let items_all = items_all.clone();
         let ui_handle = ui_handle.clone();
+        let cols = ctx.trade.cols.clone();
         move || {
             kiosk.borrow_mut().idle_since = None;
             let Some(ui) = ui_handle.upgrade() else { return };
@@ -372,7 +479,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 // Экран 0 — отделы; прочие (поиск 3 и т.д.) пейджером не
                 // обслуживаются, чтобы не уводить покупателя с экрана.
                 0 => {
-                    let pages_total = depts_all.borrow().len().div_ceil(max_cols).max(1);
+                    let pages_total = depts_all.borrow().len().div_ceil(cols.get()).max(1);
                     let page = (kiosk.borrow().dept_page + 1).min(pages_total - 1);
                     show_dept(page);
                 }
@@ -411,6 +518,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let depts_all = depts_all.clone();
         let open_dept = open_dept.clone();
         let kiosk = kiosk.clone();
+        let cols = ctx.trade.cols.clone();
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
             // Сброс сессии и страниц. try_borrow: тик вызывает go_root, уже
@@ -426,7 +534,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             ui.set_page_no(0);
             ui.set_popup_open(false);
             let tiles: Vec<DeptDef> =
-                depts_all.borrow().iter().take(max_cols).cloned().collect();
+                depts_all.borrow().iter().take(cols.get()).cloned().collect();
             ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles.clone())));
             ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
             if depts_all.borrow().len() == 1 {
@@ -459,9 +567,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let items_all = items_all.clone();
         let img_dir = img_dir.clone();
         let kiosk = kiosk.clone();
-        let set_dept_slice = set_dept_slice.clone();
         let show_items = show_items_page.clone();
         let go_root = go_root.clone();
+        let relayout = relayout.clone();
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
             // Картинки на диске заменены синхронизацией под теми же именами.
@@ -475,30 +583,13 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             };
             // Ошибки чтения НЕ затирают модели пустотой: транзитная блокировка
             // БД не должна оставлять киоск с пустым меню до следующей синхронизации.
-            let (mut depts, gd_pairs, all_groups, items);
-            match (
-                datastore::depts_list(&conn),
-                datastore::group_depts(&conn),
-                datastore::groups_alpha(&conn),
-                datastore::load_all(&conn),
-            ) {
-                (Ok(d), Ok(g), Ok(gr), Ok(i)) => {
-                    (depts, gd_pairs, all_groups, items) = (d, g, gr, i);
-                }
-                (a, b, c, d) => {
-                    for (name, e) in [
-                        ("отделы", a.err()),
-                        ("привязки", b.err()),
-                        ("группы", c.err()),
-                        ("PLU", d.err()),
-                    ] {
-                        if let Some(e) = e {
-                            log::error!("обновление данных: {name}: {e}");
-                        }
-                    }
+            let items = match datastore::load_all(&conn) {
+                Ok(i) => i,
+                Err(e) => {
+                    log::error!("обновление данных: PLU: {e}");
                     return;
                 }
-            }
+            };
             log::info!("данные обновлены: {} товаров", items.len());
             *catalog.borrow_mut() = items;
             *catalog_up.borrow_mut() = catalog
@@ -525,27 +616,11 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                     }
                 }
             }
-            let mut gd_map: std::collections::HashMap<String, String> =
-                gd_pairs.into_iter().collect();
-            // Группы без отдела уходят в «ПРОЧЕЕ», а не пропадают из меню.
-            match datastore::route_unmapped_groups(&conn, &mut gd_map, &all_groups) {
-                Ok(un) if !un.is_empty() => {
-                    for g in &un {
-                        log::warn!("группа без отдела: {g} → {}", datastore::FALLBACK_DEPT);
-                    }
-                    depts = datastore::depts_list(&conn).unwrap_or(depts);
-                }
-                Ok(_) => {}
-                Err(e) => log::error!("группы без отдела: {e}"),
-            }
-            *depts_all.borrow_mut() =
-                tiles::dept_tiles(&depts, &gd_map, &all_groups, &img_dir);
-            *group_dept.borrow_mut() = gd_map;
-            // Срез отделов обновляется без смены экрана: покупатель, читающий
-            // карточки, не должен вылетать на главный экран посреди листания.
+            // Отделы и геометрия — общая функция раскладки (сортировка,
+            // шрифт, срез страницы); покупатель, читающий карточки, остаётся
+            // на своём экране.
             let cur = ui.get_screen();
-            let page = kiosk.borrow().dept_page;
-            set_dept_slice(page);
+            relayout();
             // Одиночный отдел: каталог сворачивается в его товары (go_root
             // сам откроет отдел через отложенный вызов).
             if depts_all.borrow().len() == 1 && cur == 0 {
@@ -573,5 +648,5 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         }
     };
     let refresh_data: Rc<dyn Fn()> = Rc::new(refresh_data);
-    FlowHandles { go_root, refresh_data }
+    FlowHandles { go_root, refresh_data, relayout }
 }

@@ -401,6 +401,25 @@ export component MainWindow inherits Window {
     callback net-popup-close();
     // Режим главного адреса: false — ручной, true — DHCP (поля только чтение).
     in property <bool> net-dhcp;
+
+    // ---------- Настройки весов (экраны 12–17) ----------
+    // Товары и экран: колонки, сортировка. Торговые правила: округление,
+    // минимальный вес. Значения ставит бэкенд при открытии экрана.
+    in property <string> goods-cols: "2";
+    in property <string> goods-sort: "по алфавиту";
+    in property <string> trade-rounding: "выкл";
+    in property <string> trade-minw: "10 г";
+    // Импорт: список файлов каталога, подтверждение применения, результат.
+    in property <[string]> imp-files;
+    in property <bool> imp-popup-open: false;
+    in property <bool> imp-confirm: false;
+    in property <string> imp-popup-text;
+    in property <bool> imp-popup-ok: true;
+    callback import-tap(string);
+    callback import-apply();
+    callback imp-popup-close();
+    // Отчёты: текст собирается в фоне.
+    in property <string> report-text;
     // Данные сети заполнены и корректны — кнопка ПРИМЕНИТЬ активна.
     in property <bool> net-valid: false;
     // Экран «Простой до сброса»: число секунд и валидность (10–600).
@@ -1146,6 +1165,12 @@ export component MainWindow inherits Window {
                     : root.screen == 9 ? "НАСТРОЙКИ · ОБОРУДОВАНИЕ"
                     : root.screen == 10 ? "СМЕНА ПАРОЛЯ"
                     : root.screen == 11 ? "НАСТРОЙКИ · ПРОСТОЙ"
+                    : root.screen == 12 ? "НАСТРОЙКИ ВЕСОВ"
+                    : root.screen == 13 ? "НАСТРОЙКИ · ТОВАРЫ И ЭКРАН"
+                    : root.screen == 14 ? "НАСТРОЙКИ · ТОРГОВЫЕ ПРАВИЛА"
+                    : root.screen == 15 ? "НАСТРОЙКИ · ОБСЛУЖИВАНИЕ"
+                    : root.screen == 16 ? "НАСТРОЙКИ · ИМПОРТ"
+                    : root.screen == 17 ? "ОТЧЁТЫ"
                     : "МЕНЮ НАСТРОЕК";
                 font-size: 26px;
                 font-weight: 700;
@@ -1154,7 +1179,8 @@ export component MainWindow inherits Window {
                 overflow: elide;
             }
             if (root.screen == 4 || root.screen == 8 || root.screen == 9
-                || root.screen == 11) && !root.pin-forced : Rectangle {
+                || root.screen == 11 || root.screen == 13 || root.screen == 14
+                || root.screen == 16 || root.screen == 17) && !root.pin-forced : Rectangle {
                 x: parent.width - 336px;
                 y: 8px;
                 width: 160px;
@@ -1399,10 +1425,9 @@ export component MainWindow inherits Window {
             height: parent.height - 84px;
 
             property <[MenuRow]> rows: [
-                { label: "Настройки весов", id: "depts", admin: true },
+                { label: "Настройки весов", id: "scaleset", admin: true },
                 { label: "Оборудование", id: "equip", admin: false },
                 { label: "Сеть", id: "net", admin: true },
-                { label: "Сменить пароль", id: "changepin", admin: true },
                 { label: "Выставить 0 / тарировать", id: "zero", admin: false },
                 { label: "Перезагрузка весов", id: "restart", admin: true },
             ];
@@ -1755,6 +1780,337 @@ export component MainWindow inherits Window {
                     enabled: root.idle-valid;
                     clicked => { root.idle-save(); }
                 }
+            }
+        }
+
+        // ---------- Экран 12: хаб «Настройки весов» ----------
+        if root.screen == 12 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            property <[MenuRow]> rows: [
+                { label: "Товары и экран", id: "goods", admin: true },
+                { label: "Торговые правила", id: "trade", admin: true },
+                { label: "Обслуживание", id: "service", admin: false },
+            ];
+            for r[i] in rows : Rectangle {
+                x: 8px;
+                y: 12px + i * 82px;
+                width: parent.width - 16px;
+                height: 74px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: hub-ta.pressed ? #E4E8ED : #FFFFFF;
+                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
+                Text {
+                    x: 24px;
+                    width: parent.width - 48px;
+                    height: parent.height;
+                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                hub-ta := TouchArea {
+                    clicked => {
+                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
+                    }
+                }
+            }
+        }
+
+        // ---------- Экран 13: товары и экран ----------
+        if root.screen == 13 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            property <[MenuRow]> rows: [
+                { label: "Компоновка разделов", id: "layout", admin: true },
+                { label: "Колонок на экране", id: "cols", admin: true },
+                { label: "Порядок отделов", id: "sortalpha", admin: true },
+                { label: "Возврат на главный экран", id: "idle", admin: true },
+                { label: "Экспорт конфигурации", id: "export", admin: true },
+                { label: "Импорт конфигурации", id: "import", admin: true },
+            ];
+            for r[i] in rows : Rectangle {
+                x: 8px;
+                y: 12px + i * 82px;
+                width: parent.width - 16px;
+                height: 74px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: goods-ta.pressed ? #E4E8ED : #FFFFFF;
+                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
+                Text {
+                    x: 24px;
+                    width: parent.width - 260px;
+                    height: parent.height;
+                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                // Значение справа для переключаемых пунктов.
+                if r.id == "cols" : Text {
+                    x: parent.width - 230px;
+                    width: 190px;
+                    height: parent.height;
+                    text: root.goods-cols;
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #4A5460;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+                if r.id == "sortalpha" : Text {
+                    x: parent.width - 230px;
+                    width: 190px;
+                    height: parent.height;
+                    text: root.goods-sort;
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #4A5460;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+                goods-ta := TouchArea {
+                    clicked => {
+                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
+                    }
+                }
+            }
+        }
+
+        // ---------- Экран 14: торговые правила ----------
+        if root.screen == 14 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            property <[MenuRow]> rows: [
+                { label: "Округление цены", id: "rounding", admin: true },
+                { label: "Минимальный вес печати", id: "minweight", admin: true },
+            ];
+            for r[i] in rows : Rectangle {
+                x: 8px;
+                y: 12px + i * 82px;
+                width: parent.width - 16px;
+                height: 74px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: trade-ta.pressed ? #E4E8ED : #FFFFFF;
+                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
+                Text {
+                    x: 24px;
+                    width: parent.width - 260px;
+                    height: parent.height;
+                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                if r.id == "rounding" : Text {
+                    x: parent.width - 230px;
+                    width: 190px;
+                    height: parent.height;
+                    text: root.trade-rounding;
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #4A5460;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+                if r.id == "minweight" : Text {
+                    x: parent.width - 230px;
+                    width: 190px;
+                    height: parent.height;
+                    text: root.trade-minw;
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #4A5460;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+                trade-ta := TouchArea {
+                    clicked => {
+                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
+                    }
+                }
+            }
+        }
+
+        // ---------- Экран 15: обслуживание ----------
+        if root.screen == 15 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            property <[MenuRow]> rows: [
+                { label: "Сменить пароль", id: "changepin", admin: false },
+                { label: "Отчёты", id: "reports", admin: false },
+            ];
+            for r[i] in rows : Rectangle {
+                x: 8px;
+                y: 12px + i * 82px;
+                width: parent.width - 16px;
+                height: 74px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: svc-ta.pressed ? #E4E8ED : #FFFFFF;
+                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
+                Text {
+                    x: 24px;
+                    width: parent.width - 48px;
+                    height: parent.height;
+                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                svc-ta := TouchArea {
+                    clicked => {
+                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
+                    }
+                }
+            }
+        }
+
+        // ---------- Экран 16: импорт конфигурации ----------
+        if root.screen == 16 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            if root.imp-files.length == 0 : Text {
+                x: 16px;
+                y: 24px;
+                width: parent.width - 32px;
+                height: 60px;
+                text: "В каталоге обмена нет файлов конфигурации (.toml)";
+                font-size: 24px;
+                color: #4A5460;
+                horizontal-alignment: center;
+            }
+            for name[i] in root.imp-files : Rectangle {
+                x: 8px;
+                y: 12px + i * 82px;
+                width: parent.width - 16px;
+                height: 74px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: imp-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    x: 24px;
+                    width: parent.width - 48px;
+                    height: parent.height;
+                    text: name;
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                imp-ta := TouchArea {
+                    clicked => { root.import-tap(name); }
+                }
+            }
+
+            // Подтверждение / результат импорта.
+            if root.imp-popup-open : Rectangle {
+                x: 0; y: 0;
+                width: parent.width;
+                height: parent.height;
+                background: #00000040;
+                Rectangle {
+                    x: (parent.width - 640px) / 2;
+                    y: (parent.height - 320px) / 2;
+                    width: 640px;
+                    height: 320px;
+                    border-radius: 16px;
+                    background: #FFFFFF;
+                    Text {
+                        x: 24px; y: 24px;
+                        width: parent.width - 48px;
+                        height: 200px;
+                        text: root.imp-popup-text;
+                        font-size: 24px;
+                        color: #1A1E24;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        wrap: word-wrap;
+                    }
+                    if root.imp-confirm : Rectangle {
+                        x: 24px;
+                        y: parent.height - 80px;
+                        width: 280px;
+                        height: 56px;
+                        border-radius: 12px;
+                        background: imp-no-ta.pressed ? #E4E8ED : #EDF0F3;
+                        Text {
+                            text: "ОТМЕНА";
+                            font-size: 24px;
+                            font-weight: 700;
+                            color: #1A1E24;
+                        }
+                        imp-no-ta := TouchArea {
+                            clicked => { root.imp-popup-close(); }
+                        }
+                    }
+                    Rectangle {
+                        x: parent.width - 304px;
+                        y: parent.height - 80px;
+                        width: 280px;
+                        height: 56px;
+                        border-radius: 12px;
+                        background: imp-yes-ta.pressed ? #1E4D3A : #2E7D57;
+                        Text {
+                            text: root.imp-confirm ? "ПРИМЕНИТЬ" : "OK";
+                            font-size: 24px;
+                            font-weight: 700;
+                            color: #FFFFFF;
+                        }
+                        imp-yes-ta := TouchArea {
+                            clicked => {
+                                root.imp-confirm ? root.import-apply() : root.imp-popup-close();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---------- Экран 17: отчёты ----------
+        if root.screen == 17 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            Text {
+                x: 24px;
+                y: 16px;
+                width: parent.width - 48px;
+                height: parent.height - 32px;
+                text: root.report-text;
+                font-size: 24px;
+                color: #1A1E24;
+                vertical-alignment: top;
+                wrap: word-wrap;
             }
         }
 

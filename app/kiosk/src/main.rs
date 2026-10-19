@@ -11,6 +11,7 @@
 
 mod admin;
 mod calib;
+mod cfgio;
 mod cli;
 mod config;
 mod context;
@@ -216,54 +217,23 @@ fn run_kiosk(cfg: config::Config) {
         ui.window().set_fullscreen(true);
     }
 
-    // Каталог + справочник групп по отделам. Состав отдела — из БД-карты
+    // Каталог + привязки групп по отделам. Состав отдела — из БД-карты
     // group_dept (правится CLI/центром); dept_of (сид) не используется
-    // в фильтрах, чтобы меню и вход в отдел не расходились.
-    let mut all_groups: Vec<(String, i64)> = Vec::new();
-    let mut depts: Vec<datastore::DeptRow> = Vec::new();
+    // в фильтрах, чтобы меню и вход в отдел не расходились. Отделы,
+    // геометрия и привязки целиком собирает relayout.
     let group_dept: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>> =
         std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new()));
     let catalog: Vec<datastore::PluEntry> = match datastore::open(&cfg.db_path) {
-        Ok(conn) => {
-            // Отделы и привязки из БД: состав/порядок правятся без кода
-            // (CLI/центр/SQL). Отдел в меню виден, только если у него есть
-            // хотя бы одна непустая группа.
-            depts = datastore::depts_list(&conn).unwrap_or_default();
-            *group_dept.borrow_mut() = datastore::group_depts(&conn)
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
-            match datastore::load_all(&conn) {
-                Ok(items) => {
-                    log::info!("загружено товаров: {}", items.len());
-                    all_groups = datastore::groups_alpha(&conn).unwrap_or_default();
-                    // Группы без отдела не пропадают из меню: уходят в «ПРОЧЕЕ».
-                    let routed = datastore::route_unmapped_groups(
-                        &conn,
-                        &mut group_dept.borrow_mut(),
-                        &all_groups,
-                    );
-                    match routed {
-                        Ok(un) if !un.is_empty() => {
-                            for g in &un {
-                                log::warn!(
-                                    "группа без отдела: {g} → {}",
-                                    datastore::FALLBACK_DEPT
-                                );
-                            }
-                            depts = datastore::depts_list(&conn).unwrap_or(depts);
-                        }
-                        Ok(_) => {}
-                        Err(e) => log::error!("группы без отдела: {e}"),
-                    }
-                    items
-                }
-                Err(e) => {
-                    log::error!("чтение PLU: {e}");
-                    Vec::new()
-                }
+        Ok(conn) => match datastore::load_all(&conn) {
+            Ok(items) => {
+                log::info!("загружено товаров: {}", items.len());
+                items
             }
-        }
+            Err(e) => {
+                log::error!("чтение PLU: {e}");
+                Vec::new()
+            }
+        },
         Err(e) => {
             log::error!("база {}: {e}", cfg.db_path.display());
             Vec::new()
@@ -285,42 +255,11 @@ fn run_kiosk(cfg: config::Config) {
                 .collect(),
         ));
 
-    // Отделы одной строкой: страниц по max_cols колонок (из [ui] config),
-    // переполнение — за пейджером под колонками. Пустые отделы не видны.
+    // Отделы, геометрия колонок и шрифт собираются в relayout (flow.rs):
+    // раскладка пересчитывается и при смене настроек без перезапуска.
     let img_dir = cfg.ui.img_dir.clone();
-    let depts_all = std::rc::Rc::new(std::cell::RefCell::new(tiles::dept_tiles(
-        &depts,
-        &group_dept.borrow(),
-        &all_groups,
-        &img_dir,
-    )));
-    let max_cols = (cfg.ui.max_cols as usize).max(1);
-    let pages_total = depts_all.borrow().len().div_ceil(max_cols).max(1);
-    ui.set_page_no(0);
-    ui.set_pages_total(pages_total as i32);
-    // Шапка экрана товаров листает те же страницы отделов.
-    ui.set_dept_pages_total(pages_total as i32);
-    // Геометрия ряда от размера экрана: смена панели на более широкую/высокую
-    // не требует правки разметки (screen-w/h задаёт бэкенд или дефолт).
-    let win_w = ui.get_screen_w() as i32;
-    let win_h = ui.get_screen_h() as i32;
-    let row_w = win_w - 16;
-    // Полоса пейджера резервируется, только если страниц больше одной.
-    let pager_h: i32 = if pages_total > 1 { 64 } else { 0 };
-    let tile_h = win_h - 160 - 16 - pager_h;
-    let colw = (row_w - (max_cols as i32 - 1) * 8) / max_cols as i32;
-    ui.set_col_w(colw as f32);
-    ui.set_tile_h(tile_h as f32);
-    // Единый кегль подписи: самая длинная подпись должна влезать в самую
-    // узкую колонку целиком. Ширина прописной bold-литеры DejaVu ≈ 0.82 em.
-    let maxlen = depts_all
-        .borrow()
-        .iter()
-        .map(|d| d.name.chars().count())
-        .max()
-        .unwrap_or(4) as f32;
-    let font_px = ((colw - 32) as f32 / (maxlen * 0.82)).floor().max(18.0);
-    ui.set_dept_font(font_px);
+    let depts_all: std::rc::Rc<std::cell::RefCell<Vec<DeptDef>>> =
+        std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     // Логотип компании: <img_dir>/logo.png, показывается справа от веса.
     // Нет файла — зона остаётся пустой.
     match slint::Image::load_from_path(&img_dir.join("logo.png")) {
@@ -331,11 +270,6 @@ fn run_kiosk(cfg: config::Config) {
         }
         Err(_) => log::info!("логотип: файла нет, зона пустая"),
     }
-    log::info!("отделы: {max_cols} колонок × {colw} px, шрифт {font_px} px");
-    // Страница 0 при старте: колонки = срез depts_all.
-    let visible: Vec<DeptDef> = depts_all.borrow().iter().take(max_cols).cloned().collect();
-    ui.set_depts(slint::ModelRc::new(slint::VecModel::from(visible.clone())));
-    ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(visible)));
 
     // Состояние операции живёт в потоке UI (таймер + колбэки).
     let kiosk = std::rc::Rc::new(std::cell::RefCell::new(Kiosk::new()));
@@ -345,21 +279,41 @@ fn run_kiosk(cfg: config::Config) {
 
     // Эффективный таймаут простоя: из БД (меню «Простой до сброса»),
     // записи нет — из конфига ([kiosk] idle_timeout_secs, дефолт 60).
+    let cal_value = |conn: &rusqlite::Connection, key: &str| {
+        datastore::get_calibration(conn, key).ok().flatten()
+    };
     let idle_secs: std::rc::Rc<std::cell::Cell<u64>> = std::rc::Rc::new(
         std::cell::Cell::new(
             datastore::open(&cfg.db_path)
                 .ok()
-                .and_then(|c| datastore::get_calibration(&c, "idle_timeout_secs").ok().flatten())
+                .and_then(|c| cal_value(&c, "idle_timeout_secs"))
                 .map(|v| v.clamp(10, 600) as u64)
                 .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 600)),
         ),
     );
+    // Живые настройки «Товары и экран» и «Торговые правила»: из БД,
+    // записи нет — значения по умолчанию (2 колонки, алфавит, без
+    // округления, минимум 10 г).
+    let trade = {
+        let db = datastore::open(&cfg.db_path).ok();
+        let cal = |key: &str| db.as_ref().and_then(|c| cal_value(c, key));
+        crate::context::TradeSettings {
+            cols: std::rc::Rc::new(std::cell::Cell::new(
+                cal("dept_cols").map(|v| v.clamp(1, 5) as usize).unwrap_or(2).max(1),
+            )),
+            sort_alpha: std::rc::Rc::new(std::cell::Cell::new(cal("dept_sort_alpha").unwrap_or(1) != 0)),
+            rounding: std::rc::Rc::new(std::cell::Cell::new(cal("price_rounding").unwrap_or(0).clamp(0, 2))),
+            min_weight_g: std::rc::Rc::new(std::cell::Cell::new(
+                cal("min_weight_g").map(|v| v.clamp(1, 1000) as f64).unwrap_or(10.0),
+            )),
+        }
+    };
 
     let ctx = AppContext {
         ui: ui.as_weak(),
         cfg: cfg.clone(),
         img_dir,
-        max_cols,
+        trade,
         kiosk,
         app_state,
         catalog,
@@ -372,7 +326,12 @@ fn run_kiosk(cfg: config::Config) {
 
     // Поток покупателя и меню настроек регистрируют свои колбэки на UI.
     let flow_handles = flow::install(&ctx);
-    settings::install(&ctx);
+    settings::install(&ctx, &flow_handles);
+    // Первичная раскладка: отделы из БД, геометрия по колонкам из БД.
+    (flow_handles.relayout)();
+    if ctx.depts_all.borrow().len() == 1 {
+        (flow_handles.go_root)();
+    }
 
     // Авто-синхронизация: фоновый поток по расписанию [center]. Результат —
     // в очередь тику UI на обновление данных.

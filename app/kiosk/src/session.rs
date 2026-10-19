@@ -3,9 +3,6 @@
 
 use std::time::{Duration, Instant};
 
-/// Минимальная «наличная» масса, кг: ниже — платформа пуста.
-/// Пустая платформа стабильно показывает −6 г, товар ≥ 10 г.
-pub const MIN_MASS_KG: f64 = 0.010;
 /// Возврат из «Готово» без снятия товара (S5 → S2).
 pub const DONE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Авто-возврат из ошибки принтера.
@@ -22,6 +19,17 @@ pub fn sum_kopecks(price: i64, weight_g: u32) -> i64 {
     (price * weight_g as i64 + 500) / 1000
 }
 
+/// Округление суммы для покупателя (клавиша в «Торговых правилах»):
+/// 0 — без округления (до копейки), 1 — до 10 копеек, 2 — до рубля.
+/// Округление арифметическое («вверх от 0.5»), в меньшую сторону никогда.
+pub fn round_sum(sum: i64, mode: i64) -> i64 {
+    match mode {
+        1 => (sum + 5) / 10 * 10,
+        2 => (sum + 50) / 100 * 100,
+        _ => sum,
+    }
+}
+
 pub fn price_str(price: i64) -> String {
     format!("{}.{:02} ₽/кг", price / 100, price % 100)
 }
@@ -31,8 +39,9 @@ pub fn sum_str(sum_kop: i64) -> String {
 }
 
 /// Состояние веса для UI: 0 пусто, 1 нестабилен, 2 стабилен.
-pub fn weight_state(snap: &crate::weight::Snapshot) -> i32 {
-    if snap.mass_kg < MIN_MASS_KG {
+/// Минимум задаётся настройкой «Минимальный вес печати» (кг).
+pub fn weight_state(snap: &crate::weight::Snapshot, min_kg: f64) -> i32 {
+    if snap.mass_kg < min_kg {
         0
     } else if snap.stable {
         2
@@ -103,6 +112,10 @@ pub struct Kiosk {
     /// Запрошен перезапуск программы: тик завершает процесс, systemd
     /// перезапускает сервис (Restart=always).
     pub restart_requested: bool,
+    /// Пути файлов импорта (параллельно именам на экране 16).
+    pub imp_files: Vec<std::path::PathBuf>,
+    /// Файл импорта, ожидающий подтверждения «ПРИМЕНИТЬ».
+    pub imp_pending: String,
 }
 
 impl Kiosk {
@@ -155,6 +168,8 @@ impl Kiosk {
             pin_new: String::new(),
             pin_forced: false,
             restart_requested: false,
+            imp_files: Vec::new(),
+            imp_pending: String::new(),
         }
     }
 }
@@ -169,6 +184,20 @@ mod tests {
         assert_eq!(sum_kopecks(19999, 1350), 26999);
         assert_eq!(sum_str(26999), "269.99 ₽");
         assert_eq!(price_str(19999), "199.99 ₽/кг");
+    }
+
+    #[test]
+    fn round_sum_modes() {
+        // Режим 0 — без изменений; 10 копеек и рубль — арифметически вверх.
+        assert_eq!(round_sum(26999, 0), 26999);
+        assert_eq!(round_sum(26993, 1), 26990);
+        assert_eq!(round_sum(26995, 1), 27000);
+        assert_eq!(round_sum(26992, 1), 26990);
+        assert_eq!(round_sum(26950, 2), 27000);
+        assert_eq!(round_sum(26949, 2), 26900);
+        assert_eq!(round_sum(0, 1), 0);
+        // Неизвестный режим — как 0 (защита от кривого импорта).
+        assert_eq!(round_sum(26999, 9), 26999);
     }
 
     #[test]
@@ -192,11 +221,14 @@ mod tests {
 
     #[test]
     fn weight_state_thresholds() {
+        // Минимум печати — параметр («Торговые правила», по умолчанию 10 г).
         let mut s = crate::weight::Snapshot { mass_kg: -0.006, stable: true, port_up: true };
-        assert_eq!(weight_state(&s), 0);
+        assert_eq!(weight_state(&s, 0.010), 0);
         s.mass_kg = 1.35;
-        assert_eq!(weight_state(&s), 2);
+        assert_eq!(weight_state(&s, 0.010), 2);
         s.stable = false;
-        assert_eq!(weight_state(&s), 1);
+        assert_eq!(weight_state(&s, 0.010), 1);
+        // Настройка выше показания — платформа считается пустой.
+        assert_eq!(weight_state(&s, 2.0), 0);
     }
 }
