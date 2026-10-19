@@ -274,6 +274,8 @@ const PRESENT_WAIT: Duration = Duration::from_secs(6);
 /// Задание печати старше этого срока не печатается (экран покупателя
 /// сдаётся по таймауту 30 с, поэтому берём чуть меньше).
 const STALE_JOB: Duration = Duration::from_secs(25);
+/// Повтор лестницы восстановления из фонового опроса не чаще этого.
+const RECOVER_COOLDOWN: Duration = Duration::from_secs(10);
 /// Таймаут чтения одного ответа DLE EOT (реальный ответ — единицы мс).
 const L4_READ_TIMEOUT: Duration = Duration::from_millis(300);
 
@@ -303,6 +305,7 @@ struct Monitor {
     fault_streak: u8,
     silent_streak: u8,
     label_since: Option<std::time::Instant>,
+    last_recover: Option<std::time::Instant>,
     health: PrinterHealth,
 }
 
@@ -485,7 +488,15 @@ fn print_job(
     // записи задания до выдачи этикетки.
     log::info!("принтер: печать завершена, выдана={presented}, трасса L4: {trace}");
     mon.feed(last);
-    Ok(())
+    // Принтер принял задание, но этикетка за PRESENT_WAIT не вышла (крышка
+    // открыта, лента кончилась, зажёв): «Готово» без этикетки врать нельзя.
+    if presented {
+        Ok(())
+    } else {
+        Err(Fail::Printer(
+            "этикетка не выдана: проверьте ленту и крышку принтера".into(),
+        ))
+    }
 }
 
 fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>) {
@@ -613,6 +624,20 @@ fn probe(
         let s = read_l4(port, 2);
         if s.is_none() || s.is_some_and(escpos::l4_fault) {
             log::info!("принтер: замер L4 = {}", fmt_l4(s));
+        }
+        // Подтверждённая авария с живым ответом: пробуем лестницу восстановления
+        // прямо из фонового опроса (с кулдауном) — после заправки ленты попап
+        // уходит сам, без печати и без «Подачи».
+        if s.is_some_and(escpos::l4_fault) {
+            let due = mon
+                .last_recover
+                .is_none_or(|t| t.elapsed() >= RECOVER_COOLDOWN);
+            if due {
+                mon.last_recover = Some(std::time::Instant::now());
+                log::warn!("принтер: авария в фоне (L4 = {}), пробую восстановить", fmt_l4(s));
+                let rec = recover_printer(port);
+                mon.feed(rec);
+            }
         }
         mon.feed(s);
         Ok(())
