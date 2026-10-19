@@ -2193,6 +2193,7 @@ dependencies = [
  "log",
  "rusqlite",
  "serde",
+ "serde_json",
  "serialport",
  "shtrih-m",
  "simplelog",

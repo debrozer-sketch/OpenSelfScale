@@ -64,6 +64,11 @@ pub struct CenterProfile {
     pub interval_secs: u32,
     /// Таймаут сетевых операций, сек.
     pub timeout_secs: u32,
+    /// Команда-конвертер для protocol = "external": аргумент — файл
+    /// поставщика, stdout — канонический JSON (docs/CANONICAL.md).
+    pub external_cmd: String,
+    /// Имя файла поставщика в incoming_dir (триггер тот же — ready.flg).
+    pub external_input: String,
 }
 
 impl Default for CenterProfile {
@@ -81,6 +86,8 @@ impl Default for CenterProfile {
             history_dir: PathBuf::from("/var/lib/scalefw/history"),
             interval_secs: 1800,
             timeout_secs: 30,
+            external_cmd: String::new(),
+            external_input: String::new(),
         }
     }
 }
@@ -88,13 +95,17 @@ impl Default for CenterProfile {
 impl CenterProfile {
     /// Синхронизация настроена?
     pub fn enabled(&self) -> bool {
+        if self.protocol == "external" {
+            return !self.external_cmd.is_empty();
+        }
         !self.host.is_empty() && !self.plu_path.is_empty()
     }
 
     /// Режим приёма «как старое ПО»: источник сам кладёт выгрузку в
     /// incoming_dir (FTP/lftp), триггер — ready.flg. Киоск только наблюдает.
+    /// Внешний конвертер (protocol = "external") живёт в том же конвейере.
     pub fn is_drop(&self) -> bool {
-        self.protocol == "drop"
+        self.protocol == "drop" || self.protocol == "external"
     }
 }
 
@@ -113,6 +124,8 @@ impl std::fmt::Debug for CenterProfile {
             .field("history_dir", &self.history_dir)
             .field("interval_secs", &self.interval_secs)
             .field("timeout_secs", &self.timeout_secs)
+            .field("external_cmd", &if self.external_cmd.is_empty() { "" } else { "***" })
+            .field("external_input", &self.external_input)
             .finish()
     }
 }
@@ -194,7 +207,8 @@ const KNOWN_SECTIONS: &[(&str, &[&str])] = &[
         "center",
         &[
             "protocol", "host", "port", "user", "password", "plu_path", "layout_path", "img_dir",
-            "img_local_dir", "history_dir", "interval_secs", "timeout_secs",
+            "img_local_dir", "history_dir", "interval_secs", "timeout_secs", "external_cmd",
+            "external_input",
         ],
     ),
 ];

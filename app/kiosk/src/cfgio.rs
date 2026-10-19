@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn unknown_fields_are_ignored() {
         let s = "format = 1\ndept_cols = 4\nfuture_key = \"x\"\n";
-        let f: ConfigFile = toml::from_str(&s).unwrap();
+        let f: ConfigFile = toml::from_str(s).unwrap();
         assert_eq!(f.dept_cols, Some(4));
         assert!(f.depts.is_empty());
     }

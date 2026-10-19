@@ -5,7 +5,106 @@
 use crate::config::Config;
 use std::path::Path;
 
+use serde::Deserialize;
 use suppaftp::FtpStream;
+
+/// Таймаут внешнего конвертера: конвертер обязан закончить за это время,
+/// зависший — снимается, выгрузка считается не принятой.
+const EXTERNAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Товар в каноническом формате (docs/CANONICAL.md). Обязательны только
+/// код, название и цена — остальные поля опциональны, отсутствие любого
+/// деградирует (поле не печатается/не показывается), но не ломает выгрузку.
+#[derive(Debug, Deserialize)]
+struct CanonItem {
+    plu: String,
+    name: String,
+    price_kop: i64,
+    #[serde(default)]
+    itemcode: Option<String>,
+    #[serde(default)]
+    card_price_kop: Option<i64>,
+    #[serde(default)]
+    group: Option<String>,
+    #[serde(default)]
+    name_second: Option<String>,
+    #[serde(default)]
+    shelf_life: Option<String>,
+}
+
+/// Разбор канонического JSON (массив товаров). Битые записи пропускаются
+/// со счётчиком, как в parse_plu_xml_counted: одна кривая строка не
+/// отменяет выгрузку целиком.
+fn parse_canonical_json(text: &str) -> Result<(Vec<datastore::PluItem>, usize), String> {
+    let parsed: Result<Vec<serde_json::Value>, _> = serde_json::from_str(text);
+    let values = match parsed {
+        Ok(v) => v,
+        Err(e) => return Err(format!("не JSON-массив: {e}")),
+    };
+    let mut items = Vec::new();
+    let mut skipped = 0usize;
+    for v in values {
+        match serde_json::from_value::<CanonItem>(v) {
+            Ok(ci) => {
+                if ci.plu.trim().is_empty() || ci.name.trim().is_empty() || ci.price_kop < 0 {
+                    skipped += 1;
+                    continue;
+                }
+                items.push(datastore::PluItem {
+                    plu: ci.plu.trim().to_string(),
+                    price: ci.price_kop,
+                    // 0 или отсутствие — скидки нет (как в старой выгрузке).
+                    card_price: ci.card_price_kop.filter(|p| *p > 0),
+                    itemcode: ci.itemcode.unwrap_or_default(),
+                    groupcode: ci.group.unwrap_or_default(),
+                    namefirst: ci.name.trim().to_string(),
+                    namesecond: ci.name_second.unwrap_or_default(),
+                    shelflife: ci.shelf_life.unwrap_or_default(),
+                });
+            }
+            Err(_) => skipped += 1,
+        }
+    }
+    Ok((items, skipped))
+}
+
+/// Запуск внешнего конвертера: аргумент — файл поставщика, stdout —
+/// канонический JSON. Вывод уходит во временный файл (безопасно для любого
+/// объёма), процесс снимается по таймауту.
+fn run_external(cmd: &str, input: &Path) -> Result<String, String> {
+    let cmd = cmd.trim();
+    if cmd.is_empty() {
+        return Err("[center].external_cmd не задан".into());
+    }
+    let out_path = std::env::temp_dir().join(format!("scalefw-canonical-{}.json", std::process::id()));
+    let out = std::fs::File::create(&out_path).map_err(|e| format!("temp: {e}"))?;
+    let mut child = std::process::Command::new(cmd)
+        .arg(input)
+        .stdout(std::process::Stdio::from(out))
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("запуск {cmd}: {e}"))?;
+    let deadline = std::time::Instant::now() + EXTERNAL_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break Ok(st),
+            Ok(None) if std::time::Instant::now() > deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(format!("конвертер не уложился в {} с", EXTERNAL_TIMEOUT.as_secs()));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(e) => break Err(format!("ожидание конвертера: {e}")),
+        }
+    };
+    let data = std::fs::read_to_string(&out_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&out_path);
+    let status = status?;
+    if !status.success() {
+        return Err(format!("конвертер завершился с ошибкой ({status})"));
+    }
+    Ok(data)
+}
 
 /// Архив выгрузки: исходные plu.xml/layout.xml с датой в имени
 /// (аналог sss/history старого ПО — материал для разбора инцидентов).
@@ -169,8 +268,21 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         return Ok(None);
     }
 
-    // Дождаться plu.xml и стабильности размера (два замера подряд с паузой).
-    let plu = dir.join("plu.xml");
+    // Файл товаров: старый протокол — plu.xml, внешний конвертер — свой
+    // файл поставщика из [center].external_input.
+    let external = cfg.center.protocol == "external";
+    let input_name = if external {
+        let n = cfg.center.external_input.trim();
+        if n.is_empty() {
+            return Err("protocol = \"external\", но [center].external_input не задан".into());
+        }
+        std::path::PathBuf::from(n)
+    } else {
+        std::path::PathBuf::from("plu.xml")
+    };
+    let plu = dir.join(&input_name);
+
+    // Дождаться файла и стабильности размера (два замера подряд с паузой).
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let mut last: Option<u64> = Some(u64::MAX);
     loop {
@@ -190,15 +302,20 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
 
     // Товары (обязательны) и раскладка (необязательна, как в FTP-режиме).
     let plu_data = std::fs::read_to_string(&plu).map_err(|e| format!("{}: {e}", plu.display()))?;
-    let (items, skipped) = datastore::parse_plu_xml_counted(&plu_data)
-        .map_err(|e| format!("разбор plu.xml: {e}"))?;
+    let (items, skipped) = if external {
+        // Внешний конвертер: файл поставщика → канонический JSON → модель.
+        let canon = run_external(&cfg.center.external_cmd, &plu)?;
+        parse_canonical_json(&canon).map_err(|e| format!("канонический JSON: {e}"))?
+    } else {
+        datastore::parse_plu_xml_counted(&plu_data).map_err(|e| format!("разбор plu.xml: {e}"))?
+    };
     if skipped > 0 {
-        log::warn!("plu.xml: пропущено битых записей: {skipped}");
+        log::warn!("{}: пропущено битых записей: {skipped}", input_name.display());
     }
     if items.is_empty() {
-        // Пустой/битый plu.xml: не принимать и не подчищать — источник
+        // Пустой/битый файл: не принимать и не подчищать — источник
         // перезальёт; в history пустоту не архивируем.
-        return Err("plu.xml не содержит товаров — выгрузка не принята".into());
+        return Err(format!("{} не содержит товаров — выгрузка не принята", input_name.display()));
     }
     let layout = dir.join("layout.xml");
     let (groups, ldata) = if layout.exists() {
@@ -319,6 +436,12 @@ pub fn run(cfg: &Config) -> Result<String, String> {
         // suppaftp без TLS-фичи: честная ошибка вместо молчаливого plaintext.
         "ftps" => {
             return Err("протокол ftps не реализован: используйте ftp или drop-режим".into())
+        }
+        "external" => {
+            return Err(
+                "protocol = \"external\" работает только в drop-конвейере (incoming_dir + ready.flg)"
+                    .into(),
+            )
         }
         other => return Err(format!("протокол «{other}» не поддерживается (ftp)")),
     };
@@ -447,4 +570,52 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
         );
     }
     rx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_json_minimal_and_optional() {
+        let s = concat!(
+            r#"[{"plu":"2502192","name":"ВИНОГРАД КИШМИШ","price_kop":19999},"#,
+            r#"{"plu":"22","name":"ГРУША","price_kop":12000,"card_price_kop":0,"#,
+            r#""group":"ФРУКТЫ","shelf_life":"01.01.27"}]"#
+        );
+        let (items, skipped) = parse_canonical_json(s).unwrap();
+        assert_eq!(skipped, 0);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].plu, "2502192");
+        assert_eq!(items[0].price, 19999);
+        // Ни одного необязательного поля — всё деградирует пустотой.
+        assert!(items[0].card_price.is_none());
+        assert!(items[0].itemcode.is_empty());
+        assert!(items[0].groupcode.is_empty());
+        assert!(items[0].shelflife.is_empty());
+        // card_price_kop = 0 — скидки нет (как в старой выгрузке).
+        assert_eq!(items[1].card_price, None);
+        assert_eq!(items[1].groupcode, "ФРУКТЫ");
+        assert_eq!(items[1].shelflife, "01.01.27");
+    }
+
+    #[test]
+    fn canonical_json_skips_bad_rows() {
+        let s = r#"[
+            {"plu":"","name":"БЕЗ КОДА","price_kop":100},
+            {"plu":"31","name":"","price_kop":100},
+            {"plu":"32","name":"ХОРОШИЙ","price_kop":-5},
+            {"plu":"33","name":"ГОДНЫЙ","price_kop":5000}
+        ]"#;
+        let (items, skipped) = parse_canonical_json(s).unwrap();
+        assert_eq!(skipped, 3);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].plu, "33");
+    }
+
+    #[test]
+    fn canonical_json_rejects_non_array() {
+        assert!(parse_canonical_json("{\"plu\":\"1\"}").is_err());
+        assert!(parse_canonical_json("не json").is_err());
+    }
 }

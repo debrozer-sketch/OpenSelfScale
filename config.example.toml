@@ -37,6 +37,13 @@ baud = 19200
 #img_local_dir = "/etc/scalefw/img"
 #history_dir = "/var/lib/scalefw/history"
 
+# Внешний протокол: свой файл поставщика + конвертер в канонический JSON.
+# Контракт формата — docs/CANONICAL.md; ERP менять не нужно (protocol="drop").
+#[center]
+#protocol = "external"        # incoming_dir + ready.flg, как в drop
+#external_cmd = "/usr/local/bin/vendor-to-canonical.py"
+#external_input = "vendor.csv"
+
 # Альтернатива: киоск сам забирает данные по FTP (protocol = "ftp") —
 # заполните host/user/password/plu_path.
 
