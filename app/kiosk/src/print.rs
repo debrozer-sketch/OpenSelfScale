@@ -88,7 +88,10 @@ pub fn build_label(
         .field(layout.time.0, layout.time.1, FieldStyle::FontB, time)?
         .field(layout.plu_label.0, layout.plu_label.1, FieldStyle::FontB, &format!("PLU {}", item.plu))?;
     if !item.shelflife.is_empty() {
-        job.field(layout.shelflife.0, layout.shelflife.1, FieldStyle::FontB, &item.shelflife)?;
+        // «Годен до» + нормализованная дата; нераспознанный формат —
+        // как в выгрузке (деградация без потери данных).
+        let text = shelflife_label(&item.shelflife).unwrap_or_else(|| item.shelflife.clone());
+        job.field(layout.shelflife.0, layout.shelflife.1, FieldStyle::FontB, &text)?;
     }
     job.field(layout.weight.0, layout.weight.1, FieldStyle::FontB, &kg)?
         .field(layout.price.0, layout.price.1, FieldStyle::FontB, &price_r)?
@@ -109,6 +112,46 @@ pub fn ean13_payload(item: &PluItem, weight_g: u32) -> String {
         format!("{digits:0>5}")
     };
     format!("21{code5}{:05}", weight_g.min(99_999))
+}
+
+/// «Годен до ДД.ММ.ГГГГ» из срока годности выгрузки. Поддерживаются
+/// ДД/ММ/ГГГГ, ДД.ММ.ГГГГ, ДД.ММ.ГГ и ГГГГ-ММ-ДД (время отбрасывается).
+/// None — формат не распознан, вызывающий печатает сырую строку.
+pub fn shelflife_label(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let date_part = s.split_whitespace().next()?;
+    let parts: Vec<u32> = if date_part.contains('/') || date_part.contains('.') {
+        let sep = if date_part.contains('/') { '/' } else { '.' };
+        let p: Vec<&str> = date_part.split(sep).collect();
+        if p.len() != 3 {
+            return None;
+        }
+        p.iter().map(|x| x.parse::<u32>().ok()).collect::<Option<Vec<_>>>()?
+    } else if date_part.contains('-') {
+        let p: Vec<&str> = date_part.split('-').collect();
+        if p.len() != 3 {
+            return None;
+        }
+        // ГГГГ-ММ-ДД → [Д, М, Г]
+        let y = p[0].parse::<u32>().ok()?;
+        let m = p[1].parse::<u32>().ok()?;
+        let d = p[2].parse::<u32>().ok()?;
+        vec![d, m, y]
+    } else {
+        return None;
+    };
+    if parts.len() != 3 {
+        return None;
+    }
+    let (d, m, y) = (parts[0], parts[1], parts[2]);
+    if d == 0 || d > 31 || m == 0 || m > 12 {
+        return None;
+    }
+    let year = if y < 100 { 2000 + y } else { y };
+    Some(format!("Годен до {d:02}.{m:02}.{year:04}"))
 }
 
 /// Локальные дата (ДД.ММ.ГГ) и время (ЧЧ:ММ:СС) момента печати.
@@ -892,8 +935,23 @@ mod tests {
         // Дата и время печати — фактические, не константы из дампа.
         assert!(text.contains("13.10.26"), "дата: {text:?}");
         assert!(text.contains("18:40:00"), "время: {text:?}");
-        // Срок годности из выгрузки печатается как есть.
-        assert!(text.contains("20/09/2026 18:25:45"), "срок: {text:?}");
+        // Срок годности нормализуется к «Годен до ДД.ММ.ГГГГ» (текст
+        // этикетки в CP866 — кириллицу ассертим по дате).
+        assert!(text.contains("20.09.2026"), "срок: {text:?}");
+        assert!(!text.contains("18:25:45"), "время из срока не печатается: {text:?}");
+    }
+
+    #[test]
+    fn shelflife_label_formats() {
+        assert_eq!(shelflife_label("20/09/2026 18:25:45").as_deref(), Some("Годен до 20.09.2026"));
+        assert_eq!(shelflife_label("20/09/2026").as_deref(), Some("Годен до 20.09.2026"));
+        assert_eq!(shelflife_label("20.09.2026").as_deref(), Some("Годен до 20.09.2026"));
+        assert_eq!(shelflife_label("01.01.27").as_deref(), Some("Годен до 01.01.2027"));
+        assert_eq!(shelflife_label("2026-09-20").as_deref(), Some("Годен до 20.09.2026"));
+        // Нераспознанное — None (вызывающий печатает сырую строку).
+        assert_eq!(shelflife_label(""), None);
+        assert_eq!(shelflife_label(" soon"), None);
+        assert_eq!(shelflife_label("99/99/2026"), None);
     }
 
     #[test]
