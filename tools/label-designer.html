@@ -30,7 +30,7 @@ background-image:linear-gradient(to right,#9aa 1px,transparent 1px),linear-gradi
 .f.bad{border-color:#d00;background:#ff000026}
 .f .k{position:absolute;left:0;top:-12px;font:9px/10px monospace;color:#555;background:#fffc;white-space:nowrap}
 .f.bad .k{color:#d00}
-.f .t{width:100%;height:100%;overflow:hidden;white-space:nowrap;font-family:Consolas,monospace;display:flex;align-items:center;pointer-events:none}
+.f .t{position:absolute;left:0;top:0;transform-origin:0 0;overflow:hidden;white-space:nowrap;font-family:Consolas,monospace;display:flex;align-items:center;pointer-events:none}
 .f .bars{position:absolute;left:0;right:0;top:0;bottom:22%;pointer-events:none;background:repeating-linear-gradient(90deg,#000 0 2px,transparent 2px 4px,#000 4px 5px,transparent 5px 8px)}
 .f .bt{position:absolute;left:0;right:0;bottom:0;height:22%;text-align:center;font:10px monospace;pointer-events:none;overflow:hidden}
 .mbg{position:fixed;inset:0;background:#0006;display:flex;align-items:center;justify-content:center;z-index:50}
@@ -64,6 +64,9 @@ background-image:linear-gradient(to right,#9aa 1px,transparent 1px),linear-gradi
       <span>y, мм</span><input id="py" type="number" step="0.5">
       <span>Шрифт</span><select id="pf"><option>A</option><option>B</option></select>
       <span>Размер</span><select id="ps"><option value="1">1</option><option value="2">2 (×2)</option></select>
+      <span>Ширина, мм</span><input id="pw" type="number" step="0.5">
+      <span>Высота, мм</span><input id="ph" type="number" step="0.5">
+      <span></span><button id="pr">Сбросить размер</button>
       <span id="ptl">Текст</span><input id="pt" maxlength="48">
     </div>
   </div>
@@ -97,12 +100,18 @@ function newLayout(w,h){S.layout={format:1,name:w+'x'+h,width_mm:w,height_mm:h,f
 
 /* ---------- Геометрия и проверки ---------- */
 function geom(f){
-  const m=f.size===2?2:1,cw=f.font==='B'?2:3,ch=f.font==='B'?3:4;
-  if(f.kind==='barcode')return{w:36*m,h:14*m,txt:SAMPLE.barcode};
-  const txt=f.kind==='text'?String(f.text||''):(Object.prototype.hasOwnProperty.call(SAMPLE,f.kind)?SAMPLE[f.kind]:String(f.kind));
-  const mm=f.kind==='sum'?m*2:m;
-  return{w:Math.max(txt.length,1)*cw*mm,h:ch*mm,txt};
+  const m=f.size===2?2:1,cw=f.font==='B'?2:3,ch=f.font==='B'?3:4,bc=f.kind==='barcode';
+  let nw,nh,txt,cwm=0;
+  if(bc){nw=36*m;nh=14*m;txt=SAMPLE.barcode}
+  else{
+    txt=f.kind==='text'?String(f.text||''):(Object.prototype.hasOwnProperty.call(SAMPLE,f.kind)?SAMPLE[f.kind]:String(f.kind));
+    const mm=f.kind==='sum'?m*2:m;cwm=cw*mm;nw=Math.max(txt.length,1)*cwm;nh=ch*mm;
+  }
+  /* w — ширина рамки (обрезка/расширение), h — вертикальный масштаб; без них размер «естественный» */
+  return{w:f.w>0?f.w:nw,h:f.h>0?f.h:nh,nw,nh,cwm,txt,
+    minW:bc?30:Math.min(2,nw),minH:bc?8:nh/2,maxH:bc?nh*2:nh*3};
 }
+function setO(f,k,v,nat){if(v==null||Math.abs(v-nat)<1e-9)delete f[k];else f[k]=v}
 function outOfBounds(f){const g=geom(f),L=S.layout,e=1e-9;return !(f.x>=0&&f.y>=0&&f.x+g.w<=L.width_mm+e&&f.y+g.h<=L.height_mm+e)}
 const knownKind=k=>KINDS.includes(k);
 const isBad=f=>outOfBounds(f)||!knownKind(f.kind);
@@ -120,6 +129,11 @@ function validate(){
     if(f.kind==='text'){
       if(!String(f.text||'').trim())e.push(lb+': текст пустой');
       else if(f.text.length>48)e.push(lb+': текст длиннее 48 символов');
+    }
+    if(f.w!==undefined||f.h!==undefined){
+      const g=geom(f);
+      if(f.w!==undefined&&!(f.w>=g.minW-1e-9))e.push(lb+': ширина меньше допустимой ('+g.minW+' мм)');
+      if(f.h!==undefined&&!(f.h>=g.minH-1e-9&&f.h<=g.maxH+1e-9))e.push(lb+': высота вне диапазона '+g.minH+'–'+g.maxH+' мм');
     }
     if(!Number.isFinite(f.x)||!Number.isFinite(f.y))e.push(lb+': некорректные координаты');
     else if(knownKind(f.kind)&&outOfBounds(f))e.push(lb+': выходит за границу этикетки');
@@ -142,7 +156,7 @@ function renderList(){
   const box=$('list');box.replaceChildren();
   S.layout.fields.forEach((f,i)=>{
     const r=el('div','row'+(i===S.sel?' sel':'')+(isBad(f)?' bad':''),(i+1)+'. '+f.kind+(f.kind==='text'?': '+(f.text||''):''));
-    r.append(el('small',null,'x='+f.x+' y='+f.y+' · шрифт '+f.font+' · размер '+f.size));
+    {const g=geom(f);r.append(el('small',null,'x='+f.x+' y='+f.y+' · шрифт '+f.font+' · размер '+f.size+((f.w||f.h)?' · '+g.w+'×'+g.h+' мм':'')))}
     r.onclick=()=>{S.sel=i;renderAll()};
     box.append(r);
   });
@@ -154,6 +168,7 @@ function syncProps(){
   if(!f)return;
   const set=(id,v)=>{if(document.activeElement!==$(id))$(id).value=v};
   set('px',f.x);set('py',f.y);set('pf',f.font);set('ps',f.size);set('pt',f.text||'');
+  {const g=geom(f);set('pw',g.w);set('ph',g.h)}
   const isT=f.kind==='text';
   $('pt').style.display=isT?'':'none';$('ptl').style.display=isT?'':'none';
 }
@@ -171,7 +186,8 @@ function renderCanvas(){
     if(f.kind==='barcode'){d.append(el('div','bars'));d.append(el('div','bt',g.txt))}
     else{
       const t=el('div','t',g.txt);
-      t.style.fontSize=Math.max(5,Math.min(g.h*z*.8,g.w*z/Math.max(g.txt.length,1)/.6))+'px';
+      Object.assign(t.style,{width:g.w*z+'px',height:g.nh*z+'px',transform:'scaleY('+g.h/g.nh+')',
+        fontSize:Math.max(5,Math.min(g.nh*z*.8,g.cwm*z/.6))+'px'});
       d.append(t);
     }
     cv.append(d);
@@ -222,6 +238,7 @@ function loadLayout(d){
     fields:d.fields.map(f=>{
       const o={kind:String(f&&f.kind),x:num(f&&f.x,0),y:num(f&&f.y,0),font:f&&f.font==='B'?'B':'A',size:f&&f.size===2?2:1};
       if(o.kind==='text')o.text=String(f.text==null?'':f.text);
+      if(+f.w>0)o.w=+f.w;if(+f.h>0)o.h=+f.h;
       return o;
     })};
   S.autoName=S.layout.name===S.layout.width_mm+'x'+S.layout.height_mm;S.sel=-1;
@@ -256,7 +273,8 @@ $('bSave').onclick=()=>{
   const L=S.layout;
   const out={format:1,name:L.name,width_mm:L.width_mm,height_mm:L.height_mm,fields:L.fields.map(f=>{
     const o={kind:f.kind};if(f.kind==='text')o.text=f.text;
-    o.x=f.x;o.y=f.y;o.font=f.font;o.size=f.size;return o;
+    o.x=f.x;o.y=f.y;o.font=f.font;o.size=f.size;
+    if(f.w!==undefined)o.w=f.w;if(f.h!==undefined)o.h=f.h;return o;
   })};
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([JSON.stringify(out,null,2)],{type:'application/json'}));
@@ -277,6 +295,12 @@ const num0=(id,key)=>{
   $(id).onblur=e=>{if(cur())e.target.value=cur()[key]};
 };
 num0('px','x');num0('py','y');
+const dim=(id,key,nk)=>{
+  $(id).oninput=e=>{const f=cur(),v=parseFloat(e.target.value);if(f&&v>0){setO(f,key,v,geom(f)[nk]);changed()}};
+  $(id).onblur=e=>{if(cur())e.target.value=geom(cur())[key]};
+};
+dim('pw','w','nw');dim('ph','h','nh');
+$('pr').onclick=()=>{const f=cur();if(f){delete f.w;delete f.h;changed()}};
 $('pf').onchange=e=>{if(cur()){cur().font=e.target.value;changed()}};
 $('ps').onchange=e=>{if(cur()){cur().size=+e.target.value;changed()}};
 $('pt').oninput=e=>{if(cur()&&cur().kind==='text'){cur().text=e.target.value;changed()}};
@@ -287,7 +311,7 @@ $('stage').addEventListener('pointerdown',e=>{
   const h=e.target.closest('.h'),d=e.target.closest('.f');
   if(h&&cur()){
     const f=cur(),g=geom(f);
-    rs={dir:h.dataset.d,cx:e.clientX,cy:e.clientY,x:f.x,y:f.y,w:g.w,h:g.h,moved:false};
+    rs={dir:h.dataset.d,cx:e.clientX,cy:e.clientY,x:f.x,y:f.y,w:g.w,h:g.h,nw:g.nw,nh:g.nh,fw:f.w,fh:f.h,font:f.font,size:f.size,moved:false};
     e.preventDefault();return;
   }
   if(!d){if(S.sel!==-1){S.sel=-1;renderAll()}return}
@@ -295,26 +319,40 @@ $('stage').addEventListener('pointerdown',e=>{
   drag={cx:e.clientX,cy:e.clientY,x:f.x,y:f.y,moved:false};
   renderAll();e.preventDefault();
 });
-/* Формат хранит только font A/B и size 1/2 (пропорции фиксированы), поэтому
-   маркеры выбирают из 4 допустимых размеров ближайший к тянущей рамке;
-   противоположная сторона остаётся на месте, за границу этикетки нельзя. */
+/* Угол — пропорциональный масштаб (font A/B × size 1/2, рамка масштабируется вместе).
+   Верх/низ — вертикальный масштаб (h). Бока — обрезка/расширение рамки по ширине (w).
+   Противоположная сторона неподвижна, за границу этикетки выйти нельзя. */
 function resizeStep(e){
   const f=cur(),L=S.layout,z=zpx(),d=rs.dir;
   const dx=(e.clientX-rs.cx)/z,dy=(e.clientY-rs.cy)/z;
-  const hasW=/[ew]/.test(d),hasH=/[ns]/.test(d);
-  const tw=rs.w+(d.includes('e')?dx:d.includes('w')?-dx:0);
-  const th=rs.h+(d.includes('s')?dy:d.includes('n')?-dy:0);
-  let best=null;
-  for(const font of ['A','B'])for(const size of [1,2]){
-    if(f.kind==='barcode'&&font==='B')continue;
-    const g=geom({...f,font,size});
-    const x=d.includes('w')?rs.x+rs.w-g.w:rs.x,y=d.includes('n')?rs.y+rs.h-g.h:rs.y;
-    if(x<0||y<0||x+g.w>L.width_mm+1e-9||y+g.h>L.height_mm+1e-9)continue;
-    const sc=(hasW?Math.abs(g.w-tw)/rs.w:0)+(hasH?Math.abs(g.h-th)/rs.h:0);
-    if(!best||sc<best.sc)best={sc,font:f.kind==='barcode'?f.font:font,size,x,y};
+  f.font=rs.font;f.size=rs.size;f.x=rs.x;f.y=rs.y;
+  if(rs.fw==null)delete f.w;else f.w=rs.fw;
+  if(rs.fh==null)delete f.h;else f.h=rs.fh;
+  const g=geom(f);
+  if(d==='e'||d==='w'){
+    const maxW=d==='e'?L.width_mm-rs.x:rs.x+rs.w;
+    const tw=clamp(snap(rs.w+(d==='e'?dx:-dx)),g.minW,maxW);
+    setO(f,'w',tw,g.nw);if(d==='w')f.x=rs.x+rs.w-tw;
+  }else if(d==='n'||d==='s'){
+    const maxH=Math.min(g.maxH,d==='s'?L.height_mm-rs.y:rs.y+rs.h);
+    const th=clamp(snap(rs.h+(d==='s'?dy:-dy)),g.minH,maxH);
+    setO(f,'h',th,g.nh);if(d==='n')f.y=rs.y+rs.h-th;
+  }else{
+    const tw=rs.w+(d.includes('e')?dx:-dx),th=rs.h+(d.includes('s')?dy:-dy);
+    let best=null;
+    for(const font of ['A','B'])for(const size of [1,2]){
+      if(f.kind==='barcode'&&font==='B')continue;
+      const gn=geom({...f,font,size,w:undefined,h:undefined});
+      const bw=rs.fw==null?gn.nw:snap(rs.fw*gn.nw/rs.nw),bh=rs.fh==null?gn.nh:snap(rs.fh*gn.nh/rs.nh);
+      const x=d.includes('w')?rs.x+rs.w-bw:rs.x,y=d.includes('n')?rs.y+rs.h-bh:rs.y;
+      if(x<0||y<0||x+bw>L.width_mm+1e-9||y+bh>L.height_mm+1e-9)continue;
+      const sc=Math.abs(bw-tw)/rs.w+Math.abs(bh-th)/rs.h;
+      if(!best||sc<best.sc)best={sc,font:f.kind==='barcode'?f.font:font,size,x,y,bw,bh,gn};
+    }
+    if(!best)return;
+    f.font=best.font;f.size=best.size;f.x=best.x;f.y=best.y;
+    setO(f,'w',rs.fw==null?null:best.bw,best.gn.nw);setO(f,'h',rs.fh==null?null:best.bh,best.gn.nh);
   }
-  if(!best||(best.font===f.font&&best.size===f.size))return;
-  Object.assign(f,{font:best.font,size:best.size,x:best.x,y:best.y});
   rs.moved=true;changed(false);
 }
 window.addEventListener('pointermove',e=>{
