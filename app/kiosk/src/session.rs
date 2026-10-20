@@ -7,9 +7,6 @@ use std::time::{Duration, Instant};
 pub const DONE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Авто-возврат из ошибки принтера.
 pub const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
-/// Заводской пароль персонала: при первом запуске сеется в БД, вход с ним
-/// принудительно ведёт на смену (pin_forced).
-pub const FACTORY_PIN: &str = "12345";
 // Простой без массы → сброс на главный экран: длительность из конфига
 // ([kiosk] idle_timeout_secs, дефолт 60 с) — константы больше нет.
 

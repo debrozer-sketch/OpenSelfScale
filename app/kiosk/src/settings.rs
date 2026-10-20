@@ -11,7 +11,6 @@ use crate::context::AppContext;
 use crate::diag;
 use crate::net::{self, net_rows_set};
 use crate::print;
-use crate::session::FACTORY_PIN;
 use crate::MainWindow;
 
 /// Идёт применение сетевых настроек (защита от двойного нажатия).
@@ -256,34 +255,17 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             "вход: пароль принят, роль {}",
                             if role == datastore::auth::Role::Admin { "admin" } else { "staff" }
                         );
-                        // Заводской пароль требует смены, пока пароль не
-                        // меняли ни разу (флаг pin_changed в базе). После
-                        // первой смены вход с «12345» пускает в меню.
-                        let factory = match datastore::open(&cfg.db_path) {
-                            Ok(conn) => {
-                                let is_factory = datastore::auth::pin_is(&conn, FACTORY_PIN)
-                                    .unwrap_or(false);
-                                let changed = datastore::get_calibration(&conn, "pin_changed")
-                                    .ok()
-                                    .flatten()
-                                    .unwrap_or(0)
-                                    != 0;
-                                is_factory && !changed
-                            }
-                            Err(_) => false,
-                        };
-                        k.pin_forced = factory;
-                        k.admin_stage = if factory { 8 } else { 2 };
+                        // Вход выполнен. Заводского PIN больше нет: мастером
+                        // создаются оба пароля, принудительной смены не нужно.
+                        k.pin_forced = false;
+                        k.admin_stage = 2;
                         // Открытая карточка товара закрывается: из меню
                         // выходим на чистый главный экран.
                         k.pending = None;
                         if let Some(ui) = ui_handle.upgrade() {
                             ui.set_role(if role == datastore::auth::Role::Admin { 1 } else { 0 });
-                            ui.set_pin_forced(factory);
+                            ui.set_pin_forced(false);
                             ui.set_popup_open(false);
-                        }
-                        if factory {
-                            log::warn!("вход: действует заводской пароль — требуется смена");
                         }
                     }
                     Ok(datastore::auth::Auth::Denied { wait_secs }) => {
@@ -307,9 +289,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 return;
             }
             if stage == 7 {
-                // Старый пароль: сверка без счётчика перебора (pin_is).
+                // Старый пароль: сверка без счётчика перебора (pin_is),
+                // смена идёт админскому входу (id = 1).
                 let ok = match datastore::open(&cfg.db_path) {
-                    Ok(conn) => datastore::auth::pin_is(&conn, &pin).unwrap_or(false),
+                    Ok(conn) => datastore::auth::pin_is(&conn, 1, &pin).unwrap_or(false),
                     Err(e) => {
                         log::error!("смена пароля: база: {e}");
                         return;
@@ -340,13 +323,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 set_err(&ui_handle, "Пароли не совпадают — введите новый");
                 return;
             }
-            let old = if k.pin_forced {
-                FACTORY_PIN.to_string()
-            } else {
-                std::mem::take(&mut k.pin_pending)
-            };
+            let old = std::mem::take(&mut k.pin_pending);
             let res = match datastore::open(&cfg.db_path) {
-                Ok(conn) => datastore::auth::change_pin(&conn, &old, &pin),
+                Ok(conn) => datastore::auth::change_pin(&conn, 1, &old, &pin),
                 Err(e) => {
                     log::error!("смена пароля: база: {e}");
                     return;
@@ -355,20 +334,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             match res {
                 Ok(Ok(())) => {
                     log::info!("смена пароля: выполнена");
-                    // Флаг «пароль уже меняли»: заводской пин больше не
-                    // требует обязательной смены при каждом входе.
-                    match datastore::open(&cfg.db_path) {
-                        Ok(conn) => {
-                            if let Err(e) = datastore::set_calibration(
-                                &conn,
-                                "pin_changed",
-                                1,
-                            ) {
-                                log::error!("смена пароля: флаг: {e}");
-                            }
-                        }
-                        Err(e) => log::error!("смена пароля: флаг: база: {e}"),
-                    }
                     k.pin_new.clear();
                     k.pin_forced = false;
                     k.admin_stage = 2;

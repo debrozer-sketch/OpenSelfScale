@@ -197,15 +197,14 @@ fn run_kiosk(cfg: config::Config) {
     let app_state = Arc::new(weight::WeightSource::spawn(&cfg.scales));
     let cfg = Arc::new(cfg);
 
-    // Вход персонала: при первом запуске заводской пароль хэшируется с
-    // случайной солью и пишется в БД; дальше — только смена через меню.
-    // Первый вход с ним принудительно ведёт на смену (pin_forced).
+    // Вход персонала: пользователей создаёт мастер первичной настройки.
+    // Пустая таблица = незапрограммированные весы (заводского PIN нет).
     match datastore::open(&cfg.db_path) {
-        Ok(conn) => {
-            if let Err(e) = datastore::auth::seed(&conn, session::FACTORY_PIN) {
-                log::error!("вход: инициализация: {e}");
-            }
-        }
+        Ok(conn) => match datastore::auth::user_exists(&conn) {
+            Ok(true) => log::info!("вход: пользователи есть"),
+            Ok(false) => log::info!("вход: пользователей нет — обязателен мастер настройки"),
+            Err(e) => log::error!("вход: база: {e}"),
+        },
         Err(e) => log::error!("вход: база недоступна: {e}"),
     }
 
