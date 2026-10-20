@@ -151,7 +151,9 @@ fn ensure_tables(conn: &Connection) -> rusqlite::Result<()> {
              id           INTEGER PRIMARY KEY,
              failed       INTEGER NOT NULL DEFAULT 0,
              locked_until INTEGER NOT NULL DEFAULT 0
-         );",
+         );
+         INSERT OR IGNORE INTO admin_lock (id, failed, locked_until)
+         VALUES (1, 0, 0);",
     )?;
     migrate_single_user_schema(conn)
 }
@@ -510,6 +512,17 @@ mod tests {
         assert_ne!(salt, "aabbccdd00112233");
         // После миграции вход продолжается в новом формате.
         assert_eq!(verify(&conn, "12345").unwrap(), Auth::Granted(Role::Admin));
+    }
+
+    #[test]
+    fn verify_on_fresh_db_is_denied_not_error() {
+        // Свежая БД без строки лока: вход должен отказать (Denied), а не
+        // вернуть Err — иначе экран входа «молчит» без сообщения.
+        let conn = Connection::open_in_memory().unwrap();
+        assert!(matches!(
+            verify(&conn, "12345").unwrap(),
+            Auth::Denied { wait_secs: 0 }
+        ));
     }
 
     #[test]

@@ -357,25 +357,38 @@ fn run_kiosk(cfg: config::Config) {
     // Поток покупателя и меню настроек регистрируют свои колбэки на UI.
     let flow_handles = flow::install(&ctx);
     settings::install(&ctx, &flow_handles);
-    // Незапрограммированные весы: пользователей нет или мастер не завершён
-    // (прервали питанием) — открываем мастер сразу, минуя каталог.
+    // Незапрограммированные весы: пользователей нет — мастер открывается
+    // сразу. Мастер, прерванный после создания PIN-ов, защищён входом
+    // администратора (спека §2): доступ к сети/времени/сбросу PIN —
+    // только по PIN админа.
     match datastore::open(&cfg.db_path) {
         Ok(conn) => {
             if !crate::setup::wizard_done(&conn) {
-                if let (Some(ui), mut k) = (Some(&ui), ctx.kiosk.borrow_mut()) {
-                    let _ = ui;
+                let has_users = datastore::auth::user_exists(&conn).unwrap_or(false);
+                {
+                    let mut k = ctx.kiosk.borrow_mut();
                     k.admin_open = true;
-                    k.admin_stage = 20;
                     k.setup_active = true;
-                    log::info!("настройка: открыт мастер первичной настройки");
+                    if has_users {
+                        // Вход по PIN админа, дальше — в мастер.
+                        k.admin_stage = 1;
+                        k.admin_pin_buf.clear();
+                        log::info!("настройка: мастер прерван — требуется вход администратора");
+                    } else {
+                        k.admin_stage = 20;
+                        log::info!("настройка: открыт мастер первичной настройки");
+                    }
+                }
+                if has_users {
+                    if let Some(ui) = Some(&ui) {
+                        ui.set_ip_note(format!("IP: {}", crate::net::read_live().ip).into());
+                    }
                 }
             } else {
                 // Чек-лист остаётся доступен из меню, пока не введены
                 // в эксплуатацию.
                 if !crate::setup::entered(&conn) {
-                    if let Some(ui) = Some(&ui) {
-                        ui.set_setup_menu_visible(true);
-                    }
+                    ui.set_setup_menu_visible(true);
                 }
             }
         }

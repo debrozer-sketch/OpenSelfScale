@@ -333,19 +333,29 @@ pub fn start(
                                 let mut cc = checklist_cache.borrow_mut();
                                 cc.1 += 1;
                                 if cc.0 < 0 || cc.1 % 100 == 0 {
-                                    if let Ok(conn) = datastore::open(&cfg.db_path) {
-                                        let goods = datastore::plu_count(&conn).unwrap_or(0);
+                                    // Кэш-соединение тика (lock_db): без
+                                    // переоткрытия БД каждые 10 с.
+                                    let read = {
+                                        let mut db = lock_db.lock().expect("lock_db");
+                                        if db.is_none() {
+                                            *db = datastore::open(&cfg.db_path).ok();
+                                        }
+                                        db.as_ref().and_then(|conn| {
+                                            let goods = datastore::plu_count(conn).unwrap_or(0);
+                                            let layout = datastore::get_setting(
+                                                conn,
+                                                "label_layout_name",
+                                            )
+                                            .ok()
+                                            .flatten()
+                                            .is_some();
+                                            Some((goods, layout))
+                                        })
+                                    };
+                                    if let Some((goods, layout)) = read {
                                         cc.2 = goods as i32;
-                                        let layout = datastore::get_setting(
-                                            &conn,
-                                            "label_layout_name",
-                                        )
-                                        .ok()
-                                        .flatten()
-                                        .is_some();
-                                        let base = if cc.2 > 0 { 1 } else { 0 }
+                                        cc.0 = if goods > 0 { 1 } else { 0 }
                                             | if layout { 2 } else { 0 };
-                                        cc.0 = base;
                                     }
                                 }
                                 (cc.1, cc.2, cc.0)

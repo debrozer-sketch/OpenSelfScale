@@ -82,6 +82,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     let idle_secs = ctx.idle_secs.clone();
     let trade = ctx.trade.clone();
 
+    NTP_ON.store(cfg.time.ntp, std::sync::atomic::Ordering::Relaxed);
+    if cfg.time.ntp && !cfg.time.server.is_empty() {
+        spawn_settime(&cfg, &["ntp-server", cfg.time.server.as_str()], ui_handle.clone(), "NTP-сервер применён");
+    }
+
     // Строки меню настроек (редактор отделов): правки пишутся в БД сразу,
     // главный экран перестраивается при закрытии меню (refresh_data).
     let admin_reload = {
@@ -153,6 +158,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             k.setup_active = false;
             k.setup_pin_stage = 0;
             k.setup_print_sub = 0;
+            k.setup_scales_seen = false;
             // Роль сбрасывается вместе с сеансом меню: повторный вход —
             // только через пароль.
             if let Some(ui) = ui_handle.upgrade() {
@@ -195,10 +201,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let kiosk = kiosk.clone();
         move |d| {
             let mut k = kiosk.borrow_mut();
+            // Лимит длины: PIN — 8 цифр, ввод времени (34) — 14.
+            let max_len = if k.admin_stage == 34 { 14 } else { 8 };
             if (k.admin_stage != 1
                 && !(7..=9).contains(&k.admin_stage)
                 && !(30..=34).contains(&k.admin_stage))
-                || k.admin_pin_buf.len() >= 8
+                || k.admin_pin_buf.len() >= max_len
                 || !d.bytes().all(|b| b.is_ascii_digit())
             {
                 return;
@@ -243,7 +251,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         move || {
             let Ok(conn) = datastore::open(&cfg.db_path) else { return };
             let stage = setup::stage(&conn);
-            let (mode, note, action, action_enabled, skip_visible, back_label) =
+            let (mode, note, action, action_enabled, skip_visible, skip_label, next_visible) =
                 if !setup::wizard_done(&conn) {
                     let k = kiosk.borrow();
                     wizard_step_ui(stage, k.setup_print_sub, k.setup_scales_seen)
@@ -261,7 +269,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         "ВВЕСТИ В ЭКСПЛУАТАЦИЮ".to_string(),
                         all,
                         false,
-                        "НАЗАД".to_string(),
+                        "ПРОПУСТИТЬ".to_string(),
+                        false,
                     )
                 };
             if let Some(ui) = ui_handle.upgrade() {
@@ -271,7 +280,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 ui.set_setup_action_label(action.into());
                 ui.set_setup_action_enabled(action_enabled);
                 ui.set_setup_skip_visible(skip_visible);
-                ui.set_setup_back_label(back_label.into());
+                ui.set_setup_skip_label(skip_label.into());
+                ui.set_setup_next_visible(next_visible);
             }
         }
     };
@@ -312,6 +322,19 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         // Вход выполнен. Заводского PIN больше нет: мастером
                         // создаются оба пароля, принудительной смены не нужно.
                         k.pin_forced = false;
+                        // Прерванный мастер: после входа — в мастер, не в
+                        // меню; PIN кассира в мастер не пускает.
+                        if k.setup_active {
+                            if role == datastore::auth::Role::Admin {
+                                k.admin_stage = 20;
+                                drop(k);
+                                setup_render();
+                            } else {
+                                drop(k);
+                                set_err(&ui_handle, "Требуется PIN администратора");
+                            }
+                            return;
+                        }
                         k.admin_stage = 2;
                         // Открытая карточка товара закрывается: из меню
                         // выходим на чистый главный экран.
@@ -372,17 +395,27 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         };
                         match res {
                             Ok(Ok(())) => {
-                                let Ok(conn) = datastore::open(&cfg.db_path) else { return };
-                                let next = setup::advance(
-                                    setup::stage(&conn),
-                                    setup::Action::Next,
-                                );
-                                setup::set_stage(&conn, next);
-                                k.setup_pin_stage = 0;
-                                k.admin_stage = 20;
                                 log::info!("настройка: PIN {role_name} создан");
-                                drop(k);
-                                setup_render();
+                                k.setup_pin_stage = 0;
+                                if k.setup_active {
+                                    // В мастере: шаг закрыт, дальше по порядку.
+                                    let Ok(conn) = datastore::open(&cfg.db_path) else { return };
+                                    let next = setup::advance(
+                                        setup::stage(&conn),
+                                        setup::Action::Next,
+                                    );
+                                    setup::set_stage(&conn, next);
+                                    k.admin_stage = 20;
+                                    drop(k);
+                                    setup_render();
+                                } else {
+                                    // Создание кассира из меню админа: назад
+                                    // в меню.
+                                    k.admin_stage = 2;
+                                    if let Some(ui) = ui_handle.upgrade() {
+                                        ui.set_pin_forced(false);
+                                    }
+                                }
                             }
                             Ok(Err(msg)) => set_err(&ui_handle, msg),
                             Err(e) => log::error!("настройка: PIN: запись: {e}"),
@@ -390,7 +423,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     }
                     _ => {
                         // Ввод времени: 14 цифр ДДММГГГГЧЧММ. Диапазоны
-                        // дополнительно проверяет sudo-хелпер.
+                        // дополнительно проверяет sudo-хелпер. Шаг
+                        // продвигается сразу (состояние — в БД, переживает
+                        // сбой питания); результат хелпера — в заметке.
                         if pin.len() != 14 {
                             set_err(&ui_handle, "Формат: ДД.ММ.ГГГГ ЧЧ:ММ (14 цифр)");
                             return;
@@ -400,10 +435,31 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         let (yy, rest) = rest.split_at(4);
                         let (hh, mi) = rest.split_at(2);
                         let arg = format!("{dd}.{mm}.{yy} {hh}:{mi}");
+                        let Ok(conn) = datastore::open(&cfg.db_path) else { return };
+                        let next = setup::advance(setup::stage(&conn), setup::Action::Next);
+                        setup::set_stage(&conn, next);
                         k.setup_pin_stage = 0;
                         k.admin_stage = 20;
                         drop(k);
-                        spawn_settime(&cfg, &arg, ui_handle.clone(), "время установлено");
+                        spawn_settime(&cfg, &[arg.as_str()], ui_handle.clone(), "время установлено");
+                        // Перерисовка шага 8: значения — данными в invoke
+                        // (Rc-состояние киоска в замыкание invoke не уходит).
+                        let (mode, note, action, enabled, skip, skip_label, next_vis) =
+                            wizard_step_ui(next, 0, false);
+                        let ui_handle2 = ui_handle.clone();
+                        slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_handle2.upgrade() {
+                                ui.set_setup_mode(mode);
+                                ui.set_setup_stage(i32::from(next));
+                                ui.set_setup_note(note.into());
+                                ui.set_setup_action_label(action.into());
+                                ui.set_setup_action_enabled(enabled);
+                                ui.set_setup_skip_visible(skip);
+                                ui.set_setup_skip_label(skip_label.into());
+                                ui.set_setup_next_visible(next_vis);
+                            }
+                        })
+                        .ok();
                     }
                 }
                 return;
@@ -538,6 +594,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
             let stage = setup::stage(&conn);
             match act.as_str() {
+                "next" => {
+                    let next = setup::advance(stage, setup::Action::Next);
+                    setup::set_stage(&conn, next);
+                    drop(k);
+                    setup_render();
+                }
                 "back" => match stage {
                     // Подгонка зазора: «уехало далеко» — откат меньше и
                     // новый тест. Остаёмся на шаге (sub уже 1).
@@ -567,7 +629,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         let on = !NTP_ON.load(std::sync::atomic::Ordering::Relaxed);
                         NTP_ON.store(on, std::sync::atomic::Ordering::Relaxed);
                         let arg = if on { "ntp-on" } else { "ntp-off" };
-                        spawn_settime(&cfg, arg, ui_handle.clone(), if on { "NTP включён" } else { "NTP выключен" });
+                        spawn_settime(&cfg, &[arg], ui_handle.clone(), if on { "NTP включён" } else { "NTP выключен" });
+                        setup_render();
                     }
                     // Шаги 5/6: значения уже в БД, калибровку можно отложить.
                     5 | 6 => {
@@ -651,14 +714,20 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             let (text, saved) = calibrate_label_text(&cfg2);
                             if saved.is_some() {
                                 let Ok(conn) = datastore::open(&cfg2.db_path) else { return };
+                                // Гонка с «НАЗАД»/«ПРОПУСТИТЬ» во время скана:
+                                // шаг двигаем только если оператор ещё на 6-м.
+                                if setup::stage(&conn) != 6 {
+                                    return;
+                                }
                                 let next =
                                     setup::advance(setup::stage(&conn), setup::Action::Next);
                                 setup::set_stage(&conn, next);
                                 // Готовый вид следующего шага — данными
                                 // (Rc-состояние в поток не передаётся).
-                                let (mode, action, enabled, skip, back) = {
-                                    let (m, _note, a, e, s, b) = wizard_step_ui(next, 0, false);
-                                    (m, a, e, s, b)
+                                let (mode, action, enabled, skip, skip_label, next_vis) = {
+                                    let (m, _note, a, e, s, sl, nv) =
+                                        wizard_step_ui(next, 0, false);
+                                    (m, a, e, s, sl, nv)
                                 };
                                 slint::invoke_from_event_loop(move || {
                                     if let Some(ui) = ui_handle2.upgrade() {
@@ -668,7 +737,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                         ui.set_setup_action_label(action.into());
                                         ui.set_setup_action_enabled(enabled);
                                         ui.set_setup_skip_visible(skip);
-                                        ui.set_setup_back_label(back.into());
+                                        ui.set_setup_skip_label(skip_label.into());
+                                        ui.set_setup_next_visible(next_vis);
                                     }
                                 })
                                 .ok();
@@ -768,10 +838,22 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let relayout = flow.relayout.clone();
         move |id: slint::SharedString| {
             match id.as_str() {
+                "createstaff" => {
+                    let mut k = kiosk.borrow_mut();
+                    k.setup_pin_stage = 32;
+                    k.admin_stage = 32;
+                    k.admin_pin_buf.clear();
+                    drop(k);
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_pin_mask("".into());
+                        ui.set_pin_error("".into());
+                    }
+                }
                 "setup" => {
                     let mut k = kiosk.borrow_mut();
                     k.admin_stage = 20;
                     k.setup_active = true;
+                    k.setup_scales_seen = false;
                     drop(k);
                     setup_render();
                 }
@@ -1247,6 +1329,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     ui.on_net_popup_close({
         let kiosk = kiosk.clone();
         let ui_handle = ui_handle.clone();
+        let setup_render = setup_render.clone();
+        let cfg = cfg.clone();
         move || {
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_net_popup_open(false);
@@ -1255,6 +1339,17 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 kiosk.borrow_mut().net_buf = net::read_live().fields();
                 let k = kiosk.borrow();
                 net_rows_set(&ui, &k);
+            }
+            // Мастер настройки: сеть настроена — шаг 3 закрыт, назад в мастер.
+            if kiosk.borrow().setup_active {
+                if let Ok(conn) = datastore::open(&cfg.db_path) {
+                    if setup::stage(&conn) == 3 {
+                        let next = setup::advance(3, setup::Action::Next);
+                        setup::set_stage(&conn, next);
+                        kiosk.borrow_mut().admin_stage = 20;
+                        setup_render();
+                    }
+                }
             }
         }
     });
@@ -1416,8 +1511,26 @@ fn refresh_printer_diag(cfg: &crate::config::Config, ui_handle: &slint::Weak<Mai
                 let (len, layout) = label_info(&cfg);
                 print::fmt_diagnostics(&d, len, layout.as_deref())
             }
-            Err(e) => format!("Опрос не удался: {e}\n\nЕсли принтер отключён в конфиге,\nэкран недоступен."),
+            Err(e) => format!("Опрос не удался: {e}\n\nЕсли принтер отключён от сети,\nсначала проверьте питание."),
         };
+        // Чек-лист готовности (спека §5): список живёт в «Оборудовании»
+        // для диагностики — только просмотр, без кнопок.
+        let checklist = match datastore::open(&cfg.db_path) {
+            Ok(conn) => {
+                let goods = datastore::plu_count(&conn).unwrap_or(0);
+                let layout =
+                    datastore::get_setting(&conn, "label_layout_name").ok().flatten();
+                let entered = crate::setup::entered(&conn);
+                format!(
+                    "\n\nЧЕК-ЛИСТ (ввод в эксплуатацию{}):\n  товары: {}\n  раскладка: {}\n  принтер: в диагностике выше\n  весы: на главном экране",
+                    if entered { " ВЫПОЛНЕН" } else { "" },
+                    if goods > 0 { format!("{goods} шт") } else { "нет".into() },
+                    layout.unwrap_or_else(|| "не задана".into()),
+                )
+            }
+            Err(e) => format!("\n\nЧЕК-ЛИСТ: база недоступна: {e}"),
+        };
+        let text = format!("{text}{checklist}");
         slint::invoke_from_event_loop(move || {
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_prn_diag_text(text.into());
@@ -1518,13 +1631,18 @@ fn net_popup_text(c: &net::NetConfig) -> String {
 /// переключается кнопкой (системное состояние меняет sudo-хелпер).
 static NTP_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
+/// Стартовая синхронизация NTP: сервер из [time] (если задан) и состояние
+/// из конфига. Один вызов на старте киоска.
+
 /// Вид шага мастера: (mode, note, action, action_enabled, skip_visible,
-/// back_label). Чистая функция — по stage и подэтапам киоска.
+/// skip_label, next_visible). Чистая функция — по stage и подэтапам киоска.
 fn wizard_step_ui(
     stage: u8,
     print_sub: u8,
     scales_seen: bool,
-) -> (i32, String, String, bool, bool, String) {
+) -> (i32, String, String, bool, bool, String, bool) {
+    let ntp = NTP_ON.load(std::sync::atomic::Ordering::Relaxed);
+    let ntp_label = if ntp { "NTP: ВКЛ".to_string() } else { "NTP: ВЫКЛ".to_string() };
     match stage {
         1 => (
             1,
@@ -1535,7 +1653,8 @@ fn wizard_step_ui(
             "ВВЕСТИ PIN".into(),
             true,
             false,
-            "НАЗАД".into(),
+            "ПРОПУСТИТЬ".into(),
+            false,
         ),
         2 => (
             1,
@@ -1546,18 +1665,20 @@ fn wizard_step_ui(
             "ВВЕСТИ PIN".into(),
             true,
             true,
-            "НАЗАД".into(),
+            "ПРОПУСТИТЬ".into(),
+            false,
         ),
         3 => (
             1,
             "Шаг 3 из 8.\n\nСеть: по умолчанию работает DHCP. Для статического\n\
              адреса откройте настройку сети и примените значения;\n\
-             «НАЗАД» вернёт в мастер."
+             после закрытия попапа мастер перейдёт дальше."
                 .into(),
             "ОТКРЫТЬ СЕТЬ".into(),
             true,
             true,
-            "НАЗАД".into(),
+            "ПРОПУСТИТЬ".into(),
+            false,
         ),
         4 => (
             1,
@@ -1567,7 +1688,8 @@ fn wizard_step_ui(
             "ГОТОВО".into(),
             scales_seen,
             false,
-            "НАЗАД".into(),
+            "ПРОПУСТИТЬ".into(),
+            false,
         ),
         5 => {
             if print_sub == 0 {
@@ -1582,20 +1704,22 @@ fn wizard_step_ui(
                     "ПЕЧАТЬ ТЕСТА".into(),
                     true,
                     false,
-                    "НАЗАД".into(),
+                    "ПРОПУСТИТЬ".into(),
+                    false,
                 )
             } else {
                 (
                     1,
                     "Тест напечатан. Оцените положение изображения:\n\
-                     • всё внутри — «ГОТОВО»;\n\
+                     • всё внутри — кнопка «ГОТОВО» справа;\n\
                      • хвост обрезан — «ХВОСТ ОБРЕЗАН +16» (и снова тест);\n\
                      • изображение в зазоре — «УЕХАЛО −16» (и снова тест)."
                         .into(),
                     "ХВОСТ ОБРЕЗАН +16".into(),
                     true,
                     true,
-                    "УЕХАЛО −16".into(),
+                    "ГОТОВО".into(),
+                    false,
                 )
             }
         }
@@ -1608,18 +1732,20 @@ fn wizard_step_ui(
             "КАЛИБРОВАТЬ".into(),
             true,
             true,
-            "НАЗАД".into(),
+            "ПРОПУСТИТЬ".into(),
+            false,
         ),
         7 => (
             1,
             "Шаг 7 из 8.\n\nДата и время: введите вручную в формате\n\
-             ДД.ММ.ГГГГ ЧЧ:ММ, либо переключите NTP\n\
-             (сервер — [time] в /etc/scalefw/config.toml)."
+             ДД.ММ.ГГГГ ЧЧ:ММ, либо переключите NTP кнопкой\n\
+             (сервер — [time] в /etc/scalefw/config.toml), затем «ДАЛЕЕ»."
                 .into(),
             "ВВЕСТИ ВРЕМЯ".into(),
             true,
             true,
-            "НАЗАД".into(),
+            ntp_label,
+            true,
         ),
         8 => (
             1,
@@ -1630,7 +1756,8 @@ fn wizard_step_ui(
             "ЗАВЕРШИТЬ И ПЕРЕЗАПУСТИТЬ".into(),
             true,
             false,
-            "НАЗАД".into(),
+            "ПРОПУСТИТЬ".into(),
+            false,
         ),
         _ => (
             1,
@@ -1638,7 +1765,8 @@ fn wizard_step_ui(
             "ДАЛЕЕ".into(),
             false,
             false,
-            "НАЗАД".into(),
+            "ПРОПУСТИТЬ".into(),
+            false,
         ),
     }
 }
@@ -1708,17 +1836,17 @@ fn calibrate_label_text(cfg: &Config) -> (String, Option<i64>) {
 /// хелпера не блокирует UI.
 fn spawn_settime(
     _cfg: &Config,
-    arg: &str,
+    args: &[&str],
     ui_handle: slint::Weak<MainWindow>,
     note: &'static str,
 ) {
-    let arg = arg.to_string();
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     std::thread::spawn(move || {
         let (tx, rx) = std::sync::mpsc::channel::<Result<bool, String>>();
         std::thread::spawn(move || {
             let res = std::process::Command::new("sudo")
                 .arg("/usr/local/bin/scale-settime")
-                .arg(&arg)
+                .args(&args)
                 .stdin(std::process::Stdio::null())
                 .output();
             let _ = tx.send(match res {

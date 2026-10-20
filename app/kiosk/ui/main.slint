@@ -418,8 +418,12 @@ export component MainWindow inherits Window {
     in property <bool> setup-action-enabled: false;
     // Левая кнопка шага: обычно «НАЗАД», на подгонке зазора — «УЕХАЛО −16».
     in property <string> setup-back-label: "НАЗАД";
-    // Шаг 2: кнопка «ПРОПУСТИТЬ» (кассирский PIN не обязателен).
+    // Кнопка «ПРОПУСТИТЬ» (подпись меняется: на шаге 5 — «ГОТОВО»,
+    // на шаге 7 — состояние NTP).
     in property <bool> setup-skip-visible: false;
+    in property <string> setup-skip-label: "ПРОПУСТИТЬ";
+    // Отдельная кнопка «ДАЛЕЕ» (шаг 7: время и NTP — два разных действия).
+    in property <bool> setup-next-visible: false;
     // Пункт «Мастер настройки» в меню виден, пока весы не введены в эксплуатацию.
     in property <bool> setup-menu-visible: false;
     callback setup-tap(string);
@@ -1488,13 +1492,31 @@ export component MainWindow inherits Window {
                 border-radius: 14px;
                 background: setup-skip-ta.pressed ? #E4E8ED : #EDF0F3;
                 Text {
-                    text: "ПРОПУСТИТЬ";
-                    font-size: 22px;
+                    text: root.setup-skip-label;
+                    font-size: 20px;
                     font-weight: 700;
                     color: #1A1E24;
+                    overflow: elide;
                 }
                 setup-skip-ta := TouchArea {
                     clicked => { root.setup-tap("skip"); }
+                }
+            }
+            if root.setup-next-visible : Rectangle {
+                x: parent.width - 244px;
+                y: 340px;
+                width: 228px;
+                height: 72px;
+                border-radius: 14px;
+                background: setup-next-ta.pressed ? #1E4D3A : #2E7D57;
+                Text {
+                    text: "ДАЛЕЕ";
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #FFFFFF;
+                }
+                setup-next-ta := TouchArea {
+                    clicked => { root.setup-tap("next"); }
                 }
             }
         }
@@ -1624,6 +1646,7 @@ export component MainWindow inherits Window {
             property <[MenuRow]> rows-admin-setup: [
                 { label: "Мастер настройки", id: "setup", admin: false },
                 { label: "Настройки весов", id: "scaleset", admin: true },
+                { label: "Пароль кассира", id: "createstaff", admin: true },
                 { label: "Оборудование", id: "equip", admin: false },
                 { label: "Сеть", id: "net", admin: true },
                 { label: "Выставить 0 / тарировать", id: "zero", admin: false },
@@ -1631,6 +1654,7 @@ export component MainWindow inherits Window {
             ];
             property <[MenuRow]> rows-admin: [
                 { label: "Настройки весов", id: "scaleset", admin: true },
+                { label: "Пароль кассира", id: "createstaff", admin: true },
                 { label: "Оборудование", id: "equip", admin: false },
                 { label: "Сеть", id: "net", admin: true },
                 { label: "Выставить 0 / тарировать", id: "zero", admin: false },

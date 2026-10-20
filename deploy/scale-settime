@@ -13,8 +13,26 @@ usage() { echo "usage: scale-settime \"ДД.ММ.ГГГГ ЧЧ:ММ\" | scale-se
 if [ $# -ne 1 ]; then usage; fi
 arg="$1"
 
-if [ "$arg" = "ntp-on" ] || [ "$arg" = "ntp-off" ]; then
-    exec systemctl "$([ "$arg" = "ntp-on" ] && echo start || echo stop)" systemd-timesyncd
+if [ "$arg" = "ntp-on" ]; then
+    timedatectl set-ntp true
+    systemctl restart systemd-timesyncd
+    exit 0
+fi
+if [ "$arg" = "ntp-off" ]; then
+    timedatectl set-ntp false
+    exit 0
+fi
+
+# Свой NTP-сервер (сеть магазина без интернета): drop-in для timesyncd.
+if [ "$arg" = "ntp-server" ]; then
+    server="${2:-}"
+    if [ $# -ne 2 ] || [[ ! "$server" =~ ^[A-Za-z0-9][A-Za-z0-9.\-]*$ ]]; then
+        echo "ntp-server <host>" >&2; exit 1
+    fi
+    mkdir -p /etc/systemd/timesyncd.conf.d
+    printf '[Time]\nNTP=%s\n' "$server" > /etc/systemd/timesyncd.conf.d/scalefw.conf
+    systemctl restart systemd-timesyncd
+    exit 0
 fi
 
 # Формат строго "ДД.ММ.ГГГГ ЧЧ:ММ" — 16 символов, точный скелет.
