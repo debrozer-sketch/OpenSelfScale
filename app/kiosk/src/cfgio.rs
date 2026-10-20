@@ -338,4 +338,27 @@ mod tests {
         assert!(p.contains("Колонок: 5"), "{p}");
         assert!(p.contains("10 с"), "{p}");
     }
+
+    #[test]
+    fn export_does_not_leak_device_state() {
+        // Состояние конкретного устройства (мастер настройки, PIN-ы,
+        // раскладка) не должно выезжать из весов в файле переноса настроек.
+        let dir = std::env::temp_dir().join(format!("scalefw-cfgio-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cfg = Config::default();
+        cfg.db_path = dir.join("scale.db");
+        let conn = datastore::open(&cfg.db_path).unwrap();
+        datastore::set_setting(&conn, "setup_done", "1").unwrap();
+        datastore::set_setting(&conn, "setup_stage", "5").unwrap();
+        datastore::set_setting(&conn, "label_layout_name", "market-56x38").unwrap();
+        datastore::auth::create_user(&conn, 1, "admin", "12345").unwrap().unwrap();
+        drop(conn);
+        let path = export(&cfg).expect("export");
+        let body = std::fs::read_to_string(&path).unwrap();
+        for leak in ["setup_", "pin_salt", "pin_hash", "label_layout_name"] {
+            assert!(!body.contains(leak), "в файле экспорта найдено: {leak}\n{body}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
