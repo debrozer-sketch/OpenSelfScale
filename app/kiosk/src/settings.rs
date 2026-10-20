@@ -1771,6 +1771,31 @@ fn wizard_step_ui(
     }
 }
 
+/// Открытие мастера на старте киоска: рендер активного шага данными.
+/// Без этого экран остаётся с slint-дефолтами (режим чек-листа).
+pub(crate) fn startup_setup_render(
+    ui_handle: &slint::Weak<MainWindow>,
+    kiosk: &std::rc::Rc<std::cell::RefCell<crate::session::Kiosk>>,
+    cfg: &Config,
+) {
+    let Ok(conn) = datastore::open(&cfg.db_path) else { return };
+    let stage = setup::stage(&conn);
+    let (mode, note, action, action_enabled, skip_visible, skip_label, next_visible) = {
+        let k = kiosk.borrow();
+        wizard_step_ui(stage, k.setup_print_sub, k.setup_scales_seen)
+    };
+    if let Some(ui) = ui_handle.upgrade() {
+        ui.set_setup_mode(mode);
+        ui.set_setup_stage(i32::from(stage));
+        ui.set_setup_note(note.into());
+        ui.set_setup_action_label(action.into());
+        ui.set_setup_action_enabled(action_enabled);
+        ui.set_setup_skip_visible(skip_visible);
+        ui.set_setup_skip_label(skip_label.into());
+        ui.set_setup_next_visible(next_visible);
+    }
+}
+
 /// Правка зазора печати шагом ±16 точек (значения калибровки — в БД).
 fn adjust_feed(conn: &rusqlite::Connection, delta: i64) {
     match calib::FeedCalibration::load(conn) {

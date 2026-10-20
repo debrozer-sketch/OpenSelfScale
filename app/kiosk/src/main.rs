@@ -383,6 +383,8 @@ fn run_kiosk(cfg: config::Config) {
                     if let Some(ui) = Some(&ui) {
                         ui.set_ip_note(format!("IP: {}", crate::net::read_live().ip).into());
                     }
+                } else {
+                    settings::startup_setup_render(&ui.as_weak(), &ctx.kiosk, &cfg);
                 }
             } else {
                 // Чек-лист остаётся доступен из меню, пока не введены
