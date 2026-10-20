@@ -43,6 +43,10 @@ pub fn start(
         let trade = ctx.trade.clone();
         let refresh_data = refresh_data;
         let tick_cache = tick_cache.clone();
+        // Чек-лист (экран 19): кэш маски и редкие (раз в 10 с) обращения
+        // к БД за товарами/раскладкой — тик не должен трогать базу чаще.
+        let checklist_cache: Rc<RefCell<(i32, u32, i32)>> =
+            Rc::new(RefCell::new((-1, 0, 0)));
         let go_root = go_root.clone();
         // Внутренний сторож: каждый тик отмечает живой UI-поток
         // (watchdog.rs); надзиратель убивает процесс при замерзании UI.
@@ -322,6 +326,39 @@ pub fn start(
                     // кнопки чек-листа. Без блокирующих вызовов: вес — из
                     // уже прочитанного снимка, маска — из свойства UI.
                     if k.admin_stage == 20 {
+                        // Чек-лист: маска из БД (раз в 10 с) + живые
+                        // принтер/весы; галки обновляются в фоне.
+                        if ui.get_setup_mode() == 0 {
+                            let (ticks, goods, layout_mask) = {
+                                let mut cc = checklist_cache.borrow_mut();
+                                cc.1 += 1;
+                                if cc.0 < 0 || cc.1 % 100 == 0 {
+                                    if let Ok(conn) = datastore::open(&cfg.db_path) {
+                                        let goods = datastore::plu_count(&conn).unwrap_or(0);
+                                        cc.2 = goods as i32;
+                                        let layout = datastore::get_setting(
+                                            &conn,
+                                            "label_layout_name",
+                                        )
+                                        .ok()
+                                        .flatten()
+                                        .is_some();
+                                        let base = if cc.2 > 0 { 1 } else { 0 }
+                                            | if layout { 2 } else { 0 };
+                                        cc.0 = base;
+                                    }
+                                }
+                                (cc.1, cc.2, cc.0)
+                            };
+                            let _ = ticks;
+                            let _ = goods;
+                            let mask = layout_mask
+                                | if !ph.fault { 4 } else { 0 }
+                                | if snap.port_up { 8 } else { 0 };
+                            if ui.get_setup_mask() != mask {
+                                ui.set_setup_mask(mask);
+                            }
+                        }
                         if ui.get_setup_mode() == 0 {
                             let all =
                                 crate::setup::all_green(ui.get_setup_mask() as u32);

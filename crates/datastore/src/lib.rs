@@ -186,6 +186,11 @@ fn display_name(first: &str, second: &str) -> String {
     if second.is_empty() { first.into() } else { format!("{first} {second}") }
 }
 
+/// Число товаров (чек-лист ввода в эксплуатацию).
+pub fn plu_count(conn: &Connection) -> Result<i64, StoreError> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))?)
+}
+
 /// Все товары с экранной группой.
 pub fn load_all(conn: &Connection) -> Result<Vec<PluEntry>, StoreError> {
     let mut stmt = conn.prepare(
