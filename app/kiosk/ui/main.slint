@@ -416,8 +416,12 @@ export component MainWindow inherits Window {
     // Главная кнопка шага («ПЕЧАТЬ ТЕСТА», «ПРИМЕНИТЬ ВРЕМЯ», ...).
     in property <string> setup-action-label;
     in property <bool> setup-action-enabled: false;
+    // Левая кнопка шага: обычно «НАЗАД», на подгонке зазора — «УЕХАЛО −16».
+    in property <string> setup-back-label: "НАЗАД";
     // Шаг 2: кнопка «ПРОПУСТИТЬ» (кассирский PIN не обязателен).
     in property <bool> setup-skip-visible: false;
+    // Пункт «Мастер настройки» в меню виден, пока весы не введены в эксплуатацию.
+    in property <bool> setup-menu-visible: false;
     callback setup-tap(string);
 
     // Экран «Сеть»: поля IP/маска/шлюз/DNS, тап по полю = фокус,
@@ -1446,10 +1450,11 @@ export component MainWindow inherits Window {
                 border-radius: 14px;
                 background: setup-back-ta.pressed ? #E4E8ED : #EDF0F3;
                 Text {
-                    text: "НАЗАД";
-                    font-size: 24px;
+                    text: root.setup-back-label;
+                    font-size: 22px;
                     font-weight: 700;
                     color: #1A1E24;
+                    overflow: elide;
                 }
                 setup-back-ta := TouchArea {
                     clicked => { root.setup-tap("back"); }
@@ -1609,13 +1614,30 @@ export component MainWindow inherits Window {
             width: parent.width;
             height: parent.height - 84px;
 
-            property <[MenuRow]> rows: [
+            // Кассиру — только протяжка и перезагрузка (мастер настройки
+            // и разделы настроек — админские). Пункт мастера виден, пока
+            // весы не введены в эксплуатацию.
+            property <[MenuRow]> rows-staff: [
+                { label: "Протяжка этикетки", id: "feed", admin: false },
+                { label: "Перезагрузка весов", id: "restart", admin: false },
+            ];
+            property <[MenuRow]> rows-admin-setup: [
+                { label: "Мастер настройки", id: "setup", admin: false },
                 { label: "Настройки весов", id: "scaleset", admin: true },
                 { label: "Оборудование", id: "equip", admin: false },
                 { label: "Сеть", id: "net", admin: true },
                 { label: "Выставить 0 / тарировать", id: "zero", admin: false },
                 { label: "Перезагрузка весов", id: "restart", admin: true },
             ];
+            property <[MenuRow]> rows-admin: [
+                { label: "Настройки весов", id: "scaleset", admin: true },
+                { label: "Оборудование", id: "equip", admin: false },
+                { label: "Сеть", id: "net", admin: true },
+                { label: "Выставить 0 / тарировать", id: "zero", admin: false },
+                { label: "Перезагрузка весов", id: "restart", admin: true },
+            ];
+            property <[MenuRow]> rows: root.role == 0 ? rows-staff
+                : (root.setup-menu-visible ? rows-admin-setup : rows-admin);
             for r[i] in rows : Rectangle {
                 x: 8px;
                 y: 12px + i * 82px;

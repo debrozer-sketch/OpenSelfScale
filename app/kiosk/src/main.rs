@@ -357,6 +357,30 @@ fn run_kiosk(cfg: config::Config) {
     // Поток покупателя и меню настроек регистрируют свои колбэки на UI.
     let flow_handles = flow::install(&ctx);
     settings::install(&ctx, &flow_handles);
+    // Незапрограммированные весы: пользователей нет или мастер не завершён
+    // (прервали питанием) — открываем мастер сразу, минуя каталог.
+    match datastore::open(&cfg.db_path) {
+        Ok(conn) => {
+            if !crate::setup::wizard_done(&conn) {
+                if let (Some(ui), mut k) = (Some(&ui), ctx.kiosk.borrow_mut()) {
+                    let _ = ui;
+                    k.admin_open = true;
+                    k.admin_stage = 20;
+                    k.setup_active = true;
+                    log::info!("настройка: открыт мастер первичной настройки");
+                }
+            } else {
+                // Чек-лист остаётся доступен из меню, пока не введены
+                // в эксплуатацию.
+                if !crate::setup::entered(&conn) {
+                    if let Some(ui) = Some(&ui) {
+                        ui.set_setup_menu_visible(true);
+                    }
+                }
+            }
+        }
+        Err(e) => log::error!("настройка: база: {e}"),
+    }
     // Первичная раскладка: отделы из БД, геометрия по колонкам из БД.
     (flow_handles.relayout)();
     if ctx.depts_all.borrow().len() == 1 {

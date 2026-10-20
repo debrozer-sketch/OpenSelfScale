@@ -120,6 +120,17 @@ pub struct Kiosk {
     /// 4 всё время) и типа событий (0 все, 1 успешные, 2 ошибки).
     pub report_period: usize,
     pub report_kind: usize,
+    /// Мастер настройки активен (экран 19): «НАЗАД» из сети/оборудования
+    /// возвращает в мастер, а не в меню.
+    pub setup_active: bool,
+    /// Подэтап ввода PIN в мастере: 30 «новый PIN админа», 31 «повтор»,
+    /// 32/33 — кассир, 34 — ввод времени. Промежуточное значение —
+    /// в pin_new (админ) и pin_pending (кассир/время).
+    pub setup_pin_stage: u8,
+    /// Шаг 5 мастера: 0 — тест ещё не печатался, 1 — идёт подгонка зазора.
+    pub setup_print_sub: u8,
+    /// Шаг 4: груз ≥100 г замечен (в тике), шаг можно закрыть.
+    pub setup_scales_seen: bool,
 }
 
 impl Kiosk {
@@ -176,6 +187,10 @@ impl Kiosk {
             imp_pending: String::new(),
             report_period: 0,
             report_kind: 0,
+            setup_active: false,
+            setup_pin_stage: 0,
+            setup_print_sub: 0,
+            setup_scales_seen: false,
         }
     }
 }

@@ -8,9 +8,12 @@ use std::time::Instant;
 use crate::admin;
 use crate::cfgio;
 use crate::context::AppContext;
-use crate::diag;
+use crate::calib;
+use crate::config::Config;
 use crate::net::{self, net_rows_set};
+use crate::diag;
 use crate::print;
+use crate::setup;
 use crate::MainWindow;
 
 /// Идёт применение сетевых настроек (защита от двойного нажатия).
@@ -145,6 +148,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             k.admin_open = false;
             k.admin_stage = 1;
             k.admin_pin_buf.clear();
+            // Сеанс мастера закрывается вместе с меню: продолжить можно
+            // из пункта «Мастер настройки» (состояние шагов — в БД).
+            k.setup_active = false;
+            k.setup_pin_stage = 0;
+            k.setup_print_sub = 0;
             // Роль сбрасывается вместе с сеансом меню: повторный вход —
             // только через пароль.
             if let Some(ui) = ui_handle.upgrade() {
@@ -187,7 +195,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let kiosk = kiosk.clone();
         move |d| {
             let mut k = kiosk.borrow_mut();
-            if (k.admin_stage != 1 && !(7..=9).contains(&k.admin_stage))
+            if (k.admin_stage != 1
+                && !(7..=9).contains(&k.admin_stage)
+                && !(30..=34).contains(&k.admin_stage))
                 || k.admin_pin_buf.len() >= 8
                 || !d.bytes().all(|b| b.is_ascii_digit())
             {
@@ -224,10 +234,54 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     // Верный пароль — меню; заводской пароль принудительно ведёт на смену.
     // Неверный — поле чистится, пауза перебора растёт и переживает
     // перезапуск (счётчик в БД). PIN никуда не логируется.
+    // Открытие мастера/чек-листа: из меню и при незавершённом мастере
+    // на старте. mode: 1 = мастер, 0 = чек-лист.
+    let setup_render = {
+        let ui_handle = ui_handle.clone();
+        let kiosk = kiosk.clone();
+        let cfg = cfg.clone();
+        move || {
+            let Ok(conn) = datastore::open(&cfg.db_path) else { return };
+            let stage = setup::stage(&conn);
+            let (mode, note, action, action_enabled, skip_visible, back_label) =
+                if !setup::wizard_done(&conn) {
+                    let k = kiosk.borrow();
+                    wizard_step_ui(stage, k.setup_print_sub, k.setup_scales_seen)
+                } else {
+                    let all = ui_handle
+                        .upgrade()
+                        .map(|ui| setup::all_green(ui.get_setup_mask() as u32))
+                        .unwrap_or(false);
+                    (
+                        0,
+                        "Ввод в эксплуатацию: выполните пункты слева — галки живые,\n\
+                         обновляются автоматически. Когда всё зелёное, кнопка\n\
+                         разблокируется. Позже список остаётся в «Оборудовании»."
+                            .to_string(),
+                        "ВВЕСТИ В ЭКСПЛУАТАЦИЮ".to_string(),
+                        all,
+                        false,
+                        "НАЗАД".to_string(),
+                    )
+                };
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_setup_mode(mode);
+                ui.set_setup_stage(i32::from(stage));
+                ui.set_setup_note(note.into());
+                ui.set_setup_action_label(action.into());
+                ui.set_setup_action_enabled(action_enabled);
+                ui.set_setup_skip_visible(skip_visible);
+                ui.set_setup_back_label(back_label.into());
+            }
+        }
+    };
+
+
     ui.on_pin_try({
         let ui_handle = ui_handle.clone();
         let kiosk = kiosk.clone();
         let cfg = cfg.clone();
+        let setup_render = setup_render.clone();
         move || {
             let mut k = kiosk.borrow_mut();
             let set_err = |ui: &slint::Weak<MainWindow>, msg: &str| {
@@ -281,6 +335,76 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         }
                     }
                     Err(e) => log::error!("вход: проверка: {e}"),
+                }
+                return;
+            }
+            // PIN и время мастера настройки: 30/31 — админ (ввод, повтор),
+            // 32/33 — кассир, 34 — дата/время ДД.ММ.ГГГГ ЧЧ:ММ (14 цифр).
+            if (30..=34).contains(&stage) {
+                match stage {
+                    30 | 32 => {
+                        let ok =
+                            pin.len() >= 4 && pin.len() <= 8 && pin.bytes().all(|b| b.is_ascii_digit());
+                        if !ok {
+                            set_err(&ui_handle, "PIN: 4–8 цифр");
+                            return;
+                        }
+                        k.pin_new = pin;
+                        k.admin_stage = stage + 1;
+                    }
+                    31 | 33 => {
+                        let (uid, role_name) =
+                            if stage == 31 { (1, "admin") } else { (2, "staff") };
+                        if pin != k.pin_new {
+                            k.pin_new.clear();
+                            k.admin_stage = stage - 1;
+                            set_err(&ui_handle, "PIN-ы не совпадают — введите заново");
+                            return;
+                        }
+                        let res = match datastore::open(&cfg.db_path) {
+                            Ok(conn) => {
+                                datastore::auth::create_user(&conn, uid, role_name, &pin)
+                            }
+                            Err(e) => {
+                                log::error!("настройка: PIN: база: {e}");
+                                return;
+                            }
+                        };
+                        match res {
+                            Ok(Ok(())) => {
+                                let Ok(conn) = datastore::open(&cfg.db_path) else { return };
+                                let next = setup::advance(
+                                    setup::stage(&conn),
+                                    setup::Action::Next,
+                                );
+                                setup::set_stage(&conn, next);
+                                k.setup_pin_stage = 0;
+                                k.admin_stage = 20;
+                                log::info!("настройка: PIN {role_name} создан");
+                                drop(k);
+                                setup_render();
+                            }
+                            Ok(Err(msg)) => set_err(&ui_handle, msg),
+                            Err(e) => log::error!("настройка: PIN: запись: {e}"),
+                        }
+                    }
+                    _ => {
+                        // Ввод времени: 14 цифр ДДММГГГГЧЧММ. Диапазоны
+                        // дополнительно проверяет sudo-хелпер.
+                        if pin.len() != 14 {
+                            set_err(&ui_handle, "Формат: ДД.ММ.ГГГГ ЧЧ:ММ (14 цифр)");
+                            return;
+                        }
+                        let (dd, rest) = pin.split_at(2);
+                        let (mm, rest) = rest.split_at(2);
+                        let (yy, rest) = rest.split_at(4);
+                        let (hh, mi) = rest.split_at(2);
+                        let arg = format!("{dd}.{mm}.{yy} {hh}:{mi}");
+                        k.setup_pin_stage = 0;
+                        k.admin_stage = 20;
+                        drop(k);
+                        spawn_settime(&cfg, &arg, ui_handle.clone(), "время установлено");
+                    }
                 }
                 return;
             }
@@ -359,7 +483,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             // «Товары и экран», из хаба — в общее меню, из редактора
             // отделов и разделов хаба — в хаб, из импорта — в «Товары»,
             // из отчётов — в «Обслуживание», из сети/оборудования — в меню.
+            // Из сети, открытой из мастера настройки, — назад в мастер.
             let mut k = kiosk.borrow_mut();
+            if k.setup_active && k.admin_stage == 5 {
+                k.admin_stage = 20;
+                return;
+            }
             k.admin_stage = match k.admin_stage {
                 11 => 2,
                 15 => 12,
@@ -370,7 +499,209 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             };
         }
     });
-    // Правки порядка/состава отделов применяются к главному экрану сразу:
+
+    // ---------- Мастер настройки / чек-лист (экран 19) ----------
+    // Состояние мастера — в БД (setup::*); UI перерисовывается целиком на
+    // каждое изменение шага. Тяжёлое (печать, калибровки, время) — в
+    // фоновых потоках: результат возвращается через invoke_from_event_loop
+    // готовыми данными (Rc-состояние киоска в потоки не уходит).
+
+    ui.on_setup_tap({
+        let cfg = cfg.clone();
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
+        let setup_render = setup_render.clone();
+        let app_state = app_state.clone();
+        move |act: slint::SharedString| {
+            let mut k = kiosk.borrow_mut();
+            let Ok(conn) = datastore::open(&cfg.db_path) else { return };
+            if setup::wizard_done(&conn) {
+                // Чек-лист: единственное действие — ввод в эксплуатацию.
+                if act == "action" {
+                    let mask =
+                        ui_handle.upgrade().map(|ui| ui.get_setup_mask() as u32).unwrap_or(0);
+                    if !setup::all_green(mask) {
+                        return;
+                    }
+                    setup::set_entered(&conn, true);
+                    k.setup_active = false;
+                    k.admin_open = false;
+                    k.admin_stage = 1;
+                    k.admin_pin_buf.clear();
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_setup_menu_visible(false);
+                        ui.set_role(0);
+                    }
+                    log::info!("настройка: весы введены в эксплуатацию");
+                }
+                return;
+            }
+            let stage = setup::stage(&conn);
+            match act.as_str() {
+                "back" => match stage {
+                    // Подгонка зазора: «уехало далеко» — откат меньше и
+                    // новый тест. Остаёмся на шаге (sub уже 1).
+                    5 if k.setup_print_sub == 1 => {
+                        drop(k);
+                        adjust_feed(&conn, -16);
+                        spawn_wizard_test_print(&cfg);
+                    }
+                    s if s > 1 => {
+                        let next = setup::advance(s, setup::Action::Back);
+                        setup::set_stage(&conn, next);
+                        drop(k);
+                        setup_render();
+                    }
+                    _ => {}
+                },
+                "skip" => match stage {
+                    2 => {
+                        let next = setup::advance(stage, setup::Action::SkipCashier);
+                        setup::set_stage(&conn, next);
+                        drop(k);
+                        setup_render();
+                    }
+                    // Шаг 7: NTP вкл/выкл (хелпер со своим таймаутом).
+                    7 => {
+                        drop(k);
+                        let on = !NTP_ON.load(std::sync::atomic::Ordering::Relaxed);
+                        NTP_ON.store(on, std::sync::atomic::Ordering::Relaxed);
+                        let arg = if on { "ntp-on" } else { "ntp-off" };
+                        spawn_settime(&cfg, arg, ui_handle.clone(), if on { "NTP включён" } else { "NTP выключен" });
+                    }
+                    // Шаги 5/6: значения уже в БД, калибровку можно отложить.
+                    5 | 6 => {
+                        let next = setup::advance(stage, setup::Action::Next);
+                        setup::set_stage(&conn, next);
+                        drop(k);
+                        setup_render();
+                    }
+                    _ => {}
+                },
+                "action" => match stage {
+                    1 => {
+                        k.setup_pin_stage = 30;
+                        k.admin_stage = 30;
+                        k.admin_pin_buf.clear();
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_pin_mask("".into());
+                            ui.set_pin_error("".into());
+                        }
+                    }
+                    2 => {
+                        k.setup_pin_stage = 32;
+                        k.admin_stage = 32;
+                        k.admin_pin_buf.clear();
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_pin_mask("".into());
+                            ui.set_pin_error("".into());
+                        }
+                    }
+                    3 => {
+                        // Экран сети: поля предзаполняются текущими
+                        // настройками системы; «НАЗАД» вернёт в мастер.
+                        if let Some(ui) = ui_handle.upgrade() {
+                            k.net_dhcp = net::read_mode();
+                            k.net_buf = net::read_live().fields();
+                            k.net_focus = 0;
+                            ui.set_net_dhcp(k.net_dhcp);
+                            ui.set_net_popup_open(false);
+                            net_rows_set(&ui, &k);
+                        }
+                        k.admin_stage = 5;
+                    }
+                    4 => {
+                        if k.setup_scales_seen {
+                            let next = setup::advance(stage, setup::Action::Next);
+                            setup::set_stage(&conn, next);
+                            drop(k);
+                            setup_render();
+                        }
+                    }
+                    5 if k.setup_print_sub == 0 => {
+                        k.setup_print_sub = 1;
+                        drop(k);
+                        spawn_wizard_test_print(&cfg);
+                        setup_render();
+                    }
+                    5 => {
+                        drop(k);
+                        adjust_feed(&conn, 16);
+                        spawn_wizard_test_print(&cfg);
+                    }
+                    6 => {
+                        // Скан занимает порт демона: при весе на платформе
+                        // не запускать (как и в «Оборудовании»).
+                        let snap = app_state.snapshot();
+                        if snap.mass_kg >= 0.01 {
+                            drop(k);
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_setup_note(
+                                    "Калибровка невозможна: на платформе вес.\n\
+                                     Снимите товар и повторите."
+                                        .into(),
+                                );
+                            }
+                            return;
+                        }
+                        drop(k);
+                        let cfg2 = cfg.clone();
+                        let ui_handle2 = ui_handle.clone();
+                        std::thread::spawn(move || {
+                            let (text, saved) = calibrate_label_text(&cfg2);
+                            if saved.is_some() {
+                                let Ok(conn) = datastore::open(&cfg2.db_path) else { return };
+                                let next =
+                                    setup::advance(setup::stage(&conn), setup::Action::Next);
+                                setup::set_stage(&conn, next);
+                                // Готовый вид следующего шага — данными
+                                // (Rc-состояние в поток не передаётся).
+                                let (mode, action, enabled, skip, back) = {
+                                    let (m, _note, a, e, s, b) = wizard_step_ui(next, 0, false);
+                                    (m, a, e, s, b)
+                                };
+                                slint::invoke_from_event_loop(move || {
+                                    if let Some(ui) = ui_handle2.upgrade() {
+                                        ui.set_setup_mode(mode);
+                                        ui.set_setup_stage(i32::from(next));
+                                        ui.set_setup_note(text.into());
+                                        ui.set_setup_action_label(action.into());
+                                        ui.set_setup_action_enabled(enabled);
+                                        ui.set_setup_skip_visible(skip);
+                                        ui.set_setup_back_label(back.into());
+                                    }
+                                })
+                                .ok();
+                            } else {
+                                slint::invoke_from_event_loop(move || {
+                                    if let Some(ui) = ui_handle2.upgrade() {
+                                        ui.set_setup_note(text.into());
+                                    }
+                                })
+                                .ok();
+                            }
+                        });
+                    }
+                    7 => {
+                        k.setup_pin_stage = 34;
+                        k.admin_stage = 34;
+                        k.admin_pin_buf.clear();
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_pin_mask("".into());
+                            ui.set_pin_error("".into());
+                        }
+                    }
+                    8 => {
+                        setup::set_wizard_done(&conn, true);
+                        k.restart_requested = true;
+                        log::info!("настройка: мастер завершён, перезапуск");
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+    });    // Правки порядка/состава отделов применяются к главному экрану сразу:
     // relayout перечитывает БД (при ручном режиме — порядок ord) и
     // перестраивает плитки без ожидания следующей синхронизации.
     let relayout = flow.relayout.clone();
@@ -427,6 +758,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     // перезапуск — через флаг, тик завершает процесс, systemd перезапускает.
     ui.on_menu_tap({
         let cfg = cfg.clone();
+        let setup_render = setup_render.clone();
         let app_state = app_state.clone();
         let kiosk = kiosk.clone();
         let ui_handle = ui_handle.clone();
@@ -436,6 +768,13 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let relayout = flow.relayout.clone();
         move |id: slint::SharedString| {
             match id.as_str() {
+                "setup" => {
+                    let mut k = kiosk.borrow_mut();
+                    k.admin_stage = 20;
+                    k.setup_active = true;
+                    drop(k);
+                    setup_render();
+                }
                 "scaleset" => {
                     // Хаб настроек: значения пунктов — из живых настроек.
                     refresh_setting_labels(&ui_handle, &trade, &idle_secs);
@@ -1171,4 +1510,234 @@ fn net_popup_text(c: &net::NetConfig) -> String {
         "Настройки применены:\nIP: {}\nМаска: {}\nШлюз: {}\nDNS: {}",
         c.ip, c.mask, c.gateway, c.dns
     )
+}
+
+// ---------- Мастер настройки: шаги, печать, время ----------
+
+/// NTP-переключатель шага 7: начальное значение из конфига, дальше —
+/// переключается кнопкой (системное состояние меняет sudo-хелпер).
+static NTP_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Вид шага мастера: (mode, note, action, action_enabled, skip_visible,
+/// back_label). Чистая функция — по stage и подэтапам киоска.
+fn wizard_step_ui(
+    stage: u8,
+    print_sub: u8,
+    scales_seen: bool,
+) -> (i32, String, String, bool, bool, String) {
+    match stage {
+        1 => (
+            1,
+            "Шаг 1 из 8.\n\nПридумайте PIN администратора (4–8 цифр) — полный\n\
+             доступ к настройкам весов. Нажмите «ВВЕСТИ PIN» и наберите\n\
+             его на клавиатуре."
+                .into(),
+            "ВВЕСТИ PIN".into(),
+            true,
+            false,
+            "НАЗАД".into(),
+        ),
+        2 => (
+            1,
+            "Шаг 2 из 8.\n\nPIN кассира — вход с минимальными правами:\n\
+             протяжка этикетки и перезагрузка. Кассира можно создать\n\
+             позже из меню администратора."
+                .into(),
+            "ВВЕСТИ PIN".into(),
+            true,
+            true,
+            "НАЗАД".into(),
+        ),
+        3 => (
+            1,
+            "Шаг 3 из 8.\n\nСеть: по умолчанию работает DHCP. Для статического\n\
+             адреса откройте настройку сети и примените значения;\n\
+             «НАЗАД» вернёт в мастер."
+                .into(),
+            "ОТКРЫТЬ СЕТЬ".into(),
+            true,
+            true,
+            "НАЗАД".into(),
+        ),
+        4 => (
+            1,
+            "Шаг 4 из 8.\n\nПроверка весов: положите на платформу груз\n\
+             не легче 100 г. Кнопка активируется, когда весы покажут вес."
+                .into(),
+            "ГОТОВО".into(),
+            scales_seen,
+            false,
+            "НАЗАД".into(),
+        ),
+        5 => {
+            if print_sub == 0 {
+                (
+                    1,
+                    "Шаг 5 из 8.\n\nКалибровка печати: напечатайте тестовую этикетку\n\
+                     и оцените, где закончилось изображение:\n\
+                     • всё внутри этикетки — «ГОТОВО»;\n\
+                     • хвост обрезан — «ХВОСТ ОБРЕЗАН +16»;\n\
+                     • изображение в зазоре — «УЕХАЛО −16»."
+                        .into(),
+                    "ПЕЧАТЬ ТЕСТА".into(),
+                    true,
+                    false,
+                    "НАЗАД".into(),
+                )
+            } else {
+                (
+                    1,
+                    "Тест напечатан. Оцените положение изображения:\n\
+                     • всё внутри — «ГОТОВО»;\n\
+                     • хвост обрезан — «ХВОСТ ОБРЕЗАН +16» (и снова тест);\n\
+                     • изображение в зазоре — «УЕХАЛО −16» (и снова тест)."
+                        .into(),
+                    "ХВОСТ ОБРЕЗАН +16".into(),
+                    true,
+                    true,
+                    "УЕХАЛО −16".into(),
+                )
+            }
+        }
+        6 => (
+            1,
+            "Шаг 6 из 8.\n\nКалибровка длины этикетки: принтер прокрутит ленту\n\
+             шагами (до минуты, не трогайте принтер). Запускать только\n\
+             с пустой платформой."
+                .into(),
+            "КАЛИБРОВАТЬ".into(),
+            true,
+            true,
+            "НАЗАД".into(),
+        ),
+        7 => (
+            1,
+            "Шаг 7 из 8.\n\nДата и время: введите вручную в формате\n\
+             ДД.ММ.ГГГГ ЧЧ:ММ, либо переключите NTP\n\
+             (сервер — [time] в /etc/scalefw/config.toml)."
+                .into(),
+            "ВВЕСТИ ВРЕМЯ".into(),
+            true,
+            true,
+            "НАЗАД".into(),
+        ),
+        8 => (
+            1,
+            "Шаг 8 из 8.\n\nВсё готово. После завершения мастер закроется,\n\
+             программа перезапустится и весы уйдут в рабочий режим\n\
+             (чек-лист появится, если чего-то не хватает)."
+                .into(),
+            "ЗАВЕРШИТЬ И ПЕРЕЗАПУСТИТЬ".into(),
+            true,
+            false,
+            "НАЗАД".into(),
+        ),
+        _ => (
+            1,
+            "Мастер настройки.".into(),
+            "ДАЛЕЕ".into(),
+            false,
+            false,
+            "НАЗАД".into(),
+        ),
+    }
+}
+
+/// Правка зазора печати шагом ±16 точек (значения калибровки — в БД).
+fn adjust_feed(conn: &rusqlite::Connection, delta: i64) {
+    match calib::FeedCalibration::load(conn) {
+        Ok(mut c) => {
+            c.backward_space = (i64::from(c.backward_space) + delta).clamp(0, u16::MAX as i64) as u16;
+            if let Err(e) = c.save(conn) {
+                log::error!("настройка: калибровка печати: запись: {e}");
+            } else {
+                log::info!("настройка: калибровка печати: backward_space = {}", c.backward_space);
+            }
+        }
+        Err(e) => log::error!("настройка: калибровка печати: чтение: {e}"),
+    }
+}
+
+/// Тестовая этикетка из мастера: демон порта печатает сам, результат — в лог.
+fn spawn_wizard_test_print(cfg: &Config) {
+    let cfg = cfg.clone();
+    std::thread::spawn(move || match print::print_test_label(&cfg) {
+        Ok(()) => log::info!("настройка: тестовая этикетка напечатана"),
+        Err(e) => log::warn!("настройка: тестовая печать: {e}"),
+    });
+}
+
+/// Шаг-скан длины этикетки с санити <15 мм и записью в БД.
+/// Возвращает (текст для UI, сохранённая длина).
+fn calibrate_label_text(cfg: &Config) -> (String, Option<i64>) {
+    match print::calibrate_label(cfg) {
+        // Этикетки короче 15 мм в системе нет: мусорный скан — старое
+        // значение не трогаем.
+        Ok(mm) if mm < 15 => (
+            "Калибровка дала подозрительный результат\n(слишком короткая этикетка).\n\
+             Старое значение сохранено. Повторите калибровку."
+                .to_string(),
+            None,
+        ),
+        Ok(mm) => {
+            log::info!("настройка: калибровка: длина этикетки {mm} мм");
+            match datastore::open(&cfg.db_path) {
+                Ok(conn) => {
+                    if let Err(e) = datastore::set_calibration(&conn, "label_length_mm", i64::from(mm)) {
+                        log::warn!("настройка: калибровка: запись в базу: {e}");
+                    }
+                }
+                Err(e) => log::warn!("настройка: калибровка: база: {e}"),
+            }
+            (format!("Длина этикетки: {mm} мм. Значение сохранено."), Some(i64::from(mm)))
+        }
+        Err(e) => {
+            log::warn!("настройка: калибровка: {e}");
+            (
+                "Калибровка не удалась.\n\nПроверьте заправку этикеток и повторите.\n\
+                 Если не помогает — обратитесь в сервис."
+                    .to_string(),
+                None,
+            )
+        }
+    }
+}
+
+/// Запуск sudo-хелпера времени в фоне с дедлайном 5 с. Поздний ответ
+/// игнорируется (инвариант «программа не зависает»), зависший поток
+/// хелпера не блокирует UI.
+fn spawn_settime(
+    _cfg: &Config,
+    arg: &str,
+    ui_handle: slint::Weak<MainWindow>,
+    note: &'static str,
+) {
+    let arg = arg.to_string();
+    std::thread::spawn(move || {
+        let (tx, rx) = std::sync::mpsc::channel::<Result<bool, String>>();
+        std::thread::spawn(move || {
+            let res = std::process::Command::new("sudo")
+                .arg("/usr/local/bin/scale-settime")
+                .arg(&arg)
+                .stdin(std::process::Stdio::null())
+                .output();
+            let _ = tx.send(match res {
+                Ok(o) => Ok(o.status.success()),
+                Err(e) => Err(e.to_string()),
+            });
+        });
+        let outcome = match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(Ok(true)) => format!("ок: {note}"),
+            Ok(Ok(false)) => format!("хелпер сообщил об ошибке: {note}"),
+            Ok(Err(e)) => format!("запуск хелпера не удался: {e}"),
+            Err(_) => "хелпер не ответил за 5 с — значение не применено".to_string(),
+        };
+        log::info!("настройка: время: {outcome}");
+        slint::invoke_from_event_loop(move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_setup_note(format!("Дата и время: {outcome}").into());
+            }
+        })
+        .ok();
+    });
 }

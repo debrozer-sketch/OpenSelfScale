@@ -287,6 +287,9 @@ pub fn start(
                         15 => 16,
                         16 => 17,
                         17 => 18,
+                        // Мастер настройки/чек-лист и его PIN-этапы.
+                        20 => 19,
+                        30..=35 => 5,
                         _ => 7,
                     };
                     if ui.get_screen() != screen {
@@ -300,6 +303,55 @@ pub fn start(
                         };
                         if ui.get_pin_prompt() != prompt {
                             ui.set_pin_prompt(prompt.into());
+                        }
+                    }
+                    // Подсказки PIN-этапов мастера.
+                    if (30..=34).contains(&k.admin_stage) {
+                        let prompt = match k.admin_stage {
+                            30 => "Новый PIN администратора",
+                            31 => "Повторите PIN администратора",
+                            32 => "Новый PIN кассира (можно пропустить)",
+                            33 => "Повторите PIN кассира",
+                            _ => "Дата и время: ДД.ММ.ГГГГ ЧЧ:ММ",
+                        };
+                        if ui.get_pin_prompt() != prompt {
+                            ui.set_pin_prompt(prompt.into());
+                        }
+                    }
+                    // Мастер (экран 19): живые данные шага 4 и активность
+                    // кнопки чек-листа. Без блокирующих вызовов: вес — из
+                    // уже прочитанного снимка, маска — из свойства UI.
+                    if k.admin_stage == 20 {
+                        if ui.get_setup_mode() == 0 {
+                            let all =
+                                crate::setup::all_green(ui.get_setup_mask() as u32);
+                            if ui.get_setup_action_enabled() != all {
+                                ui.set_setup_action_enabled(all);
+                            }
+                        } else {
+                            let st = {
+                                let mut db = lock_db.lock().expect("lock_db");
+                                if db.is_none() {
+                                    *db = datastore::open(&cfg.db_path).ok();
+                                }
+                                db.as_ref().map(|c| crate::setup::stage(c)).unwrap_or(0)
+                            };
+                            if st == 4 {
+                                let note = format!(
+                                    "Шаг 4 из 8.\n\nПроверка весов: положите на платформу груз\n\
+                                     не легче 100 г. Кнопка активируется, когда весы покажут вес.\n\n\
+                                     Текущий вес: {:.3} кг{}",
+                                    snap.mass_kg,
+                                    if ws == 2 { " (стабильно)" } else { "" }
+                                );
+                                if ui.get_setup_note() != note {
+                                    ui.set_setup_note(note.into());
+                                }
+                                if snap.mass_kg >= 0.1 && !k.setup_scales_seen {
+                                    k.setup_scales_seen = true;
+                                    ui.set_setup_action_enabled(true);
+                                }
+                            }
                         }
                     }
                     if k.admin_stage == 1 {
