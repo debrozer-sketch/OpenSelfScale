@@ -547,7 +547,7 @@ fn scan_phase(
         if started.elapsed() > total {
             return Err(Fail::Printer(format!("шаг-скан: дедлайн фазы «{what}»")));
         }
-        if port.write_all(&[escpos::ESC, b'J', 10]).is_err() || port.flush().is_err() {
+        if port.write_all(&[escpos::ESC, b'J', 8]).is_err() || port.flush().is_err() {
             return Err(Fail::Io("шаг-скан: запись в порт".into()));
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -562,16 +562,14 @@ fn scan_phase(
     )))
 }
 
-/// Калибровка этикетки шаг-сканом (подтверждено live 19.10, PROTOCOL):
-/// единица подачи GS P 0 254 = 0,1 мм/дот, шаг ESC J 10 = 1,0 мм ровно.
+/// Калибровка этикетки шаг-сканом (подтверждено live 19-20.10): шаг
+/// ESC J 8 = 8 дот = 1,0 мм — у PT561 ESC J считает в дотах (0,125 мм)
+/// и GS P игнорирует (живая проверка: 30 «шагов по 1 мм» при реальных
+/// 38 мм рулона = 30 × 1,25 мм). GS P не используется вовсе, поэтому
+/// единицы подачи не меняются и восстановление не требуется.
 /// Фазы: дойти до зазора → до начала этикетки → считать шаги этикетки
 /// (это её длина в мм) → снова выйти на начало следующей (принтер остаётся
-/// выровненным к печати). Единицы подачи восстанавливаются в конце.
-fn set_unit(port: &mut Box<dyn serialport::SerialPort>, y: u8) {
-    let _ = port.write_all(&[escpos::GS, 0x50, 0, y]);
-    let _ = port.flush();
-}
-
+/// выровненным к печати).
 fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, Fail> {
     // Суммарный дедлайн скана: калибровка идёт через демон порта и на всё
     // её время блокирует покупательскую печать (выполняется только из
@@ -583,7 +581,6 @@ fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, 
     let expired = |what: &str| {
         Fail::Printer(format!("шаг-скан: дедлайн фазы «{what}»"))
     };
-    set_unit(port, 254);
     let res = (|| {
         scan_phase(port, false, STEP_CAP, "зазор", started, TOTAL_DEADLINE)?;
         scan_phase(port, true, GAP_CAP, "начало этикетки", started, TOTAL_DEADLINE)?;
@@ -592,7 +589,7 @@ fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, 
             if started.elapsed() > TOTAL_DEADLINE {
                 return Err(expired("счёт длины"));
             }
-            if port.write_all(&[escpos::ESC, b'J', 10]).is_err() || port.flush().is_err() {
+            if port.write_all(&[escpos::ESC, b'J', 8]).is_err() || port.flush().is_err() {
                 return Err(Fail::Io("шаг-скан: запись в порт".into()));
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -610,9 +607,6 @@ fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, 
         scan_phase(port, true, GAP_CAP, "выравнивание", started, TOTAL_DEADLINE)?;
         Ok(len)
     })();
-    // Восстановление единиц на ЛЮБОМ исходе: при обрыве порта запись уйдёт
-    // в никуда и не навредит, а при живом порте вернёт дефолт до ESC @.
-    set_unit(port, 0);
     res
 }
 
