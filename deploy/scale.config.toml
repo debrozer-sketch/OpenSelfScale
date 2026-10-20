@@ -24,3 +24,11 @@ baud = 19200
 #protocol = "drop"            # приём из incoming_dir по флагу ready.flg
 #img_local_dir = "/etc/scalefw/img"
 #history_dir = "/var/lib/scalefw/history"
+
+# Дата и время: NTP по умолчанию; выключенному NTP соответствует
+# ручной ввод в мастере настройки (через sudo-хелпер scale-settime).
+#[time]
+#ntp = true
+# Свой NTP-сервер для сети магазина без интернета; пусто - debian pool.
+#server =
+

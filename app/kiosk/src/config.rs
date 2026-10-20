@@ -184,6 +184,23 @@ impl KioskProfile {
     }
 }
 
+/// Время и синхронизация: NTP (systemd-timesyncd) или ручной ввод
+/// через хелпер scale-settime.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TimeProfile {
+    /// NTP включён (дефолт). Выключенному NTP соответствует ручной режим.
+    pub ntp: bool,
+    /// Свой NTP-сервер (сеть магазина без интернета); пусто — debian pool.
+    pub server: String,
+}
+
+impl Default for TimeProfile {
+    fn default() -> Self {
+        Self { ntp: true, server: String::new() }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -193,6 +210,8 @@ pub struct Config {
     pub kiosk: KioskProfile,
     /// Источник выгрузки (FTP и т.п.).
     pub center: CenterProfile,
+    /// Дата/время: NTP или ручной ввод.
+    pub time: TimeProfile,
     /// Каталог приёма выгрузки (drop-протокол, ready.flg — триггер).
     pub incoming_dir: PathBuf,
     /// База PLU.
@@ -214,6 +233,7 @@ impl Default for Config {
             ui: UiProfile::default(),
             kiosk: KioskProfile::default(),
             center: CenterProfile::default(),
+            time: TimeProfile::default(),
             incoming_dir: PathBuf::from("/var/ftp/scale"),
             db_path: PathBuf::from("/home/scales/plu.db"),
             log_file: PathBuf::from("/var/log/scalefw/kiosk.log"),
@@ -225,7 +245,7 @@ impl Default for Config {
 /// Допустимые ключи config.toml: опечатка (`debug_dumps`) иначе молча
 /// игнорируется, и настройка «не работает» без единого сообщения.
 const KNOWN_TOP: &[&str] =
-    &["scales", "printer", "ui", "kiosk", "center", "incoming_dir", "db_path", "log_file"];
+    &["scales", "printer", "ui", "kiosk", "center", "time", "incoming_dir", "db_path", "log_file"];
 const KNOWN_SECTIONS: &[(&str, &[&str])] = &[
     ("scales", &["kind", "port", "baud"]),
     ("printer", &["kind", "port", "baud", "enabled", "debug_dump"]),
@@ -245,6 +265,7 @@ const KNOWN_SECTIONS: &[(&str, &[&str])] = &[
             "external_input",
         ],
     ),
+    ("time", &["ntp", "server"]),
 ];
 
 fn unknown_keys(text: &str) -> Vec<String> {
@@ -410,6 +431,34 @@ baud = 115200
         let w = unknown_keys("[printer]\ndebug_dumps = true\n[nope]\nx = 1\n");
         assert_eq!(w.len(), 2, "{w:?}");
         assert!(w[0].contains("printer.debug_dumps") || w[1].contains("printer.debug_dumps"));
+    }
+
+    #[test]
+    fn time_section_parses() {
+        let mut c = Config::default();
+        c.time = crate::config::TimeProfile { ntp: true, server: String::new() };
+        assert!(c.time.ntp);
+        // Разбор секции из текста.
+        let dir = std::env::temp_dir().join(format!("scalefw-time-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            "[time]\nntp = false\nserver = \"192.168.1.1\"\n",
+        )
+        .unwrap();
+        let c = Config::load(&path).unwrap();
+        assert!(!c.time.ntp);
+        assert_eq!(c.time.server, "192.168.1.1");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn time_defaults_on() {
+        let c = Config::default();
+        assert!(c.time.ntp);
+        assert!(c.time.server.is_empty());
     }
 
     #[test]

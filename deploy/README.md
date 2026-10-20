@@ -73,3 +73,18 @@ Debian-машине или python-скрипт). Перед переустано
 только внутри доверенного сегмента 172.18.x.x за jump-хостом. Держать
 порт открытым наружу или в сегменте с посторонними машинами нельзя;
 в этом случае добавить `-localhost yes` в ExecStart.
+
+## Дата и время (sudo-хелпер)
+
+Киоск задаёт время через единственный root-хелпер. Установка на весах:
+
+`
+install -m 755 deploy/scale-settime /usr/local/bin/scale-settime
+install -m 440 deploy/scale-settime.sudoers /etc/sudoers.d/scale-settime
+`
+
+Режимы: scale-settime "ДД.ММ.ГГГГ ЧЧ:ММ" (ручная установка),
+scale-settime ntp-on|ntp-off (вкл/выкл systemd-timesyncd). Аргумент
+валидуется скриптом (скелет + диапазоны + реальность даты через GNU date),
+ввод извне в shell не попадает. NTP-сервер своей сети — [time] server
+в /etc/scalefw/config.toml.
