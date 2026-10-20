@@ -22,6 +22,7 @@ mod net;
 mod print;
 mod session;
 mod settings;
+mod setup;
 mod sync;
 mod tick;
 mod tiles;
