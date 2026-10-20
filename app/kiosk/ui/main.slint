@@ -51,6 +51,13 @@ export struct NetworkField {
     value: string,
 }
 
+// Строка списка мастера настройки / чек-листа (экран 19).
+export struct SetupRow {
+    label: string,
+    // 0 = ожидание (серый), 1 = активен (подсвечен), 2 = готов (галка).
+    state: int,
+}
+
 // Колонка отдела: ширина = равная доля строки; скругления сглаживает рендер,
 // рамка 2 px — светло-серый контур зоны нажатия.
 component DeptTile inherits Rectangle {
@@ -396,6 +403,22 @@ export component MainWindow inherits Window {
     callback admin-color(string);
     // Пункт меню (id из MenuRow): диспетчеризация в бэкенде.
     callback menu-tap(string);
+
+    // ---- мастер настройки / чек-лист (экран 19) ----
+    // mode: 0 = чек-лист (живые галки, кнопка ввода в эксплуатацию),
+    // 1 = мастер (пошагово). stage — шаг мастера 1..8, mask — битмаск
+    // чек-листа (setup::evaluate).
+    in property <int> setup-mode;
+    in property <int> setup-stage;
+    in property <int> setup-mask;
+    // Контент активного шага: подсказка оператору.
+    in property <string> setup-note;
+    // Главная кнопка шага («ПЕЧАТЬ ТЕСТА», «ПРИМЕНИТЬ ВРЕМЯ», ...).
+    in property <string> setup-action-label;
+    in property <bool> setup-action-enabled: false;
+    // Шаг 2: кнопка «ПРОПУСТИТЬ» (кассирский PIN не обязателен).
+    in property <bool> setup-skip-visible: false;
+    callback setup-tap(string);
 
     // Экран «Сеть»: поля IP/маска/шлюз/DNS, тап по полю = фокус,
     // клавиатура цифр и точек, ПРИМЕНИТЬ живо меняет адрес.
@@ -1187,6 +1210,7 @@ export component MainWindow inherits Window {
                     : root.screen == 16 ? "НАСТРОЙКИ · ИМПОРТ"
                     : root.screen == 17 ? "ОТЧЁТЫ"
                     : root.screen == 18 ? "ПРИНТЕР · ДИАГНОСТИКА"
+                    : root.screen == 19 ? "НАСТРОЙКА ВЕСОВ"
                     : "МЕНЮ НАСТРОЕК";
                 font-size: 26px;
                 font-weight: 700;
@@ -1323,6 +1347,149 @@ export component MainWindow inherits Window {
                 pin-save-ta := TouchArea {
                     enabled: root.pin-mask != "";
                     clicked => { root.pin-try(); }
+                }
+            }
+        }
+
+        // ---------- Экран 19: мастер настройки / чек-лист ----------
+        // Слева — список шагов (мастер) или пунктов чек-листа; справа —
+        // контент активного шага (setup-note) и кнопки.
+        if root.screen == 19 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+
+            property <[SetupRow]> wizard-rows: [
+                { label: "1 · Пароль администратора", state: root.setup-stage > 1 ? 2 : (root.setup-stage == 1 ? 1 : 0) },
+                { label: "2 · Пароль кассира", state: root.setup-stage > 2 ? 2 : (root.setup-stage == 2 ? 1 : 0) },
+                { label: "3 · Сеть", state: root.setup-stage > 3 ? 2 : (root.setup-stage == 3 ? 1 : 0) },
+                { label: "4 · Проверка весов", state: root.setup-stage > 4 ? 2 : (root.setup-stage == 4 ? 1 : 0) },
+                { label: "5 · Печать (тест)", state: root.setup-stage > 5 ? 2 : (root.setup-stage == 5 ? 1 : 0) },
+                { label: "6 · Длина этикетки", state: root.setup-stage > 6 ? 2 : (root.setup-stage == 6 ? 1 : 0) },
+                { label: "7 · Дата и время", state: root.setup-stage > 7 ? 2 : (root.setup-stage == 7 ? 1 : 0) },
+                { label: "8 · Готово", state: root.setup-stage > 8 ? 2 : (root.setup-stage == 8 ? 1 : 0) },
+            ];
+            // Slint не имеет битовых операций: биты маски через mod/floor.
+            property <int> bit-goods: mod(root.setup-mask, 2);
+            property <int> bit-layout: mod(floor(root.setup-mask / 2), 2);
+            property <int> bit-printer: mod(floor(root.setup-mask / 4), 2);
+            property <int> bit-scales: mod(floor(root.setup-mask / 8), 2);
+            property <[SetupRow]> checklist-rows: [
+                { label: "Товары загружены", state: bit-goods == 1 ? 2 : 1 },
+                { label: "Раскладка этикетки", state: bit-layout == 1 ? 2 : 1 },
+                { label: "Принтер исправен", state: bit-printer == 1 ? 2 : 1 },
+                { label: "Весы исправны", state: bit-scales == 1 ? 2 : 1 },
+            ];
+
+            // Список шагов.
+            for row[i] in (root.setup-mode == 1 ? wizard-rows : checklist-rows) : Rectangle {
+                x: 16px;
+                y: 12px + i * 88px;
+                width: 460px;
+                height: 78px;
+                border-radius: 14px;
+                border-width: 2px;
+                border-color: row.state == 1 ? #2E7D57 : #C9CFD7;
+                background: row.state == 1 ? #F0F7F2 : #FFFFFF;
+                Text {
+                    x: 16px;
+                    width: parent.width - 32px;
+                    height: parent.height;
+                    text: row.label;
+                    font-size: 24px;
+                    font-weight: row.state == 1 ? 700 : 500;
+                    color: row.state == 0 ? #A6ADB8 : (row.state == 1 ? #1A1E24 : #2E7D57);
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                if row.state == 2 : Text {
+                    x: parent.width - 56px;
+                    width: 40px;
+                    height: parent.height;
+                    text: "✓";
+                    font-size: 30px;
+                    font-weight: 700;
+                    color: #2E7D57;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Контент активного шага.
+            Rectangle {
+                x: 496px;
+                y: 12px;
+                width: parent.width - 512px;
+                height: 300px;
+                border-radius: 16px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: #FFFFFF;
+                Text {
+                    x: 20px;
+                    y: 16px;
+                    width: parent.width - 40px;
+                    height: parent.height - 32px;
+                    text: root.setup-note;
+                    font-size: 23px;
+                    color: #2B2F36;
+                    wrap: word-wrap;
+                    vertical-alignment: top;
+                }
+            }
+
+            // Кнопки шага: назад / главная / пропустить.
+            Rectangle {
+                x: 496px;
+                y: 340px;
+                width: 180px;
+                height: 72px;
+                border-radius: 14px;
+                background: setup-back-ta.pressed ? #E4E8ED : #EDF0F3;
+                Text {
+                    text: "НАЗАД";
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                }
+                setup-back-ta := TouchArea {
+                    clicked => { root.setup-tap("back"); }
+                }
+            }
+            Rectangle {
+                x: 696px;
+                y: 340px;
+                width: parent.width - 960px;
+                height: 72px;
+                border-radius: 14px;
+                background: !root.setup-action-enabled ? #DDE1E6
+                    : (setup-action-ta.pressed ? #1E4D3A : #2E7D57);
+                Text {
+                    text: root.setup-action-label;
+                    font-size: 24px;
+                    font-weight: 700;
+                    color: #FFFFFF;
+                    overflow: elide;
+                }
+                setup-action-ta := TouchArea {
+                    enabled: root.setup-action-enabled;
+                    clicked => { root.setup-tap("action"); }
+                }
+            }
+            if root.setup-skip-visible : Rectangle {
+                x: parent.width - 244px;
+                y: 340px;
+                width: 228px;
+                height: 72px;
+                border-radius: 14px;
+                background: setup-skip-ta.pressed ? #E4E8ED : #EDF0F3;
+                Text {
+                    text: "ПРОПУСТИТЬ";
+                    font-size: 22px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                }
+                setup-skip-ta := TouchArea {
+                    clicked => { root.setup-tap("skip"); }
                 }
             }
         }
