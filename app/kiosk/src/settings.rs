@@ -632,6 +632,13 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         spawn_settime(&cfg, &[arg], ui_handle.clone(), if on { "NTP включён" } else { "NTP выключен" });
                         setup_render();
                     }
+                    // Сеть: DHCP по умолчанию, шаг можно пропустить.
+                    3 => {
+                        let next = setup::advance(stage, setup::Action::Next);
+                        setup::set_stage(&conn, next);
+                        drop(k);
+                        setup_render();
+                    }
                     // Шаги 5/6: значения уже в БД, калибровку можно отложить.
                     5 | 6 => {
                         let next = setup::advance(stage, setup::Action::Next);
