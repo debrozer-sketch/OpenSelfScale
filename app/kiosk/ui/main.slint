@@ -155,6 +155,7 @@ component PluCard inherits Rectangle {
     in property <int> cell-offset: 0;
     in property <PluTile> p;
     in property <bool> active: true;
+    in property <bool> card-show-name: true;
 
     callback tapped;
 
@@ -746,6 +747,7 @@ export component MainWindow inherits Window {
             cell-offset: root.items-cell-offset;
             p: p;
             active: root.can-tap;
+            card-show-name: root.card-show-name;
             tapped => { root.plu-tapped(p.id); }
         }
         // «ДАЛЕЕ →» — ячейка сразу за последним товаром (на полной странице
