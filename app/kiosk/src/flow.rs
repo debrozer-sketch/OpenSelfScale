@@ -114,14 +114,20 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let ui_handle = ui_handle.clone();
         let kiosk = kiosk.clone();
         let items_all = items_all.clone();
+        let catalog_back = ctx.trade.catalog_back.clone();
         move |page: usize| {
             let Some(ui) = ui_handle.upgrade() else { return };
             let pages_total = tiles::items_pages(items_all.borrow().len());
             let page = page.min(pages_total - 1);
             // Страница 0: 26 товаров + «ДАЛЕЕ» (27-я ячейка). Остальные:
-            // «← НАЗАД» + 25 товаров + «ДАЛЕЕ».
-            let (skip, take) =
-                if page == 0 { (0, 26) } else { (26 + (page - 1) * 25, 25) };
+            // «← НАЗАД» + 25 товаров + «ДАЛЕЕ». Кнопка «← НАЗАД» отключена
+            // настройкой — вместо неё 26-й товар, без пустого слота.
+            let back = catalog_back.get();
+            let (skip, take) = if page == 0 {
+                (0, 26)
+            } else {
+                (26 + (page - 1) * 25, if back { 25 } else { 26 })
+            };
             let tiles: Vec<PluTile> = items_all
                 .borrow()
                 .iter()
@@ -132,7 +138,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             ui.set_items(slint::ModelRc::new(slint::VecModel::from(tiles)));
             ui.set_items_page_no(page as i32);
             ui.set_items_pages_total(pages_total as i32);
-            ui.set_items_cell_offset(if page == 0 { 0 } else { 1 });
+            ui.set_items_cell_offset(if page == 0 || !back { 0 } else { 1 });
             kiosk.borrow_mut().item_page = page;
         }
     };
@@ -183,8 +189,11 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
     // раздельные пагинации. Шапка вмещает столько кнопок, сколько лезет
     // по ширине (110 px шаг + поиск справа), независимо от настройки колонок.
     // Не меняет экран — используется и промоткой в шапке.
+    // Ёмкость шапки: кнопки (шаг 114) + пагинация (НАЗАД 66 + ДАЛЕЕ 66)
+    // должны кончаться до пилюли поиска (x = ширина − 308):
+    // 8 + cap·114 + 128 ≤ ширина − 316 → cap = (ширина − 452) / 114.
     let header_capacity = |ui: &MainWindow| -> usize {
-        (((ui.get_screen_w() - 332.0) / 114.0).max(1.0) as usize).max(1)
+        (((ui.get_screen_w() - 452.0) / 114.0).floor().max(1.0) as usize).max(1)
     };
     let set_header_slice = {
         let ui_handle = ui_handle.clone();
@@ -575,7 +584,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             let tiles: Vec<DeptDef> =
                 depts_all.borrow().iter().take(cols.get()).cloned().collect();
             ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
-            let cap = (((ui.get_screen_w() - 332.0) / 114.0).max(1.0) as usize).max(1);
+            let cap = (((ui.get_screen_w() - 452.0) / 114.0).floor().max(1.0) as usize).max(1);
             let htiles: Vec<DeptDef> =
                 depts_all.borrow().iter().take(cap).cloned().collect();
             ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(htiles)));
