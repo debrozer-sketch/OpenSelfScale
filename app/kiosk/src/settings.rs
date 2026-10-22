@@ -264,9 +264,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         .unwrap_or(false);
                     (
                         0,
-                        "Ввод в эксплуатацию: выполните пункты слева — галки живые,\n\
-                         обновляются автоматически. Когда всё зелёное, кнопка\n\
-                         разблокируется. Позже список остаётся в «Оборудовании»."
+                        "Ввод в эксплуатацию: пункты слева обновляются\n\
+                         автоматически по состоянию весов. Когда все пункты\n\
+                         выполнены, кнопка разблокируется. Список также\n\
+                         доступен в разделе «Оборудование»."
                             .to_string(),
                         "ВВЕСТИ В ЭКСПЛУАТАЦИЮ".to_string(),
                         all,
@@ -278,7 +279,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_setup_mode(mode);
                 ui.set_setup_stage(i32::from(stage));
-                ui.set_setup_wizard_done(setup::wizard_done(&conn));
                 ui.set_setup_note(note.into());
                 ui.set_setup_action_label(action.into());
                 ui.set_setup_action_enabled(action_enabled);
@@ -1833,9 +1833,10 @@ pub(crate) fn startup_setup_render(
             .unwrap_or(false);
         (
             0,
-            "Ввод в эксплуатацию: выполните пункты слева — галки живые,\n\
-             обновляются автоматически. Когда всё зелёное, кнопка\n\
-             разблокируется. Позже список остаётся в «Оборудовании»."
+            "Ввод в эксплуатацию: пункты слева обновляются\n\
+             автоматически по состоянию весов. Когда все пункты\n\
+             выполнены, кнопка разблокируется. Список также\n\
+             доступен в разделе «Оборудование»."
                 .to_string(),
             "ВВЕСТИ В ЭКСПЛУАТАЦИЮ".to_string(),
             all,
@@ -1847,7 +1848,6 @@ pub(crate) fn startup_setup_render(
     if let Some(ui) = ui_handle.upgrade() {
         ui.set_setup_mode(mode);
         ui.set_setup_stage(i32::from(stage));
-        ui.set_setup_wizard_done(done);
         ui.set_setup_note(note.into());
         ui.set_setup_action_label(action.into());
         ui.set_setup_action_enabled(action_enabled);

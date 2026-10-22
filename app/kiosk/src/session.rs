@@ -74,6 +74,8 @@ pub struct Kiosk {
     pub idle_since: Option<Instant>,
     /// Текущая страница колонок отделов (пейджинг).
     pub dept_page: usize,
+    /// Страница кнопок отделов в шапке товаров (независима от колонок).
+    pub header_dept_page: usize,
     /// Тапы по индикатору веса: счётчик серии и момент последнего тапа.
     /// 5 тапов за 3 с — вход в меню настроек; пауза дольше 3 с сбрасывает
     /// серию.
@@ -169,6 +171,7 @@ impl Kiosk {
             print_op: 0,
             idle_since: None,
             dept_page: 0,
+            header_dept_page: 0,
             admin_taps: 0,
             admin_tap_last: None,
             item_page: 0,

@@ -165,13 +165,13 @@ component PluCard inherits Rectangle {
     border-radius: 12px;
     background: !root.active ? #EDEFF2 : ta.pressed ? #E4E8ED : #FFFFFF;
 
-    // Квадратная зона картинки: 104×104, без окантовки. Нет файла —
-    // светлая плашка (картинки придут из центра позже).
+    // Квадратная зона картинки: без названия — выше, до строки цены.
+    // Нет файла — светлая плашка (картинки придут из центра позже).
     Rectangle {
         x: 2px;
         y: 2px;
         width: 104px;
-        height: 104px;
+        height: root.card-show-name ? 104px : 140px;
         border-radius: 10px;
         clip: true;
         background: #F0F2F5;
@@ -183,7 +183,7 @@ component PluCard inherits Rectangle {
         }
     }
 
-    Text {
+    if root.card-show-name : Text {
         x: 3px;
         y: 108px;
         width: parent.width - 6px;
@@ -424,7 +424,6 @@ export component MainWindow inherits Window {
     in property <string> setup-skip-label: "ПРОПУСТИТЬ";
     // Отдельная кнопка «ДАЛЕЕ» (шаг 7: время и NTP — два разных действия).
     in property <bool> setup-next-visible: false;
-    in property <bool> setup-wizard-done: false;
     // Пункт «Мастер настройки» в меню виден, пока весы не введены в эксплуатацию.
     in property <bool> setup-menu-visible: false;
     callback setup-tap(string);
@@ -449,6 +448,8 @@ export component MainWindow inherits Window {
     in property <string> goods-idle: "30 с";
     in property <string> goods-cardname: "ВКЛ";
     in property <bool> card-show-name: true;
+    // Страница кнопок отделов в шапке товаров — независима от колонок главного.
+    in property <int> header-page: 0;
     in property <string> trade-rounding: "выкл";
     in property <string> trade-minw: "10 г";
     // Импорт: список файлов каталога, подтверждение применения, результат.
@@ -663,7 +664,7 @@ export component MainWindow inherits Window {
             }
         }
         // «НАЗАД» — только когда промотка уже делалась.
-        if root.page-no > 0 : Rectangle {
+        if root.header-page > 0 : Rectangle {
             x: 8px + root.header-depts.length * 114px;
             y: 8px;
             width: 62px;
@@ -681,7 +682,7 @@ export component MainWindow inherits Window {
             }
         }
         // «ДАЛЕЕ» — только если есть следующая порция отделов.
-        if root.page-no < root.dept-pages-total - 1 : Rectangle {
+        if root.header-page < root.dept-pages-total - 1 : Rectangle {
             x: 8px + root.header-depts.length * 114px
                 + (root.page-no > 0 ? 66px : 0px);
             y: 8px;
@@ -1279,11 +1280,10 @@ export component MainWindow inherits Window {
                     clicked => { root.depts-close(); }
                 }
             }
-            // «ВЫХОД» скрыт в мастере настройки (экран 19): выход в каталог
-            // при пустой таблице пользователей = софт-лок, вход в меню
-            // возможен только после создания PIN-ов. В чек-листе после
-            // завершения мастера выход разрешён.
-            if root.screen != 19 || root.setup-wizard-done : Rectangle {
+            // «ВЫХОД» скрыт на экране 19 (мастер и чек-лист): выход в
+            // каталог до завершения настройки = софт-лок без пользователей;
+            // в чек-листе — до ввода в эксплуатацию.
+            if root.screen != 19 : Rectangle {
                 x: parent.width - 176px;
                 y: 8px;
                 width: 160px;

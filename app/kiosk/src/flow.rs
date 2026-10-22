@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::context::AppContext;
 use crate::session::weight_state;
 use crate::tiles;
-use crate::{DeptDef, PluTile};
+use crate::{DeptDef, MainWindow, PluTile};
 
 /// Замыкания, нужные вне этого модуля (тик и инициализация).
 pub struct FlowHandles {
@@ -179,13 +179,42 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             open_dept(&dept);
         }
     });
-    // Срез отделов: колонки главного экрана + кнопки в шапке экрана товаров.
+    // Срез отделов: колонки главного экрана и кнопки в шапке товаров —
+    // раздельные пагинации. Шапка вмещает столько кнопок, сколько лезет
+    // по ширине (110 px шаг + поиск справа), независимо от настройки колонок.
     // Не меняет экран — используется и промоткой в шапке.
+    let header_capacity = |ui: &MainWindow| -> usize {
+        (((ui.get_screen_w() - 332.0) / 114.0).max(1.0) as usize).max(1)
+    };
+    let set_header_slice = {
+        let ui_handle = ui_handle.clone();
+        let depts_all = depts_all.clone();
+        let kiosk = kiosk.clone();
+        move |hpage: usize| {
+            let Some(ui) = ui_handle.upgrade() else { return };
+            let cap = header_capacity(&ui);
+            let pages_total = depts_all.borrow().len().div_ceil(cap).max(1);
+            let hpage = hpage.min(pages_total - 1);
+            let tiles: Vec<DeptDef> = depts_all
+                .borrow()
+                .iter()
+                .skip(hpage * cap)
+                .take(cap)
+                .cloned()
+                .collect();
+            ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+            ui.set_header_page(hpage as i32);
+            ui.set_dept_pages_total(pages_total as i32);
+            kiosk.borrow_mut().header_dept_page = hpage;
+        }
+    };
+    let set_header_slice: Rc<dyn Fn(usize)> = Rc::new(set_header_slice);
     let set_dept_slice = {
         let ui_handle = ui_handle.clone();
         let depts_all = depts_all.clone();
         let kiosk = kiosk.clone();
         let cols = ctx.trade.cols.clone();
+        let set_header_slice = set_header_slice.clone();
         move |page: usize| {
             let Some(ui) = ui_handle.upgrade() else { return };
             let pages_total = depts_all.borrow().len().div_ceil(cols.get()).max(1);
@@ -197,14 +226,13 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 .take(cols.get())
                 .cloned()
                 .collect();
-            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles.clone())));
-            ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
             ui.set_page_no(page as i32);
-            // Оба счётчика: пейджер под колонками (экран 0) и шапка товаров.
-            // После синхронизации число отделов меняется — оба должны жить.
+            // Счётчик пейджера под колонками (экран 0); шапка товаров —
+            // своя пагинация (set_header_slice).
             ui.set_pages_total(pages_total as i32);
-            ui.set_dept_pages_total(pages_total as i32);
             kiosk.borrow_mut().dept_page = page;
+            set_header_slice(kiosk.borrow().header_dept_page);
         }
     };
     let set_dept_slice: Rc<dyn Fn(usize)> = Rc::new(set_dept_slice);
@@ -222,23 +250,21 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
     ui.on_dept_next({
         let kiosk = kiosk.clone();
         let depts_all = depts_all.clone();
-        let set_dept_slice = set_dept_slice.clone();
-        let cols = ctx.trade.cols.clone();
+        let set_header_slice = set_header_slice.clone();
         move || {
             kiosk.borrow_mut().idle_since = None;
-            let pages = depts_all.borrow().len().div_ceil(cols.get()).max(1);
-            let next = (kiosk.borrow().dept_page + 1).min(pages - 1);
-            set_dept_slice(next);
+            let next = kiosk.borrow().header_dept_page + 1;
+            set_header_slice(next);
         }
     });
     // Промотка «НАЗАД» в шапке экрана товаров: предыдущая порция отделов.
     ui.on_dept_prev({
         let kiosk = kiosk.clone();
-        let set_dept_slice = set_dept_slice.clone();
+        let set_header_slice = set_header_slice.clone();
         move || {
             kiosk.borrow_mut().idle_since = None;
-            let prev = kiosk.borrow().dept_page.saturating_sub(1);
-            set_dept_slice(prev);
+            let prev = kiosk.borrow().header_dept_page.saturating_sub(1);
+            set_header_slice(prev);
         }
     });
     // Выход на уровень выше (кнопка «← Назад» в шапке): товары → отделы,
@@ -266,6 +292,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let group_dept = group_dept.clone();
         let img_dir = img_dir.clone();
         let palette = ctx.palette.clone();
+        let set_header_slice = set_header_slice.clone();
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
             let (depts, gd_pairs, all_groups) = match datastore::open(&cfg.db_path) {
@@ -350,12 +377,11 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 .take(cols)
                 .cloned()
                 .collect();
-            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles.clone())));
-            ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
             ui.set_page_no(page as i32);
             ui.set_pages_total(pages_total as i32);
-            ui.set_dept_pages_total(pages_total as i32);
             kiosk.borrow_mut().dept_page = page;
+            set_header_slice(kiosk.borrow().header_dept_page);
         }
     };
     let relayout: Rc<dyn Fn()> = Rc::new(relayout);
@@ -535,15 +561,20 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             if let Ok(mut k) = kiosk.try_borrow_mut() {
                 k.reset_admin_taps();
                 k.dept_page = 0;
+                k.header_dept_page = 0;
                 k.item_page = 0;
             }
             ui.set_screen(0);
             ui.set_page_no(0);
+            ui.set_header_page(0);
             ui.set_popup_open(false);
             let tiles: Vec<DeptDef> =
                 depts_all.borrow().iter().take(cols.get()).cloned().collect();
-            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles.clone())));
-            ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+            let cap = (((ui.get_screen_w() - 332.0) / 114.0).max(1.0) as usize).max(1);
+            let htiles: Vec<DeptDef> =
+                depts_all.borrow().iter().take(cap).cloned().collect();
+            ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(htiles)));
             if depts_all.borrow().len() == 1 {
                 if let Some(n) = depts_all.borrow().first().map(|d| d.name.clone()) {
                     // Один отдел = сразу его товары. open_dept берёт borrow
