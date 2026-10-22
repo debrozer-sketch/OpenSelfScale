@@ -232,7 +232,10 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             // своя пагинация (set_header_slice).
             ui.set_pages_total(pages_total as i32);
             kiosk.borrow_mut().dept_page = page;
-            set_header_slice(kiosk.borrow().header_dept_page);
+            // Страница шапки читается до вызова set_header_slice: он берёт
+            // borrow_mut сессии — вложенный borrow здесь паникует.
+            let hpage = kiosk.borrow().header_dept_page;
+            set_header_slice(hpage);
         }
     };
     let set_dept_slice: Rc<dyn Fn(usize)> = Rc::new(set_dept_slice);
@@ -381,7 +384,8 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             ui.set_page_no(page as i32);
             ui.set_pages_total(pages_total as i32);
             kiosk.borrow_mut().dept_page = page;
-            set_header_slice(kiosk.borrow().header_dept_page);
+            let hpage = kiosk.borrow().header_dept_page;
+            set_header_slice(hpage);
         }
     };
     let relayout: Rc<dyn Fn()> = Rc::new(relayout);
