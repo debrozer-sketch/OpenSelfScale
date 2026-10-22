@@ -50,6 +50,8 @@ fn refresh_setting_labels(
         ui.set_goods_idle(format!("{} с", idle_secs.get()).into());
         ui.set_goods_cardname(if trade.card_show_name.get() { "ВКЛ" } else { "ВЫКЛ" }.into());
         ui.set_card_show_name(trade.card_show_name.get());
+        ui.set_goods_backbtn(if trade.catalog_back.get() { "ВКЛ" } else { "ВЫКЛ" }.into());
+        ui.set_catalog_back_btn(trade.catalog_back.get());
         ui.set_trade_rounding(
             match trade.rounding.get() {
                 1 => "до 10 коп",
@@ -942,6 +944,20 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         );
                     });
                 }
+                // Кнопка «← Назад» в сетке каталога: ВКЛ ↔ ВЫКЛ.
+                "backbtn" => {
+                    let next = !trade.catalog_back.get();
+                    let trade = trade.clone();
+                    let ui_handle = ui_handle.clone();
+                    save_setting(&cfg.db_path, "catalog_back_btn", i64::from(next), |v| {
+                        trade.catalog_back.set(v != 0);
+                        refresh_setting_labels(&ui_handle, &trade, &idle_secs);
+                        log::info!(
+                            "меню: кнопка «назад» в каталоге: {}",
+                            if v != 0 { "вкл" } else { "выкл" }
+                        );
+                    });
+                }
                 // Округление цены: выкл → 10 коп → 1 руб → выкл.
                 "rounding" => {
                     let next = (trade.rounding.get() + 1) % 3;
@@ -1468,6 +1484,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     }
                     if let Some(v) = f.card_show_name {
                         trade.card_show_name.set(v);
+                    }
+                    if let Some(v) = f.catalog_back_btn {
+                        trade.catalog_back.set(v);
                     }
                     refresh_data();
                     refresh_setting_labels(&ui_handle, &trade, &idle_secs);

@@ -448,6 +448,7 @@ export component MainWindow inherits Window {
     in property <string> goods-sort: "по алфавиту";
     in property <string> goods-idle: "30 с";
     in property <string> goods-cardname: "ВКЛ";
+    in property <string> goods-backbtn: "ВКЛ";
     in property <bool> card-show-name: true;
     // Страница кнопок отделов в шапке товаров — независима от колонок главного.
     in property <int> header-page: 0;
@@ -722,8 +723,8 @@ export component MainWindow inherits Window {
                 clicked => { root.search-open(); }
             }
         }
-        // «← НАЗАД» — ячейка 0 на всех страницах, кроме первой.
-        if root.items-page-no > 0 : Rectangle {
+        // «← НАЗАД» — ячейка 0 на всех страницах, кроме первой (можно скрыть).
+        if root.items-page-no > 0 && root.catalog-back-btn : Rectangle {
             x: 8px;
             y: 56px;
             width: 108px;
@@ -2035,6 +2036,7 @@ export component MainWindow inherits Window {
                 { label: "Порядок отделов", id: "sortalpha", admin: true },
                 { label: "Возврат на главный экран", id: "idletimeout", admin: true },
                 { label: "Название в карточке", id: "cardname", admin: true },
+                { label: "Кнопка «← Назад» в каталоге", id: "backbtn", admin: true },
                 { label: "Экспорт конфигурации", id: "export", admin: true },
                 { label: "Импорт конфигурации", id: "import", admin: true },
             ];
@@ -2098,6 +2100,17 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.goods-cardname;
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #4A5460;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+                if r.id == "backbtn" : Text {
+                    x: parent.width - 230px;
+                    width: 190px;
+                    height: parent.height;
+                    text: root.goods-backbtn;
                     font-size: 26px;
                     font-weight: 700;
                     color: #4A5460;

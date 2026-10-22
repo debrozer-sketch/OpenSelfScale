@@ -318,6 +318,9 @@ fn run_kiosk(cfg: config::Config) {
             card_show_name: std::rc::Rc::new(std::cell::Cell::new(
                 cal("card_show_name").map(|v| v != 0).unwrap_or(true),
             )),
+            catalog_back: std::rc::Rc::new(std::cell::Cell::new(
+                cal("catalog_back_btn").map(|v| v != 0).unwrap_or(true),
+            )),
         }
     };
 
