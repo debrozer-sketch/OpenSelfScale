@@ -425,7 +425,8 @@ export component MainWindow inherits Window {
     in property <string> setup-skip-label: "ПРОПУСТИТЬ";
     // Отдельная кнопка «ДАЛЕЕ» (шаг 7: время и NTP — два разных действия).
     in property <bool> setup-next-visible: false;
-    // Пункт «Мастер настройки» в меню виден, пока весы не введены в эксплуатацию.
+    // Пункт «Мастер настройки» в меню — только при первой установке
+    // (мастер не завершён); в рабочей весы пункта нет.
     in property <bool> setup-menu-visible: false;
     callback setup-tap(string);
 
