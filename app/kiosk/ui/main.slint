@@ -424,6 +424,7 @@ export component MainWindow inherits Window {
     in property <string> setup-skip-label: "ПРОПУСТИТЬ";
     // Отдельная кнопка «ДАЛЕЕ» (шаг 7: время и NTP — два разных действия).
     in property <bool> setup-next-visible: false;
+    in property <bool> setup-wizard-done: false;
     // Пункт «Мастер настройки» в меню виден, пока весы не введены в эксплуатацию.
     in property <bool> setup-menu-visible: false;
     callback setup-tap(string);
@@ -1249,8 +1250,9 @@ export component MainWindow inherits Window {
             }
             // «ВЫХОД» скрыт в мастере настройки (экран 19): выход в каталог
             // при пустой таблице пользователей = софт-лок, вход в меню
-            // возможен только после создания PIN-ов.
-            if root.screen != 19 : Rectangle {
+            // возможен только после создания PIN-ов. В чек-листе после
+            // завершения мастера выход разрешён.
+            if root.screen != 19 || root.setup-wizard-done : Rectangle {
                 x: parent.width - 176px;
                 y: 8px;
                 width: 160px;
@@ -1376,8 +1378,8 @@ export component MainWindow inherits Window {
                 { label: "2 · Пароль кассира", state: root.setup-stage > 2 ? 2 : (root.setup-stage == 2 ? 1 : 0) },
                 { label: "3 · Сеть", state: root.setup-stage > 3 ? 2 : (root.setup-stage == 3 ? 1 : 0) },
                 { label: "4 · Проверка весов", state: root.setup-stage > 4 ? 2 : (root.setup-stage == 4 ? 1 : 0) },
-                { label: "5 · Печать (тест)", state: root.setup-stage > 5 ? 2 : (root.setup-stage == 5 ? 1 : 0) },
-                { label: "6 · Длина этикетки", state: root.setup-stage > 6 ? 2 : (root.setup-stage == 6 ? 1 : 0) },
+                { label: "5 · Длина этикетки", state: root.setup-stage > 5 ? 2 : (root.setup-stage == 5 ? 1 : 0) },
+                { label: "6 · Печать (тест)", state: root.setup-stage > 6 ? 2 : (root.setup-stage == 6 ? 1 : 0) },
                 { label: "7 · Дата и время", state: root.setup-stage > 7 ? 2 : (root.setup-stage == 7 ? 1 : 0) },
                 { label: "8 · Готово", state: root.setup-stage > 8 ? 2 : (root.setup-stage == 8 ? 1 : 0) },
             ];

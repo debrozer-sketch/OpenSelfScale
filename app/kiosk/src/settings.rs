@@ -276,6 +276,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_setup_mode(mode);
                 ui.set_setup_stage(i32::from(stage));
+                ui.set_setup_wizard_done(setup::wizard_done(&conn));
                 ui.set_setup_note(note.into());
                 ui.set_setup_action_label(action.into());
                 ui.set_setup_action_enabled(action_enabled);
@@ -615,7 +616,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 "back" => match stage {
                     // Подгонка зазора: «уехало далеко» — откат меньше и
                     // новый тест. Остаёмся на шаге (sub уже 1).
-                    5 if k.setup_print_sub == 1 => {
+                    6 if k.setup_print_sub == 1 => {
                         drop(k);
                         adjust_feed(&conn, -16);
                         spawn_wizard_test_print(&cfg);
@@ -700,18 +701,18 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             setup_render();
                         }
                     }
-                    5 if k.setup_print_sub == 0 => {
+                    6 if k.setup_print_sub == 0 => {
                         k.setup_print_sub = 1;
                         drop(k);
                         spawn_wizard_test_print(&cfg);
                         setup_render();
                     }
-                    5 => {
+                    6 => {
                         drop(k);
                         adjust_feed(&conn, 16);
                         spawn_wizard_test_print(&cfg);
                     }
-                    6 => {
+                    5 => {
                         // Скан занимает порт демона: при весе на платформе
                         // не запускать (как и в «Оборудовании»).
                         let snap = app_state.snapshot();
@@ -734,8 +735,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             if saved.is_some() {
                                 let Ok(conn) = datastore::open(&cfg2.db_path) else { return };
                                 // Гонка с «НАЗАД»/«ПРОПУСТИТЬ» во время скана:
-                                // шаг двигаем только если оператор ещё на 6-м.
-                                if setup::stage(&conn) != 6 {
+                                // шаг двигаем только если оператор ещё на 5-м.
+                                if setup::stage(&conn) != 5 {
                                     return;
                                 }
                                 let next =
@@ -1710,11 +1711,23 @@ fn wizard_step_ui(
             "ПРОПУСТИТЬ".into(),
             false,
         ),
-        5 => {
+        5 => (
+            1,
+            "Шаг 5 из 8.\n\nКалибровка длины этикетки: принтер прокрутит ленту\n\
+             шагами (до минуты, не трогайте принтер). Запускать только\n\
+             с пустой платформой."
+                .into(),
+            "КАЛИБРОВАТЬ".into(),
+            true,
+            true,
+            "ПРОПУСТИТЬ".into(),
+            false,
+        ),
+        6 => {
             if print_sub == 0 {
                 (
                     1,
-                    "Шаг 5 из 8.\n\nКалибровка печати: нажмите «ПЕЧАТЬ ТЕСТА» и оцените\n\
+                    "Шаг 6 из 8.\n\nКалибровка печати: нажмите «ПЕЧАТЬ ТЕСТА» и оцените\n\
                      положение изображения на этикетке:\n\
                      • целиком на этикетке — «ГОТОВО»;\n\
                      • низ отрезан — это смещение вниз, жмите «СМЕЩЕНИЕ +16»;\n\
@@ -1744,18 +1757,6 @@ fn wizard_step_ui(
                 )
             }
         }
-        6 => (
-            1,
-            "Шаг 6 из 8.\n\nКалибровка длины этикетки: принтер прокрутит ленту\n\
-             шагами (до минуты, не трогайте принтер). Запускать только\n\
-             с пустой платформой."
-                .into(),
-            "КАЛИБРОВАТЬ".into(),
-            true,
-            true,
-            "ПРОПУСТИТЬ".into(),
-            false,
-        ),
         7 => (
             1,
             "Шаг 7 из 8.\n\nДата и время: введите вручную в формате\n\
@@ -1801,13 +1802,33 @@ pub(crate) fn startup_setup_render(
 ) {
     let Ok(conn) = datastore::open(&cfg.db_path) else { return };
     let stage = setup::stage(&conn);
-    let (mode, note, action, action_enabled, skip_visible, skip_label, next_visible) = {
+    let done = setup::wizard_done(&conn);
+    let (mode, note, action, action_enabled, skip_visible, skip_label, next_visible) = if !done {
         let k = kiosk.borrow();
         wizard_step_ui(stage, k.setup_print_sub, k.setup_scales_seen)
+    } else {
+        // Чек-лист ввода в эксплуатацию (после завершения мастера).
+        let all = ui_handle
+            .upgrade()
+            .map(|ui| setup::all_green(ui.get_setup_mask() as u32))
+            .unwrap_or(false);
+        (
+            0,
+            "Ввод в эксплуатацию: выполните пункты слева — галки живые,\n\
+             обновляются автоматически. Когда всё зелёное, кнопка\n\
+             разблокируется. Позже список остаётся в «Оборудовании»."
+                .to_string(),
+            "ВВЕСТИ В ЭКСПЛУАТАЦИЮ".to_string(),
+            all,
+            false,
+            "ПРОПУСТИТЬ".to_string(),
+            false,
+        )
     };
     if let Some(ui) = ui_handle.upgrade() {
         ui.set_setup_mode(mode);
         ui.set_setup_stage(i32::from(stage));
+        ui.set_setup_wizard_done(done);
         ui.set_setup_note(note.into());
         ui.set_setup_action_label(action.into());
         ui.set_setup_action_enabled(action_enabled);

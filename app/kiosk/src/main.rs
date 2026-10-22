@@ -387,9 +387,19 @@ fn run_kiosk(cfg: config::Config) {
                     settings::startup_setup_render(&ui.as_weak(), &ctx.kiosk, &cfg);
                 }
             } else {
-                // Чек-лист остаётся доступен из меню, пока не введены
-                // в эксплуатацию.
+                // Мастер пройден, но весы ещё не введены в эксплуатацию:
+                // чек-лист открыт сразу, чтобы было видно, чего не хватает
+                // (этикетка, товары, калибровки). «ВЫХОД» ведёт в каталог,
+                // пункт остаётся в меню до ввода в эксплуатацию.
                 if !crate::setup::entered(&conn) {
+                    {
+                        let mut k = ctx.kiosk.borrow_mut();
+                        k.admin_open = true;
+                        k.admin_stage = 20;
+                    }
+                    settings::startup_setup_render(&ui.as_weak(), &ctx.kiosk, &cfg);
+                    log::info!("настройка: показан чек-лист ввода в эксплуатацию");
+                } else {
                     ui.set_setup_menu_visible(true);
                 }
             }
