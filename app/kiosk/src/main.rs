@@ -363,6 +363,16 @@ fn run_kiosk(cfg: config::Config) {
     // только по PIN админа.
     match datastore::open(&cfg.db_path) {
         Ok(conn) => {
+            // Раскладка по умолчанию — зашитая боевая LIVE_LAYOUT. Ключ
+            // нужен чек-листу («раскладка задана»); веб-конструктор позже
+            // начнёт записывать сюда выбранный макет.
+            if datastore::get_setting(&conn, "label_layout_name")
+                .ok()
+                .flatten()
+                .is_none()
+            {
+                datastore::set_setting(&conn, "label_layout_name", "market-56x38").ok();
+            }
             if !crate::setup::wizard_done(&conn) {
                 let has_users = datastore::auth::user_exists(&conn).unwrap_or(false);
                 {
