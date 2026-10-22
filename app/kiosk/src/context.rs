@@ -26,6 +26,8 @@ pub struct TradeSettings {
     pub rounding: Rc<std::cell::Cell<i64>>,
     /// Минимальный вес печати, г.
     pub min_weight_g: Rc<std::cell::Cell<f64>>,
+    /// Название товара в карточке: ВКЛ/ВЫКЛ (без названия картинка крупнее).
+    pub card_show_name: Rc<std::cell::Cell<bool>>,
 }
 
 /// Контекст, разделяемый всеми UI-обработчиками киоска.

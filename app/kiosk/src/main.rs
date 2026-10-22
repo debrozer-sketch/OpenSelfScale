@@ -315,6 +315,9 @@ fn run_kiosk(cfg: config::Config) {
             min_weight_g: std::rc::Rc::new(std::cell::Cell::new(
                 cal("min_weight_g").map(|v| v.clamp(10, 1000) as f64).unwrap_or(10.0),
             )),
+            card_show_name: std::rc::Rc::new(std::cell::Cell::new(
+                cal("card_show_name").map(|v| v != 0).unwrap_or(true),
+            )),
         }
     };
 

@@ -447,6 +447,8 @@ export component MainWindow inherits Window {
     in property <string> goods-cols: "2";
     in property <string> goods-sort: "по алфавиту";
     in property <string> goods-idle: "30 с";
+    in property <string> goods-cardname: "ВКЛ";
+    in property <bool> card-show-name: true;
     in property <string> trade-rounding: "выкл";
     in property <string> trade-minw: "10 г";
     // Импорт: список файлов каталога, подтверждение применения, результат.
@@ -1005,10 +1007,11 @@ export component MainWindow inherits Window {
             // Панель глушит клики (закрытие — только мимо панели/«ОТМЕНА»).
             popup-panel-ta := TouchArea { }
 
-            // Картинка крупно.
+            // Картинка крупно. Без названия — на всю ширину панели.
             Rectangle {
                 x: 24px; y: 24px;
-                width: 280px; height: 280px;
+                width: root.card-show-name ? 280px : 672px;
+                height: 280px;
                 border-radius: 16px;
                 clip: true;
                 background: #F0F2F5;
@@ -1021,7 +1024,7 @@ export component MainWindow inherits Window {
             }
 
             // Название и цены за килограмм.
-            Text {
+            if root.card-show-name : Text {
                 x: 328px; y: 24px;
                 width: 368px; height: 64px;
                 text: root.popup-plu.name;
@@ -1035,12 +1038,13 @@ export component MainWindow inherits Window {
             Text {
                 x: 328px; y: 100px;
                 width: 368px; height: 32px;
+                visible: root.card-show-name;
                 text: "Цена: " + root.popup-plu.price;
                 font-size: 22px;
                 vertical-alignment: center;
                 color: #1A1E24;
             }
-            if root.popup-plu.card-price != "" : Text {
+            if root.popup-plu.card-price != "" && root.card-show-name : Text {
                 x: 328px; y: 136px;
                 width: 368px; height: 32px;
                 text: "По скидочной карте: " + root.popup-plu.card-price;
@@ -1048,6 +1052,33 @@ export component MainWindow inherits Window {
                 font-weight: 700;
                 vertical-alignment: center;
                 color: #2FA36B;
+            }
+            // Без названия: цена (и карта) бейджем поверх картинки.
+            if !root.card-show-name && (root.popup-plu.price != "" || root.popup-plu.card-price != "") : Rectangle {
+                x: 428px; y: 236px;
+                width: 244px; height: root.popup-plu.card-price != "" ? 68px : 44px;
+                border-radius: 10px;
+                background: rgba(255, 255, 255, 0.88);
+                if root.card-show-name == false : Text {
+                    x: 12px; y: 0px;
+                    width: parent.width - 24px;
+                    height: 44px;
+                    text: root.popup-plu.price;
+                    font-size: 24px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    color: #1A1E24;
+                }
+                if root.popup-plu.card-price != "" : Text {
+                    x: 12px; y: 40px;
+                    width: parent.width - 24px;
+                    height: 26px;
+                    text: "по карте " + root.popup-plu.card-price;
+                    font-size: 16px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    color: #2FA36B;
+                }
             }
 
             // Вес и стоимость текущего веса; на пустых весах — подсказка.
@@ -2001,6 +2032,7 @@ export component MainWindow inherits Window {
                 { label: "Колонок на экране", id: "cols", admin: true },
                 { label: "Порядок отделов", id: "sortalpha", admin: true },
                 { label: "Возврат на главный экран", id: "idletimeout", admin: true },
+                { label: "Название в карточке", id: "cardname", admin: true },
                 { label: "Экспорт конфигурации", id: "export", admin: true },
                 { label: "Импорт конфигурации", id: "import", admin: true },
             ];
@@ -2053,6 +2085,17 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.goods-idle;
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #4A5460;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+                if r.id == "cardname" : Text {
+                    x: parent.width - 230px;
+                    width: 190px;
+                    height: parent.height;
+                    text: root.goods-cardname;
                     font-size: 26px;
                     font-weight: 700;
                     color: #4A5460;

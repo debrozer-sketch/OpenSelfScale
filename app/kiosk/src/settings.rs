@@ -48,6 +48,8 @@ fn refresh_setting_labels(
             if trade.sort_alpha.get() { "по алфавиту" } else { "вручную" }.into(),
         );
         ui.set_goods_idle(format!("{} с", idle_secs.get()).into());
+        ui.set_goods_cardname(if trade.card_show_name.get() { "ВКЛ" } else { "ВЫКЛ" }.into());
+        ui.set_card_show_name(trade.card_show_name.get());
         ui.set_trade_rounding(
             match trade.rounding.get() {
                 1 => "до 10 коп",
@@ -926,6 +928,20 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         );
                     });
                 }
+                // Название товара в карточке: ВКЛ ↔ ВЫКЛ.
+                "cardname" => {
+                    let next = !trade.card_show_name.get();
+                    let trade = trade.clone();
+                    let ui_handle = ui_handle.clone();
+                    save_setting(&cfg.db_path, "card_show_name", i64::from(next), |v| {
+                        trade.card_show_name.set(v != 0);
+                        refresh_setting_labels(&ui_handle, &trade, &idle_secs);
+                        log::info!(
+                            "меню: название в карточке: {}",
+                            if v != 0 { "вкл" } else { "выкл" }
+                        );
+                    });
+                }
                 // Округление цены: выкл → 10 коп → 1 руб → выкл.
                 "rounding" => {
                     let next = (trade.rounding.get() + 1) % 3;
@@ -1449,6 +1465,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     }
                     if let Some(v) = f.idle_timeout_secs {
                         idle_secs.set(v.clamp(10, 60) as u64);
+                    }
+                    if let Some(v) = f.card_show_name {
+                        trade.card_show_name.set(v);
                     }
                     refresh_data();
                     refresh_setting_labels(&ui_handle, &trade, &idle_secs);

@@ -27,6 +27,8 @@ pub struct ConfigFile {
     pub price_rounding: Option<i64>,
     #[serde(default)]
     pub min_weight_g: Option<i64>,
+    #[serde(default)]
+    pub card_show_name: Option<bool>,
     /// Отделы в экранным порядке. Совместимость формата: старые файлы —
     /// строка (имя), новые — таблица { name, bg, fg } с цветами плитки.
     /// Импорт создаёт отсутствующие, выставляет порядок и применяет цвета;
@@ -90,6 +92,7 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
         .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 60) as i64);
     let rounding = cal("price_rounding").unwrap_or(0);
     let minw = cal("min_weight_g").unwrap_or(10);
+    let cardname = cal("card_show_name").unwrap_or(1);
     let depts: Vec<DeptEntry> = datastore::depts_list(&conn)
         .map_err(|e| format!("отделы: {e}"))?
         .into_iter()
@@ -106,6 +109,7 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
         idle_timeout_secs: Some(idle),
         price_rounding: Some(rounding.clamp(0, 2)),
         min_weight_g: Some(minw.clamp(10, 1000)),
+        card_show_name: Some(cardname != 0),
         depts,
     };
     let dir = export_dir(cfg);
@@ -224,6 +228,9 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
     if let Some(v) = f.min_weight_g {
         datastore::set_calibration(&tx, "min_weight_g", v.clamp(10, 1000)).map_err(|e| e.to_string())?;
     }
+    if let Some(v) = f.card_show_name {
+        datastore::set_calibration(&tx, "card_show_name", i64::from(v)).map_err(|e| e.to_string())?;
+    }
     if !f.depts.is_empty() {
         let entries: Vec<(String, Option<String>, Option<String>)> = f
             .depts
@@ -283,6 +290,7 @@ mod tests {
             idle_timeout_secs: Some(90),
             price_rounding: Some(1),
             min_weight_g: Some(20),
+            card_show_name: Some(false),
             depts: vec![
                 DeptEntry::Name("ОВОЩИ".into()),
                 DeptEntry::Detailed {
@@ -332,6 +340,7 @@ mod tests {
             idle_timeout_secs: Some(1),
             price_rounding: Some(5),
             min_weight_g: Some(0),
+            card_show_name: None,
             depts: vec![DeptEntry::Name("А".into())],
         };
         let p = preview(&f);
