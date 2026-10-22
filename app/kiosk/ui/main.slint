@@ -1247,7 +1247,10 @@ export component MainWindow inherits Window {
                     clicked => { root.depts-close(); }
                 }
             }
-            Rectangle {
+            // «ВЫХОД» скрыт в мастере настройки (экран 19): выход в каталог
+            // при пустой таблице пользователей = софт-лок, вход в меню
+            // возможен только после создания PIN-ов.
+            if root.screen != 19 : Rectangle {
                 x: parent.width - 176px;
                 y: 8px;
                 width: 160px;

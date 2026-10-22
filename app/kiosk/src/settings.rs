@@ -306,6 +306,18 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
             let stage = k.admin_stage;
             if stage == 1 {
+                // Таблица пользователей пуста: проверять нечего, вход
+                // невозможен — подсказка вместо молчаливого отказа.
+                let no_users = match datastore::open(&cfg.db_path) {
+                    Ok(conn) => {
+                        !datastore::auth::user_exists(&conn).unwrap_or(false)
+                    }
+                    Err(_) => false,
+                };
+                if no_users {
+                    set_err(&ui_handle, "Пароли не созданы — завершите мастер настройки");
+                    return;
+                }
                 let res = match datastore::open(&cfg.db_path) {
                     Ok(conn) => datastore::auth::verify(&conn, &pin),
                     Err(e) => {
