@@ -1396,6 +1396,9 @@ export component MainWindow inherits Window {
             ];
 
             // Список шагов: 8 строк по 42px + зазор 6 — влезает в высоту.
+            // Мастер: state 1 = активный шаг (зелёная рамка). Чек-лист:
+            // state 1 = НЕ выполнено (янтарный), state 2 = выполнено
+            // (зелёный с галкой), state 0 = ещё не наступало (серый).
             for row[i] in (root.setup-mode == 1 ? wizard-rows : checklist-rows) : Rectangle {
                 x: 8px;
                 y: 6px + i * 48px;
@@ -1403,8 +1406,12 @@ export component MainWindow inherits Window {
                 height: 42px;
                 border-radius: 10px;
                 border-width: 2px;
-                border-color: row.state == 1 ? #2E7D57 : #C9CFD7;
-                background: row.state == 1 ? #F0F7F2 : #FFFFFF;
+                border-color: row.state == 2 ? #2E7D57
+                    : (row.state == 1 && root.setup-mode == 0 ? #E8A13D
+                    : (row.state == 1 ? #2E7D57 : #C9CFD7));
+                background: row.state == 2 ? #F0F7F2
+                    : (row.state == 1 && root.setup-mode == 0 ? #FDF7EC
+                    : (row.state == 1 ? #F0F7F2 : #FFFFFF));
                 Text {
                     x: 12px;
                     width: parent.width - 40px;
@@ -1412,7 +1419,7 @@ export component MainWindow inherits Window {
                     text: row.label;
                     font-size: 18px;
                     font-weight: row.state == 1 ? 700 : 500;
-                    color: row.state == 0 ? #A6ADB8 : (row.state == 1 ? #1A1E24 : #2E7D57);
+                    color: row.state == 0 ? #A6ADB8 : (row.state == 1 && root.setup-mode == 0 ? #8A5A16 : #1A1E24);
                     vertical-alignment: center;
                     overflow: elide;
                 }
