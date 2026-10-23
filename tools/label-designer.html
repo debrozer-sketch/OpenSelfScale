@@ -3,236 +3,1540 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenScale - конструктор этикеток</title>
+<title>OpenScale — конструктор этикеток</title>
 <style>
-:root{--ink:#172326;--muted:#657377;--line:#dce2df;--paper:#fff;--ground:#e9eeea;--accent:#157567;--accent-dark:#0b5b50;--soft:#e7f3ef;--danger:#bb4b3a}
-[hidden]{display:none!important}
-*{box-sizing:border-box}html,body{height:100%;margin:0}body{font:14px/1.4 system-ui,-apple-system,"Segoe UI",Arial,sans-serif;color:var(--ink);background:var(--ground)}button,input,select{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.42}button:focus-visible,input:focus-visible,select:focus-visible,.field-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}input,select{border:1px solid #c8d1cc;background:#fff;border-radius:7px;color:var(--ink);min-height:38px;padding:7px 10px;min-width:0}input:focus,select:focus{border-color:var(--accent);outline:2px solid #15756730}input[type=number]{font-variant-numeric:tabular-nums}button{border:1px solid var(--line);border-radius:7px;background:white;color:var(--ink);padding:8px 12px;min-height:38px;font-weight:600;white-space:nowrap;transition:background .16s,border-color .16s,transform .16s}button:hover:not(:disabled){background:#f0f5f2;border-color:#aabeb5}button:active:not(:disabled){transform:translateY(1px)}button.primary{background:var(--accent);border-color:var(--accent);color:#fff}button.primary:hover:not(:disabled){background:var(--accent-dark)}button.quiet{border-color:transparent;background:transparent;color:var(--muted)}button.quiet:hover:not(:disabled){color:var(--ink)}.icon-button{width:32px;min-height:32px;padding:3px;display:grid;place-items:center;font-size:17px;line-height:1}.app{height:100%;display:flex;flex-direction:column;min-height:0}.topbar{background:#fcfdfb;border-bottom:1px solid var(--line);flex:none}.brandline{height:58px;display:flex;align-items:center;gap:18px;padding:0 24px;border-bottom:1px solid #edf0ed}.logo{font-size:21px;letter-spacing:-.06em;font-weight:800;white-space:nowrap}.logo span{color:var(--accent)}.brandline .subtitle{border-left:1px solid var(--line);padding-left:18px;color:var(--muted);font-size:13px}.top-actions{display:flex;gap:7px;align-items:center;margin-left:auto}.toolbar{padding:10px 24px;display:flex;align-items:end;gap:18px;flex-wrap:wrap}.control{display:flex;flex-direction:column;gap:3px;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:.02em}.control input,.control select{font-weight:500;font-size:14px}.control.name input{width:180px}.control.dimension input{width:78px}.control.zoom select{width:90px}.size-group{display:flex;gap:8px;align-items:end}.size-separator{color:#8b9891;padding-bottom:10px}.toolbar-note{margin-left:auto;color:#84918b;font-size:12px;padding-bottom:10px}.workspace{display:flex;flex:1;min-height:0}.sidebar{width:352px;flex:none;background:#fff;border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}.side-head{padding:18px 19px 10px;display:flex;align-items:baseline;justify-content:space-between}.side-head h2,.prop-head h2{font-size:15px;letter-spacing:-.02em;margin:0}.count{font-size:12px;color:var(--muted)}.list{overflow:auto;min-height:105px;max-height:42%;flex:1;padding:0 10px 8px}.field-row{display:flex;align-items:center;gap:9px;border:1px solid transparent;border-radius:8px;padding:7px 6px;margin:2px 0;cursor:pointer;min-height:54px;transition:background .16s,border-color .16s}.field-row:hover{background:#f4f7f4}.field-row.selected{background:var(--soft);border-color:#9bcfc0}.field-row.bad{border-color:#e7a498;background:#fff5f2}.field-row.drop-target{box-shadow:inset 0 3px var(--accent)}.grip{color:#9aaba3;font-size:19px;line-height:1;cursor:grab;touch-action:none;padding:6px 2px;user-select:none}.grip:active{cursor:grabbing}.glyph{width:31px;height:31px;flex:none;border-radius:7px;background:#e9f0ed;color:#32685d;display:grid;place-items:center;font-size:11px;font-weight:800;font-family:ui-monospace,monospace}.selected .glyph{background:#c9e8db}.bad .glyph{background:#f7dbd5;color:var(--danger)}.row-copy{flex:1;min-width:0}.row-title{font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row-meta{font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row-actions{display:flex;gap:0;opacity:0}.field-row:hover .row-actions,.field-row.selected .row-actions,.field-row:focus-within .row-actions{opacity:1}.row-actions button{color:#697a73}.addbar{display:flex;gap:7px;padding:10px 16px 15px;border-bottom:1px solid var(--line)}.addbar select{flex:1;width:10px}.addbar button{flex:none}.properties{flex:1;min-height:0;overflow:auto;padding:16px 19px 28px}.prop-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}.prop-kind{font-size:12px;color:var(--muted)}.prop-empty{color:#899590;font-size:13px;line-height:1.6;padding:18px 4px}.group{border-top:1px solid var(--line);padding:13px 0 14px}.group h3{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#74877f;margin:0 0 11px}.prop-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}.prop-control{display:flex;flex-direction:column;gap:5px;min-width:0;font-size:12px;color:#485b54;font-weight:550}.prop-control input,.prop-control select{width:100%;min-height:40px}.prop-control.custom input{border-color:#69ae94;background:#f1faf5}.prop-control.custom .prop-label:after{content:' • изменено';color:var(--accent);font-size:10px}.wide{grid-column:1/-1}.hint{font-size:11px;color:#87948e;margin:8px 0 0;line-height:1.45}.reset{margin-top:11px;font-size:12px;padding:6px 9px;min-height:32px}.stage{position:relative;flex:1;min-width:0;overflow:auto;background:#e9eeea;padding:58px 48px 80px;touch-action:pan-x pan-y}.stage-top{position:sticky;left:0;top:-40px;z-index:6;display:flex;justify-content:space-between;align-items:center;pointer-events:none;margin:-37px 0 19px;color:#718079;font-size:12px;max-width:100%}.stage-top strong{font-weight:650;color:#52665c}.paper-wrap{width:max-content;margin:0 auto;min-width:0}.ruler-label{color:#667b71;font:11px ui-monospace,monospace;margin-bottom:8px}.canvas{position:relative;background:#fff;box-shadow:0 2px 4px #1a2d2620,0 19px 45px #28372e17;isolation:isolate;user-select:none;touch-action:none;overflow:visible}.canvas.fine{background-image:linear-gradient(to right,#e7ece9 1px,transparent 1px),linear-gradient(to bottom,#e7ece9 1px,transparent 1px),linear-gradient(to right,#f2f4f2 1px,transparent 1px),linear-gradient(to bottom,#f2f4f2 1px,transparent 1px)}.canvas.coarse{background-image:linear-gradient(to right,#edf0ed 1px,transparent 1px),linear-gradient(to bottom,#edf0ed 1px,transparent 1px)}.field{position:absolute;border:1px solid #348375;background:#15756712;cursor:move;touch-action:none;user-select:none;overflow:visible}.field.selected{border:2px solid #d28937;background:#e7a94020;z-index:5}.field.bad{border-color:var(--danger);background:#eb635522}.field .tag{position:absolute;left:0;top:-15px;font:10px/13px ui-monospace,monospace;color:#557268;background:#fffe;white-space:nowrap;max-width:170px;overflow:hidden;text-overflow:ellipsis;pointer-events:none}.field.bad .tag{color:var(--danger)}.field .clip{position:absolute;inset:0;overflow:hidden;pointer-events:none}.field .text-preview{position:absolute;left:0;top:0;transform-origin:top left;white-space:nowrap;font-family:Consolas,"Courier New",monospace;display:flex;align-items:center;color:#172326;pointer-events:none}.bars{position:absolute;left:0;right:0;top:0;bottom:22%;background:repeating-linear-gradient(90deg,#111 0 2px,transparent 2px 4px,#111 4px 5px,transparent 5px 8px,#111 8px 11px,transparent 11px 13px);pointer-events:none}.barcode-digits{position:absolute;bottom:0;left:0;right:0;height:22%;text-align:center;white-space:nowrap;overflow:hidden;font-family:Consolas,monospace;color:#111;pointer-events:none}.handle{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border:2px solid white;background:#d28937;border-radius:2px;z-index:6;touch-action:none}.handle[data-dir=n]{left:50%;top:0;cursor:ns-resize}.handle[data-dir=s]{left:50%;top:100%;cursor:ns-resize}.handle[data-dir=w]{left:0;top:50%;cursor:ew-resize}.handle[data-dir=e]{left:100%;top:50%;cursor:ew-resize}.handle[data-dir=nw]{left:0;top:0;cursor:nwse-resize}.handle[data-dir=se]{left:100%;top:100%;cursor:nwse-resize}.handle[data-dir=ne]{left:100%;top:0;cursor:nesw-resize}.handle[data-dir=sw]{left:0;top:100%;cursor:nesw-resize}.guide{position:absolute;background:#e89147;z-index:7;pointer-events:none}.guide.vertical{top:0;bottom:0;width:1px}.guide.horizontal{left:0;right:0;height:1px}.coord-tip{position:fixed;z-index:20;background:#193d34;color:#fff;border-radius:5px;padding:5px 8px;font:11px ui-monospace,monospace;pointer-events:none;box-shadow:0 3px 12px #0002;white-space:nowrap}.warning{color:var(--danger);font-size:11px;margin:7px 0 0}.empty-screen{position:absolute;inset:0;z-index:12;background:#e9eeea;display:flex;align-items:center;justify-content:center;text-align:center;padding:28px}.empty-inner{max-width:425px;margin-top:-35px}.empty-mark{font-size:39px;font-weight:800;letter-spacing:-.08em;margin-bottom:18px}.empty-mark span{color:var(--accent)}.empty-inner h1{font-size:26px;line-height:1.16;letter-spacing:-.04em;margin:0 0 11px}.empty-inner p{margin:0 auto 25px;color:#63766b;line-height:1.55;max-width:330px}.empty-actions{display:flex;gap:9px;justify-content:center;flex-wrap:wrap}.empty-actions button{min-height:44px}.modal-back{position:fixed;inset:0;background:#15292280;z-index:50;display:flex;align-items:center;justify-content:center;padding:18px;animation:fade .16s ease-out}.modal{background:#fff;border-radius:12px;width:min(100%,460px);box-shadow:0 22px 65px #0b1e1a45;padding:24px;animation:rise .19s ease-out}.modal h2{font-size:19px;letter-spacing:-.03em;margin:0 0 10px}.modal p{color:#52645b;line-height:1.5;margin:0 0 12px}.modal ul{max-height:42vh;overflow:auto;margin:10px 0;padding-left:20px;color:#a33f30;line-height:1.6}.modal-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:22px}.modal .form-row{display:flex;gap:12px;margin-top:14px}.modal .form-row label{display:flex;flex:1;flex-direction:column;gap:5px;color:#53675e;font-size:12px}.modal .form-row input{width:100%}.modal .error{color:var(--danger);font-size:12px;margin-top:10px;min-height:18px}.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:80;padding:9px 14px;background:#1b4035;color:#fff;border-radius:7px;box-shadow:0 8px 24px #0003;font-size:13px;animation:rise .18s ease-out;white-space:nowrap}@keyframes fade{from{opacity:0}to{opacity:1}}@keyframes rise{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}@media(max-width:800px){.brandline{padding:0 13px}.brandline .subtitle{display:none}.toolbar{padding:10px 13px;gap:9px}.toolbar-note{display:none}.sidebar{width:300px}.stage{padding:50px 25px}}@media(max-width:620px){.app{height:auto;min-height:100vh}.brandline{height:auto;min-height:54px;flex-wrap:wrap;padding:9px 12px}.top-actions{gap:3px}.top-actions button{padding:6px 8px;font-size:12px}.toolbar{gap:8px}.control.name input{width:135px}.control.dimension input{width:65px}.workspace{flex-direction:column}.stage{order:0;flex:none;min-height:340px;max-height:56vh;padding:47px 20px 45px}.sidebar{order:1;width:100%;border-right:0;border-top:1px solid var(--line);min-height:480px}.list{max-height:260px;flex:none}.properties{overflow:visible}.stage-top{top:-30px}}
+:root {
+  color-scheme: light;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  --bg: #eceff1;
+  --surface: #ffffff;
+  --surface-2: #f5f6f7;
+  --line: #cfd5d9;
+  --line-strong: #85909a;
+  --edge: #5b6670;
+  --text: #1b2126;
+  --muted: #4f5a63;
+  --accent: #0b5cad;
+  --accent-hover: #084a8c;
+  --accent-soft: #e3eefa;
+  --danger: #b3261e;
+  --danger-soft: #fdecea;
+  --r: 3px;
+  --s1: 0.25rem;
+  --s2: 0.5rem;
+  --s3: 0.75rem;
+  --s4: 1rem;
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { font-size: 100%; }
+body { margin: 0; font: 0.875rem/1.45 var(--font); color: var(--text); background: var(--bg); }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.muted { color: var(--muted); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+button { font: inherit; min-height: 2rem; padding: 0.25rem 0.75rem; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--surface); color: var(--text); cursor: pointer; }
+button:hover:not(:disabled) { background: #e9edf0; }
+button:disabled { color: #6b757d; border-color: var(--line); cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+button.danger { color: var(--danger); border-color: var(--danger); }
+button.link { min-height: 0; padding: 0 0.125rem; border: 0; background: none; color: var(--accent); text-decoration: underline; text-align: left; }
+button.link:hover:not(:disabled) { background: none; color: var(--accent-hover); }
+input, select, textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r); min-height: 2rem; padding: 0.25rem 0.5rem; min-width: 0; }
+input[type=number] { font-variant-numeric: tabular-nums; text-align: right; }
+input[type=checkbox] { min-height: 0; width: 1.5rem; height: 1.5rem; margin: 0; flex: none; }
+input[aria-invalid=true], select[aria-invalid=true] { border-color: var(--danger); border-width: 2px; }
+
+.app { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; min-height: 100vh; }
+.appbar { background: var(--surface); border-bottom: 1px solid var(--line); }
+.appbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); padding: var(--s2) var(--s4); }
+.title { margin: 0; font-size: 1rem; font-weight: 600; }
+.title span { font-weight: 400; color: var(--muted); }
+.commands { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s2); margin-left: auto; }
+.docbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); padding: var(--s2) var(--s4); border-top: 1px solid var(--line); background: var(--surface-2); }
+.docbar label { display: flex; align-items: center; gap: var(--s2); }
+.docbar .name input { width: 12rem; }
+.docbar .dim input { width: 5.5rem; }
+.menu { position: relative; }
+.menu-list { position: absolute; right: 0; top: calc(100% + 2px); z-index: 30; min-width: 17rem; display: flex; flex-direction: column; padding: var(--s1); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); }
+.menu-list button { border: 0; border-radius: 2px; text-align: left; }
+.caret::after { content: ""; display: inline-block; margin-left: 0.5em; border: 0.3em solid transparent; border-top-color: currentColor; border-bottom: 0; vertical-align: middle; }
+
+.workspace { display: block; min-height: 0; }
+.panel { background: var(--surface); border-top: 1px solid var(--line); min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s1) var(--s2); padding: var(--s3) var(--s4) var(--s2); }
+.panel-head h2 { margin: 0; font-size: 0.875rem; font-weight: 600; }
+.add-row { display: flex; gap: var(--s2); padding: 0 var(--s4) var(--s3); }
+.add-row select { flex: 1; }
+.field-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); max-height: 14rem; overflow: auto; }
+.row { display: flex; background: var(--surface); border-bottom: 1px solid var(--line); }
+.row.selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.row.drop-target { box-shadow: inset 0 3px 0 var(--accent); }
+.grip { flex: none; width: 1.75rem; display: grid; place-items: center; color: var(--muted); cursor: grab; touch-action: none; user-select: none; }
+.row-select { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s2); min-height: 2.75rem; padding: 0.25rem var(--s2) 0.25rem 0; border: 0; border-radius: 0; background: transparent; text-align: left; }
+.row-select:hover:not(:disabled) { background: rgba(0, 0, 0, 0.04); }
+.row-select:focus-visible { outline-offset: -2px; }
+.row-num { flex: none; width: 1.5rem; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.row-title { font-weight: 600; }
+.row.selected .row-title { font-weight: 700; }
+.row-meta { font-size: 0.8125rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-flag { flex: none; font-size: 0.8125rem; font-weight: 600; color: var(--danger); }
+.field-actions { display: flex; flex-wrap: wrap; gap: var(--s2); padding: var(--s3) var(--s4); border-top: 1px solid var(--line); }
+
+.stage-panel { display: flex; flex-direction: column; min-width: 0; background: var(--bg); border-top: 1px solid var(--line); }
+.stage-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); padding: var(--s2) var(--s4); background: var(--surface); border-bottom: 1px solid var(--line); }
+.stage-bar label { display: flex; align-items: center; gap: var(--s2); }
+.stage-bar .spacer { margin-left: auto; }
+.stage { flex: 1; min-height: 16rem; max-height: 75vh; overflow: auto; scrollbar-gutter: stable; padding: 1.5rem; }
+.paper { width: max-content; margin: 0 auto; }
+.stage-note { margin: 0; padding: var(--s1) var(--s4); font-size: 0.8125rem; color: var(--muted); background: var(--surface); border-top: 1px solid var(--line); }
+.canvas { position: relative; background-color: #fff; border: 1px solid var(--edge); user-select: none; touch-action: none; background-image: linear-gradient(to right, #d9dee2 1px, transparent 1px), linear-gradient(to bottom, #d9dee2 1px, transparent 1px); }
+.canvas.fine { background-image: linear-gradient(to right, #d9dee2 1px, transparent 1px), linear-gradient(to bottom, #d9dee2 1px, transparent 1px), linear-gradient(to right, #eef0f2 1px, transparent 1px), linear-gradient(to bottom, #eef0f2 1px, transparent 1px); }
+.canvas-fields { position: absolute; inset: 0; }
+.field { position: absolute; border: 1px solid var(--edge); background: rgba(11, 92, 173, 0.06); cursor: move; touch-action: none; }
+.field.selected { outline: 2px solid var(--accent); background: rgba(11, 92, 173, 0.14); z-index: 2; }
+.field.bad { border: 2px dashed var(--danger); background: var(--danger-soft); }
+.field .tag { display: none; position: absolute; left: 0; bottom: 100%; max-width: 14rem; padding: 0 0.25rem; font-size: 0.75rem; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); background: rgba(255, 255, 255, 0.9); pointer-events: none; }
+.field.selected .tag, .field.bad .tag, .field:hover .tag { display: block; }
+.field.bad .tag { color: var(--danger); font-weight: 600; }
+.clip { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.text-preview { position: absolute; left: 0; top: 0; transform-origin: top left; white-space: nowrap; display: flex; align-items: center; font-family: Consolas, "Courier New", monospace; color: #111; }
+.bars { position: absolute; left: 0; right: 0; top: 0; bottom: 22%; background: repeating-linear-gradient(90deg, #111 0 2px, transparent 2px 4px, #111 4px 5px, transparent 5px 8px, #111 8px 11px, transparent 11px 13px); }
+.digits { position: absolute; left: 0; right: 0; bottom: 0; height: 22%; text-align: center; white-space: nowrap; overflow: hidden; font-family: Consolas, monospace; color: #111; }
+.handle { position: absolute; z-index: 3; width: 1.5rem; height: 1.5rem; margin: -0.75rem 0 0 -0.75rem; touch-action: none; }
+.handle::before { content: ""; position: absolute; left: 50%; top: 50%; width: 0.625rem; height: 0.625rem; margin: -0.3125rem 0 0 -0.3125rem; background: #fff; border: 2px solid var(--accent); }
+.handle[data-dir=n] { left: 50%; top: 0; cursor: ns-resize; }
+.handle[data-dir=s] { left: 50%; top: 100%; cursor: ns-resize; }
+.handle[data-dir=w] { left: 0; top: 50%; cursor: ew-resize; }
+.handle[data-dir=e] { left: 100%; top: 50%; cursor: ew-resize; }
+.handle[data-dir=nw] { left: 0; top: 0; cursor: nwse-resize; }
+.handle[data-dir=se] { left: 100%; top: 100%; cursor: nwse-resize; }
+.handle[data-dir=ne] { left: 100%; top: 0; cursor: nesw-resize; }
+.handle[data-dir=sw] { left: 0; top: 100%; cursor: nesw-resize; }
+.guide { position: absolute; z-index: 4; background: var(--accent); pointer-events: none; }
+.guide.vertical { top: 0; bottom: 0; width: 1px; }
+.guide.horizontal { left: 0; right: 0; height: 1px; }
+.coord-tip { position: fixed; z-index: 40; padding: 0.25rem 0.5rem; border-radius: var(--r); background: var(--text); color: #fff; font-size: 0.8125rem; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+
+.empty { margin: 0; padding: var(--s2) var(--s4) var(--s4); color: var(--muted); }
+fieldset { margin: 0; padding: var(--s3) var(--s4); border: 0; border-top: 1px solid var(--line); min-width: 0; }
+legend { padding: 0; margin-bottom: var(--s2); font-weight: 600; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.fld, .stack { display: flex; flex-direction: column; gap: var(--s1); min-width: 0; }
+.fld > span, .stack > span { font-size: 0.8125rem; color: var(--muted); }
+.fld input, .fld select, .stack input, .stack select { width: 100%; }
+.mod { font-weight: 600; color: var(--accent); }
+.hint { margin: var(--s2) 0 0; font-size: 0.8125rem; color: var(--muted); }
+.msg { margin: var(--s1) 0 0; font-size: 0.8125rem; font-weight: 600; color: var(--danger); }
+.msg:empty { display: none; }
+fieldset button { margin-top: var(--s2); }
+
+.issues { max-height: 30vh; overflow: auto; padding: var(--s2) var(--s4); background: var(--surface); border-top: 1px solid var(--line); }
+.issues ul { margin: 0; padding-left: 1.25rem; }
+.issues button.link { color: var(--danger); }
+.statusbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s4); padding: var(--s1) var(--s4); font-size: 0.8125rem; background: var(--surface); border-top: 1px solid var(--line); }
+.statusbar button { min-height: 1.75rem; }
+#btnIssues.bad { border-color: var(--danger); color: var(--danger); font-weight: 600; }
+.status-msg { flex: 1; min-width: 12rem; margin: 0; }
+.persist { margin: 0; color: var(--muted); }
+
+dialog.dlg { width: 100%; max-width: min(34rem, calc(100vw - 2rem)); padding: 0; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--text); }
+dialog.dlg::backdrop { background: rgba(27, 33, 38, 0.5); }
+.dlg h2 { margin: 0; padding: var(--s3) var(--s4); font-size: 1rem; font-weight: 600; border-bottom: 1px solid var(--line); }
+.dlg h3 { margin: 0; font-size: 0.875rem; }
+.dlg-body { display: flex; flex-direction: column; gap: var(--s3); max-height: 65vh; overflow: auto; padding: var(--s3) var(--s4); }
+.dlg-body p, .dlg-body ul { margin: 0; }
+.dlg-body ul { padding-left: 1.25rem; }
+.dlg-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s2); padding: var(--s3) var(--s4); background: var(--surface-2); border-top: 1px solid var(--line); }
+.preset-row { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.check { display: flex; gap: var(--s2); align-items: flex-start; }
+textarea.json { width: 100%; min-height: 10rem; font-family: var(--mono); font-size: 0.8125rem; resize: vertical; }
+
+@media (pointer: coarse) {
+  button, input, select { min-height: 2.75rem; }
+  .handle { width: 2.75rem; height: 2.75rem; margin: -1.375rem 0 0 -1.375rem; }
+}
+@media (min-width: 68em) {
+  body { height: 100vh; overflow: hidden; }
+  .app { height: 100vh; min-height: 0; }
+  .workspace { display: grid; grid-template-columns: 19rem minmax(0, 1fr) 21rem; grid-template-rows: minmax(0, 1fr); }
+  .panel { overflow: auto; border-top: 0; }
+  .panel.fields { display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+  .panel.props { border-left: 1px solid var(--line); }
+  .field-list { flex: 1; max-height: none; min-height: 6rem; }
+  .stage-panel { min-height: 0; border-top: 0; }
+  .stage { max-height: none; min-height: 0; }
+}
+@media (forced-colors: active) {
+  .row.selected { outline: 2px solid Highlight; outline-offset: -2px; }
+  .handle::before { border-color: Highlight; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
 </style>
 </head>
 <body>
 <div class="app">
-  <header class="topbar">
-    <div class="brandline"><div class="logo">Open<span>Scale</span></div><div class="subtitle">Конструктор этикеток</div><div class="top-actions"><button id="newBtn" class="quiet">Новая</button><button id="openBtn">Открыть JSON</button><button id="copyBtn" title="Скопировать JSON раскладки (Ctrl+C)">Копировать</button><button id="pasteBtn" title="Вставить JSON раскладки (Ctrl+V)">Вставить</button><button id="copySaveBtn" title="Скачать под новым именем">Как копию</button><button id="saveBtn" class="primary">Скачать JSON</button></div></div>
-    <div class="toolbar"><label class="control name">ИМЯ РАСКЛАДКИ<input id="layoutName" aria-label="Имя раскладки"></label><div class="size-group"><label class="control dimension">ШИРИНА, ММ<input id="layoutWidth" type="number" step="0.5" min="20" max="80"></label><span class="size-separator">×</span><label class="control dimension">ВЫСОТА, ММ<input id="layoutHeight" type="number" step="0.5" min="20" max="200"></label></div><label class="control zoom">МАСШТАБ<select id="zoom"><option value="auto">Авто</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label><span class="toolbar-note">203 dpi · шаг 0,5 мм</span></div>
+  <header class="appbar">
+    <div class="appbar-row">
+      <h1 class="title">OpenScale <span>конструктор этикеток</span></h1>
+      <div class="commands" role="group" aria-label="Команды документа">
+        <button id="btnUndo" type="button" disabled>Отменить</button>
+        <button id="btnNew" type="button">Новая…</button>
+        <button id="btnOpen" type="button">Открыть файл…</button>
+        <button id="btnDownload" class="primary" type="button">Скачать JSON</button>
+        <div class="menu">
+          <button id="btnExchange" class="caret" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="menuExchange">Обмен JSON</button>
+          <div id="menuExchange" class="menu-list" hidden>
+            <button id="miCopy" type="button">Копировать JSON в буфер</button>
+            <button id="miPaste" type="button">Вставить JSON из буфера…</button>
+            <button id="miSaveAs" type="button">Скачать под другим именем…</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="docbar" role="group" aria-label="Параметры раскладки">
+      <label class="name"><span>Имя раскладки</span><input id="layoutName" autocomplete="off"></label>
+      <label class="dim"><span>Ширина, мм</span><input id="layoutWidth" type="number" step="0.5"></label>
+      <label class="dim"><span>Высота, мм</span><input id="layoutHeight" type="number" step="0.5"></label>
+      <span class="muted">203 dpi · шаг 0,5 мм</span>
+    </div>
   </header>
-  <div class="workspace">
-    <aside class="sidebar"><div class="side-head"><h2>Поля этикетки</h2><span class="count" id="fieldCount"></span></div><div id="fieldList" class="list" aria-label="Поля в порядке печати"></div><div class="addbar"><select id="kindSelect" aria-label="Тип нового поля"></select><button id="addBtn" class="primary">+ Добавить</button></div>
-      <div class="properties" id="properties"><div class="prop-head"><h2>Свойства поля</h2><span class="prop-kind" id="selectedKind"></span></div><div class="prop-empty" id="propEmpty">Выберите поле на этикетке или в списке, чтобы изменить его.</div><div id="propBody" hidden>
-        <section class="group"><h3>Положение · мм</h3><div class="prop-grid"><label class="prop-control"><span class="prop-label">Слева (X)</span><input id="propX" type="number" step="0.5"></label><label class="prop-control"><span class="prop-label">Сверху (Y)</span><input id="propY" type="number" step="0.5"></label></div></section>
-        <section class="group"><h3>Вид</h3><div class="prop-grid"><label class="prop-control"><span class="prop-label">Шрифт</span><select id="propFont"><option value="A">A · 3 × 4 мм</option><option value="B">B · 2 × 3 мм</option></select></label><label class="prop-control"><span class="prop-label">Размер знака</span><select id="propSize"><option value="1">1× обычный</option><option value="2">2× двойной</option></select></label><label class="prop-control" id="widthControl"><span class="prop-label">Ширина рамки, мм</span><input id="propWidth" type="number" min="0.5" step="0.5"></label><label class="prop-control" id="heightControl"><span class="prop-label">Высота рамки, мм</span><input id="propHeight" type="number" min="0.5" step="0.5"></label></div><p class="hint" id="naturalHint"></p><p class="warning" id="barcodeWarning" hidden>Штрихкод уже минимальной ширины 30 мм.</p><button id="resetBtn" class="reset">Сбросить размер рамки</button></section>
-        <section class="group" id="textGroup" hidden><h3>Текст</h3><label class="prop-control"><span class="prop-label">Надпись · до 48 символов</span><input id="propText" maxlength="48" placeholder="Введите текст"></label></section>
-        <button id="deleteBtn" class="quiet" style="color:var(--danger);padding-left:0">Удалить поле</button>
-      </div></div>
-    </aside>
-    <main class="stage" id="stage"><div class="stage-top"><strong>ПРЕДПРОСМОТР</strong><span>Перетащите поле или его маркеры</span></div><div class="paper-wrap"><div class="ruler-label" id="paperLabel"></div><div id="canvas" class="canvas"></div></div><div id="coordTip" class="coord-tip" hidden></div></main>
-  </div>
+
+  <main class="workspace">
+    <section class="panel fields" aria-labelledby="hFields">
+      <div class="panel-head"><h2 id="hFields">Поля</h2><span class="muted"><span id="fieldCount">0</span> · порядок печати сверху вниз</span></div>
+      <div class="add-row">
+        <label class="vh" for="kindSelect">Тип нового поля</label>
+        <select id="kindSelect"></select>
+        <button id="btnAdd" type="button">Добавить поле</button>
+      </div>
+      <ol id="fieldList" class="field-list" aria-label="Поля в порядке печати"></ol>
+      <div class="field-actions" role="group" aria-label="Действия над выбранным полем">
+        <button id="btnUp" type="button" aria-label="Выше в порядке печати" disabled>Выше</button>
+        <button id="btnDown" type="button" aria-label="Ниже в порядке печати" disabled>Ниже</button>
+        <button id="btnDup" type="button" aria-label="Дублировать поле" disabled>Дублировать</button>
+        <button id="btnDel" class="danger" type="button" aria-label="Удалить поле" disabled>Удалить</button>
+      </div>
+    </section>
+
+    <section class="stage-panel" aria-label="Макет этикетки">
+      <div class="stage-bar">
+        <label><span>Масштаб</span><select id="zoom"><option value="auto">Авто</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label>
+        <span id="paperSize" class="muted"></span>
+        <button id="btnHelp" class="spacer" type="button">Справка</button>
+      </div>
+      <div id="stage" class="stage">
+        <div class="paper">
+          <div id="canvas" class="canvas" tabindex="0" role="group" aria-label="Этикетка" aria-describedby="canvasHint">
+            <div id="canvasFields" class="canvas-fields" aria-hidden="true"></div>
+            <div id="guideX" class="guide vertical" hidden></div>
+            <div id="guideY" class="guide horizontal" hidden></div>
+          </div>
+        </div>
+      </div>
+      <p id="canvasHint" class="stage-note">Предпросмотр приблизительный: шрифты не печатные, штрихкод схематичен. С фокусом на макете стрелки сдвигают выбранное поле на 0,5 мм, Shift — на 2 мм.</p>
+    </section>
+
+    <section class="panel props" aria-labelledby="hProps">
+      <div class="panel-head"><h2 id="hProps">Свойства поля</h2><span id="propKind" class="muted"></span></div>
+      <p id="propEmpty" class="empty">Поле не выбрано. Выберите его в списке или на этикетке.</p>
+      <div id="propBody" class="props-body" hidden>
+        <fieldset>
+          <legend>Положение, мм</legend>
+          <div class="pair">
+            <label class="fld"><span>X, слева</span><input id="propX" type="number" step="0.5" data-msg="msgPos" aria-describedby="msgPos"></label>
+            <label class="fld"><span>Y, сверху</span><input id="propY" type="number" step="0.5" data-msg="msgPos" aria-describedby="msgPos"></label>
+          </div>
+          <p id="msgPos" class="msg"></p>
+        </fieldset>
+        <fieldset>
+          <legend>Знак печатного шрифта</legend>
+          <div class="pair">
+            <label class="fld"><span>Шрифт</span><select id="propFont" aria-describedby="msgView"><option value="A">A · 3 × 4 мм</option><option value="B">B · 2 × 3 мм</option></select></label>
+            <label class="fld"><span>Размер знака</span><select id="propSize" aria-describedby="msgView"><option value="1">1× обычный</option><option value="2">2× двойной</option></select></label>
+          </div>
+          <p id="msgView" class="msg"></p>
+        </fieldset>
+        <fieldset>
+          <legend>Рамка, мм</legend>
+          <div class="pair">
+            <label class="fld"><span>Ширина <span id="modW" class="mod" hidden>(изменено)</span></span><input id="propW" type="number" step="0.5" data-msg="msgFrame" aria-describedby="frameHint msgFrame"></label>
+            <label class="fld"><span>Высота <span id="modH" class="mod" hidden>(изменено)</span></span><input id="propH" type="number" step="0.5" data-msg="msgFrame" aria-describedby="frameHint msgFrame"></label>
+          </div>
+          <p id="frameHint" class="hint"></p>
+          <p id="msgFrame" class="msg"></p>
+          <button id="btnResetFrame" type="button">Сбросить рамку</button>
+        </fieldset>
+        <fieldset id="textGroup" hidden>
+          <legend>Текст</legend>
+          <label class="fld"><span>Надпись, до 48 символов</span><input id="propText" maxlength="48" autocomplete="off" aria-describedby="msgText"></label>
+          <p id="msgText" class="msg"></p>
+        </fieldset>
+      </div>
+    </section>
+  </main>
+
+  <section id="issuesPanel" class="issues" aria-label="Ошибки раскладки" hidden>
+    <ul id="issueList"></ul>
+  </section>
+  <footer class="statusbar">
+    <button id="btnIssues" type="button" aria-expanded="false" aria-controls="issuesPanel" disabled>Ошибок нет</button>
+    <p id="statusMsg" class="status-msg" role="status"></p>
+    <p id="persistInfo" class="persist"></p>
+  </footer>
 </div>
-<input id="fileInput" type="file" accept=".json,application/json" hidden><script>
+<div id="coordTip" class="coord-tip" hidden></div>
+<input id="fileInput" type="file" accept=".json,application/json" hidden>
+<script>
+(function () {
 'use strict';
-const KINDS=['name','plu','barcode','weight','price','sum','date','time','shelflife','cardprice','text'];
-const LABELS={name:'Название товара',plu:'Код PLU',barcode:'Штрихкод',weight:'Вес',price:'Цена',sum:'Сумма',date:'Дата',time:'Время',shelflife:'Срок годности',cardprice:'Цена по карте',text:'Произвольный текст'};
-const ICONS={name:'Aa',plu:'#',barcode:'|||',weight:'кг',price:'₽',sum:'Σ',date:'01',time:':',shelflife:'→',cardprice:'₽',text:'T'};
-const REQUIRED=['name','weight','sum','barcode'];
-const SAMPLE={name:'ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ',plu:'PLU 2502192',barcode:'210213601350',weight:'1,350 кг',price:'199,99 ₽/кг',sum:'269,99 ₽',date:'19.10.26',time:'18:40:00',shelflife:'Годен до 20.09.2026',cardprice:'Со скидкой: 249,99 ₽'};
-const KEY='openscale.labeldesigner.draft';
-const $=id=>document.getElementById(id);
-const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
-const S={layout:null,sel:-1,zoom:'auto',autoName:true,history:[],interaction:null,reorder:null,editFocus:null};
-const snap=n=>Math.round(n*2)/2;
-const clamp=(n,min,max)=>Math.min(Math.max(n,min),Math.max(min,max));
-const fl2=n=>Math.floor(n*2+1e-9)/2;
-const current=()=>S.layout&&S.layout.fields[S.sel];
-const isHalf=n=>Number.isFinite(n)&&Math.abs(n*2-Math.round(n*2))<1e-8;
-function starter(){return[{kind:'name',x:2,y:1,font:'B',size:1},{kind:'barcode',x:2,y:5,font:'A',size:1},{kind:'weight',x:2,y:21,font:'A',size:1},{kind:'price',x:2,y:26,font:'A',size:1},{kind:'sum',x:2,y:31,font:'A',size:1}]}
-function newLayout(w,h,persist=true){S.layout={format:1,name:w+'x'+h,width_mm:w,height_mm:h,fields:starter()};S.autoName=true;S.sel=-1;S.history=[];renderAll();if(persist)saveDraft()}
-function geom(f){
-  const m=f.size===2?2:1,cw=f.font==='B'?2:3,ch=f.font==='B'?3:4,bc=f.kind==='barcode';
-  let nw,nh,txt,cwm=0;
-  if(bc){nw=36*m;nh=14*m;txt=SAMPLE.barcode}
-  else{txt=f.kind==='text'?String(f.text||''):(Object.prototype.hasOwnProperty.call(SAMPLE,f.kind)?SAMPLE[f.kind]:String(f.kind));const mm=f.kind==='sum'?m*2:m;cwm=cw*mm;nw=Math.max(txt.length,1)*cwm;nh=ch*mm}
-  return{w:f.w>0?f.w:nw,h:f.h>0?f.h:nh,nw,nh,cwm,txt,minW:bc?30:Math.min(2,nw),minH:bc?8:nh/2,maxH:bc?nh*2:nh*3};
+// ==== src/core/constants.js ====
+const FORMAT_VERSION = 1;
+const KINDS = ['name', 'plu', 'barcode', 'weight', 'price', 'sum', 'date', 'time', 'shelflife', 'cardprice', 'text'];
+const LABELS = { name: 'Название товара', plu: 'Код PLU', barcode: 'Штрихкод', weight: 'Вес', price: 'Цена', sum: 'Сумма', date: 'Дата', time: 'Время', shelflife: 'Срок годности', cardprice: 'Цена по карте', text: 'Произвольный текст' };
+const REQUIRED = ['name', 'weight', 'sum', 'barcode'];
+const SAMPLE = { name: 'ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ', plu: 'PLU 2502192', barcode: '210213601350', weight: '1,350 кг', price: '199,99 ₽/кг', sum: '269,99 ₽', date: '19.10.26', time: '18:40:00', shelflife: 'Годен до 20.09.2026', cardprice: 'Со скидкой: 249,99 ₽' };
+const FONTS = ['A', 'B'];
+const SIZES = [1, 2];
+// Размер знака печатного шрифта в мм (ширина, высота). Это шрифты принтера этикеток, а не шрифт интерфейса.
+const FONT_INFO = { A: { cw: 3, ch: 4 }, B: { cw: 2, ch: 3 } };
+const LIMITS = {
+  width: [20, 80],
+  height: [20, 200],
+  textMax: 48,
+  textParseMax: 1000,
+  maxFields: 200,
+  maxChars: 524288,
+  maxAbs: 10000,
+  historyMax: 100,
+  canvasMaxPx: 4000
+};
+const PRESETS = [
+  { label: 'Узкая', w: 58, h: 20 },
+  { label: 'Средняя', w: 58, h: 30 },
+  { label: 'Квадрат', w: 40, h: 40 },
+  { label: 'Длинная', w: 58, h: 40 }
+];
+const DRAFT_KEY = 'openscale.labeldesigner.draft';
+
+// ==== src/core/geometry.js ====
+
+const snap = n => Math.round(n * 2) / 2;
+const fl2 = n => Math.floor(n * 2 + 1e-9) / 2;
+const clamp = (n, min, max) => Math.min(Math.max(n, min), Math.max(min, max));
+const isHalf = n => Number.isFinite(n) && Math.abs(n * 2 - Math.round(n * 2)) < 1e-8;
+const fmt = n => String(n).replace('.', ',');
+
+// Естественный размер поля по предметной модели: шрифт A/B, размер знака 1/2, образец текста.
+// w/h в поле — необязательные переопределения рамки (мм).
+function geom(f) {
+  const m = f.size === 2 ? 2 : 1;
+  const { cw, ch } = FONT_INFO[f.font === 'B' ? 'B' : 'A'];
+  const isBarcode = f.kind === 'barcode';
+  let nw, nh, txt, cwm = 0;
+  if (isBarcode) {
+    nw = 36 * m; nh = 14 * m; txt = SAMPLE.barcode;
+  } else {
+    txt = f.kind === 'text' ? String(f.text || '') : (Object.prototype.hasOwnProperty.call(SAMPLE, f.kind) ? SAMPLE[f.kind] : String(f.kind));
+    const mm = f.kind === 'sum' ? m * 2 : m;
+    cwm = cw * mm;
+    nw = Math.max(txt.length, 1) * cwm;
+    nh = ch * mm;
+  }
+  return {
+    w: f.w > 0 ? f.w : nw,
+    h: f.h > 0 ? f.h : nh,
+    nw, nh, cwm, txt,
+    minW: isBarcode ? 30 : Math.min(2, nw),
+    minH: isBarcode ? 8 : nh / 2,
+    maxH: isBarcode ? nh * 2 : nh * 3
+  };
 }
-function setOverride(f,key,v,natural){if(v==null||Math.abs(v-natural)<1e-9)delete f[key];else f[key]=v}
-function outOfBounds(f){const g=geom(f),L=S.layout;return !(f.x>=0&&f.y>=0&&f.x+g.w<=L.width_mm+1e-9&&f.y+g.h<=L.height_mm+1e-9)}
-function fieldErrors(f){const g=geom(f);return !KINDS.includes(f.kind)||!['A','B'].includes(f.font)||![1,2].includes(f.size)||!isHalf(f.x)||!isHalf(f.y)||outOfBounds(f)||(f.w!==undefined&&(!isHalf(f.w)||f.w<g.minW))||(f.h!==undefined&&(!isHalf(f.h)||f.h<g.minH||f.h>g.maxH))||(f.kind==='text'&&(!String(f.text||'').trim()||f.text.length>48))}
-function validate(){
-  const L=S.layout,errors=[];
-  if(L.format!==1)errors.push('format должен быть равен 1');
-  if(!String(L.name||'').trim())errors.push('Имя раскладки пустое');
-  if(!(L.width_mm>=20&&L.width_mm<=80&&isHalf(L.width_mm)))errors.push('Ширина должна быть 20–80 мм, с шагом 0,5 мм');
-  if(!(L.height_mm>=20&&L.height_mm<=200&&isHalf(L.height_mm)))errors.push('Высота должна быть 20–200 мм, с шагом 0,5 мм');
-  REQUIRED.forEach(k=>{if(!L.fields.some(f=>f.kind===k))errors.push('Нет обязательного поля: '+LABELS[k])});
-  L.fields.forEach((f,i)=>{
-    const label='Поле №'+(i+1)+' ('+(LABELS[f.kind]||f.kind)+')',g=geom(f);
-    if(!KINDS.includes(f.kind))errors.push(label+': неизвестный тип');
-    if(!['A','B'].includes(f.font)||![1,2].includes(f.size))errors.push(label+': некорректный шрифт или размер');
-    if(f.kind==='text'&&(!String(f.text||'').trim()||f.text.length>48))errors.push(label+': текст должен содержать от 1 до 48 символов');
-    if(!isHalf(f.x)||!isHalf(f.y))errors.push(label+': координаты должны быть кратны 0,5 мм');
-    if(f.w!==undefined&&(!isHalf(f.w)||f.w<g.minW))errors.push(label+': ширина рамки от '+g.minW+' мм, шаг 0,5 мм');
-    if(f.h!==undefined&&(!isHalf(f.h)||f.h<g.minH-1e-9||f.h>g.maxH+1e-9))errors.push(label+': высота рамки '+g.minH+'–'+g.maxH+' мм, шаг 0,5 мм');
-    if(outOfBounds(f))errors.push(label+': выходит за границу этикетки');
-  });return errors;
+
+function outOfBounds(f, L) {
+  const g = geom(f);
+  return !(f.x >= 0 && f.y >= 0 && f.x + g.w <= L.width_mm + 1e-9 && f.y + g.h <= L.height_mm + 1e-9);
 }
-function checkpoint(){if(!S.layout)return;S.history.push({layout:JSON.stringify(S.layout),sel:S.sel,autoName:S.autoName});if(S.history.length>80)S.history.shift()}
-function undo(){const prev=S.history.pop();if(!prev)return;S.layout=JSON.parse(prev.layout);S.sel=prev.sel;S.autoName=prev.autoName;renderAll();saveDraft();toast('Действие отменено')}
-function saveDraft(){try{localStorage.setItem(KEY,JSON.stringify(S.layout))}catch(_){}}
-function loadDraft(){try{const value=JSON.parse(localStorage.getItem(KEY));return value&&Array.isArray(value.fields)?value:null}catch(_){return null}}
-function changed(persist=true){renderTop();renderList();syncProps();renderCanvas();if(persist)saveDraft()}
-function scale(){return S.zoom==='auto'?Math.max(1,Math.min(12,($('stage').clientWidth-100)/Math.max(1,S.layout.width_mm))):S.zoom}
-function renderTop(){const L=S.layout;if(!L)return;for(const [id,value] of [['layoutName',L.name],['layoutWidth',L.width_mm],['layoutHeight',L.height_mm]])if(document.activeElement!==$(id))$(id).value=value}
-function renderList(){
-  const box=$('fieldList');box.replaceChildren();$('fieldCount').textContent=S.layout.fields.length+' · сверху печатается последним';
-  S.layout.fields.forEach((f,i)=>{
-    const row=el('div','field-row'+(i===S.sel?' selected':'')+(fieldErrors(f)?' bad':''));row.dataset.index=i;row.tabIndex=0;
-    const grip=el('span','grip','⋮⋮');grip.title='Перетащите, чтобы изменить порядок печати';grip.setAttribute('aria-label','Переместить поле');
-    const glyph=el('span','glyph',ICONS[f.kind]||'?'),copy=el('div','row-copy');copy.append(el('div','row-title',LABELS[f.kind]||f.kind));
-    const g=geom(f);copy.append(el('div','row-meta',f.x+'; '+f.y+' мм · '+g.w+' × '+g.h+(f.kind==='text'?' · '+(f.text||''):'')));
-    const actions=el('div','row-actions'),dup=el('button','icon-button','⧉'),del=el('button','icon-button','×');dup.title='Дублировать поле';dup.setAttribute('aria-label','Дублировать поле');del.title='Удалить поле';del.setAttribute('aria-label','Удалить поле');
-    dup.onclick=e=>{e.stopPropagation();duplicate(i)};del.onclick=e=>{e.stopPropagation();removeField(i)};actions.append(dup,del);row.append(grip,glyph,copy,actions);
-    row.onclick=()=>{S.sel=i;renderAll()};row.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();S.sel=i;renderAll()}};
-    grip.onpointerdown=e=>startReorder(e,i);
-    box.append(row);
-  });
+
+// Привязка перемещения: центр этикетки и левые/верхние края других полей, затем шаг 0,5 мм.
+function snapMove(L, index, rawX, rawY, scale) {
+  const g = geom(L.fields[index]);
+  const limit = Math.min(1.5, Math.max(0.5, 6 / scale));
+  const xs = [{ value: (L.width_mm - g.w) / 2, line: L.width_mm / 2 }];
+  const ys = [{ value: (L.height_mm - g.h) / 2, line: L.height_mm / 2 }];
+  L.fields.forEach((o, i) => { if (i !== index) { xs.push({ value: o.x, line: o.x }); ys.push({ value: o.y, line: o.y }); } });
+  const nearest = (v, targets) => targets.reduce((b, t) => (Math.abs(v - t.value) < Math.abs(v - b.value) ? t : b), { value: Infinity, line: null });
+  let x = rawX, y = rawY;
+  const guides = {};
+  const sx = nearest(x, xs), sy = nearest(y, ys);
+  if (Math.abs(x - sx.value) <= limit) { x = sx.value; guides.x = sx.line; }
+  if (Math.abs(y - sy.value) <= limit) { y = sy.value; guides.y = sy.line; }
+  return { x: clamp(snap(x), 0, fl2(L.width_mm - g.w)), y: clamp(snap(y), 0, fl2(L.height_mm - g.h)), guides };
 }
-function syncProps(){
-  const f=current();$('propEmpty').hidden=!!f;$('propBody').hidden=!f;$('selectedKind').textContent=f?(LABELS[f.kind]||f.kind):'';if(!f)return;
-  const set=(id,value)=>{if(document.activeElement!==$(id))$(id).value=value};const g=geom(f);
-  set('propX',f.x);set('propY',f.y);set('propFont',f.font);set('propSize',f.size);set('propWidth',g.w);set('propHeight',g.h);set('propText',f.text||'');
-  $('widthControl').classList.toggle('custom',f.w!==undefined);$('heightControl').classList.toggle('custom',f.h!==undefined);
-  $('naturalHint').textContent='Естественный размер: '+g.nw+' × '+g.nh+' мм. Боковые маркеры меняют ширину, верхние и нижние — высоту, угловые — размер знака.';
-  $('barcodeWarning').hidden=f.kind!=='barcode'||g.w>30;
-  $('textGroup').hidden=f.kind!=='text';
+
+// ==== src/core/validate.js ====
+
+const widthIssue = w => (w >= LIMITS.width[0] && w <= LIMITS.width[1] && isHalf(w) ? null : 'Ширина должна быть 20–80 мм, с шагом 0,5 мм');
+const heightIssue = h => (h >= LIMITS.height[0] && h <= LIMITS.height[1] && isHalf(h) ? null : 'Высота должна быть 20–200 мм, с шагом 0,5 мм');
+
+// Проблемы одного поля: [{prop, message}]. prop: kind | style | text | pos | w | h | bounds
+function fieldIssues(f, L) {
+  const out = [];
+  const add = (prop, message) => out.push({ prop, message });
+  const g = geom(f);
+  if (!KINDS.includes(f.kind)) add('kind', 'неизвестный тип');
+  if (!FONTS.includes(f.font) || !SIZES.includes(f.size)) add('style', 'некорректный шрифт или размер');
+  if (f.kind === 'text') {
+    const t = typeof f.text === 'string' ? f.text : '';
+    if (!t.trim() || t.length > LIMITS.textMax) add('text', 'текст должен содержать от 1 до 48 символов');
+  }
+  if (!isHalf(f.x) || !isHalf(f.y)) add('pos', 'координаты должны быть кратны 0,5 мм');
+  if (f.w !== undefined && (!isHalf(f.w) || f.w < g.minW - 1e-9)) add('w', 'ширина рамки от ' + fmt(g.minW) + ' мм, шаг 0,5 мм');
+  if (f.h !== undefined && (!isHalf(f.h) || f.h < g.minH - 1e-9 || f.h > g.maxH + 1e-9)) add('h', 'высота рамки ' + fmt(g.minH) + '–' + fmt(g.maxH) + ' мм, шаг 0,5 мм');
+  if (outOfBounds(f, L)) add('bounds', 'выходит за границу этикетки');
+  return out;
 }
-function renderCanvas(guides){
-  if(!S.layout)return;const L=S.layout,z=scale(),cv=$('canvas');
-  cv.style.width=L.width_mm*z+'px';cv.style.height=L.height_mm*z+'px';cv.classList.toggle('fine',z>=5);cv.classList.toggle('coarse',z<5);
-  cv.style.backgroundSize=z>=5?`${5*z}px ${5*z}px,${5*z}px ${5*z}px,${z}px ${z}px,${z}px ${z}px`:`${5*z}px ${5*z}px,${5*z}px ${5*z}px`;
-  $('paperLabel').textContent=L.width_mm+' × '+L.height_mm+' мм';cv.replaceChildren();
-  L.fields.forEach((f,i)=>{
-    const g=geom(f),node=el('div','field'+(i===S.sel?' selected':'')+(fieldErrors(f)?' bad':''));node.dataset.index=i;
-    Object.assign(node.style,{left:f.x*z+'px',top:f.y*z+'px',width:g.w*z+'px',height:g.h*z+'px'});
-    node.append(el('span','tag',LABELS[f.kind]||f.kind));
-    const clip=el('div','clip');if(f.kind==='barcode'){
-      clip.append(el('div','bars'));const digits=el('div','barcode-digits',g.txt);digits.style.fontSize=Math.max(6,Math.min(12,g.h*z*.19))+'px';clip.append(digits);
-    }else{
-      const t=el('div','text-preview',g.txt);Object.assign(t.style,{width:g.nw*z+'px',height:g.nh*z+'px',transform:'scaleY('+g.h/g.nh+')',fontSize:Math.max(5,Math.min(g.nh*z*.8,g.cwm*z/.6))+'px'});clip.append(t);
-    }node.append(clip);
-    if(i===S.sel)['n','s','e','w','ne','nw','se','sw'].forEach(dir=>{const h=el('span','handle');h.dataset.dir=dir;node.append(h)});
-    cv.append(node);
-  });
-  if(guides){if(guides.x!=null){const line=el('div','guide vertical');line.style.left=guides.x*z+'px';cv.append(line)}if(guides.y!=null){const line=el('div','guide horizontal');line.style.top=guides.y*z+'px';cv.append(line)}}
+
+// Проблемы раскладки: [{field, prop, message}], field = -1 для документа в целом.
+function validateLayout(L) {
+  const issues = [];
+  const add = (field, prop, message) => issues.push({ field, prop, message });
+  if (L.format !== 1) add(-1, 'format', 'format должен быть равен 1');
+  if (!String(L.name || '').trim()) add(-1, 'name', 'Имя раскладки пустое');
+  const wi = widthIssue(L.width_mm);
+  if (wi) add(-1, 'width', wi);
+  const hi = heightIssue(L.height_mm);
+  if (hi) add(-1, 'height', hi);
+  REQUIRED.forEach(k => { if (!L.fields.some(f => f.kind === k)) add(-1, 'required', 'Нет обязательного поля: ' + LABELS[k]); });
+  L.fields.forEach((f, i) => fieldIssues(f, L).forEach(x => add(i, x.prop, x.message)));
+  return issues;
 }
-function renderAll(){renderTop();renderList();syncProps();renderCanvas()}
-function toast(message){document.querySelector('.toast')?.remove();const t=el('div','toast',message);document.body.append(t);setTimeout(()=>t.remove(),2300)}function modal(title,body,buttons,locked=false){
-  const bg=el('div','modal-back'),box=el('div','modal'),actions=el('div','modal-actions');if(locked)bg.dataset.locked='1';
-  box.setAttribute('role','dialog');box.setAttribute('aria-modal','true');box.append(el('h2',null,title),body);
-  const close=()=>bg.remove();buttons.forEach(({text,primary,action})=>{const btn=el('button',primary?'primary':'',text);btn.onclick=()=>{if(action&&action(close)===false)return;close()};actions.append(btn)});box.append(actions);bg.append(box);document.body.append(bg);actions.querySelector('.primary')?.focus();return close;
+
+function describeIssue(L, issue) {
+  if (issue.field < 0) return issue.message;
+  const f = L.fields[issue.field];
+  return 'Поле №' + (issue.field + 1) + ' (' + (LABELS[f.kind] || f.kind) + '): ' + issue.message;
 }
-function showErrors(errors,title='Ошибки валидации'){const body=el('div');body.append(el('p',null,'Проверьте раскладку перед сохранением.'));const ul=el('ul');errors.forEach(msg=>ul.append(el('li',null,msg)));body.append(ul);modal(title,body,[{text:'Понятно',primary:true}])}
-function newDialog(){
-  const body=el('div'),p=el('p',null,'Выберите размер этикетки в миллиметрах. Текущая раскладка останется в истории отмены только до открытия другой.');body.append(p);
-  const presets=el('div','form-row'),mk=(label,w,h)=>{const b=el('button',null,label);b.onclick=()=>{wInput.value=w;hInput.value=h};presets.append(b)};
-  mk('Узкая 58×20',58,20);mk('Средняя 58×30',58,30);mk('Квадрат 40×40',40,40);mk('Длинная 58×40',58,40);
-  const row=el('div','form-row'),make=(label,value)=>{const wrap=el('label',null,label),input=el('input');input.type='number';input.step='0.5';input.value=value;wrap.append(input);row.append(wrap);return input};
-  const wInput=make('Ширина · 20–80',58),hInput=make('Высота · 20–200',40),err=el('div','error');body.append(presets,row,err);
-  modal('Новая раскладка',body,[{text:'Отмена'},{text:'Создать',primary:true,action:()=>{const a=+wInput.value,b=+hInput.value;if(!(a>=20&&a<=80&&b>=20&&b<=200&&isHalf(a)&&isHalf(b))){err.textContent='Укажите размер в допустимых пределах с шагом 0,5 мм';return false}newLayout(a,b)}}]);
-}
-function parseLayout(data){
-  if(!data||typeof data!=='object'||Array.isArray(data)||!Array.isArray(data.fields))throw Error('нет массива fields');
-  const numeric=(v,label)=>{if(typeof v!=='number'||!Number.isFinite(v))throw Error(label+' должен быть числом');return v};
-  const fields=data.fields.map((f,i)=>{
-    const fail=message=>{throw Error('битое поле №'+(i+1)+': '+message)};
-    if(!f||typeof f!=='object'||Array.isArray(f))fail('ожидается объект');
-    if(!KINDS.includes(f.kind))fail('неизвестный тип');
-    if(typeof f.x!=='number'||!Number.isFinite(f.x)||typeof f.y!=='number'||!Number.isFinite(f.y))fail('некорректные координаты');
-    if(!['A','B'].includes(f.font)||![1,2].includes(f.size))fail('некорректный шрифт или размер');
-    if(f.w!==undefined&&(typeof f.w!=='number'||!Number.isFinite(f.w)||f.w<=0))fail('некорректная ширина рамки');
-    if(f.h!==undefined&&(typeof f.h!=='number'||!Number.isFinite(f.h)||f.h<=0))fail('некорректная высота рамки');
-    if(f.kind==='text'&&typeof f.text!=='string')fail('некорректный текст');
-    const out={kind:f.kind,x:f.x,y:f.y,font:f.font,size:f.size};if(f.kind==='text')out.text=f.text;if(f.w!==undefined)out.w=f.w;if(f.h!==undefined)out.h=f.h;return out;
-  });
-  return{format:data.format,name:data.name==null?'':String(data.name),width_mm:numeric(data.width_mm,'Ширина'),height_mm:numeric(data.height_mm,'Высота'),fields};
-}
-function loadLayout(data){const layout=parseLayout(data);S.layout=layout;S.sel=-1;S.autoName=layout.name===layout.width_mm+'x'+layout.height_mm;S.history=[];renderAll();saveDraft();const errors=validate();if(errors.length)showErrors(errors,'Файл открыт с ошибками');else toast('Раскладка открыта')}
-function exportObject(){const L=S.layout;return{format:1,name:L.name,width_mm:L.width_mm,height_mm:L.height_mm,fields:L.fields.map(f=>{const out={kind:f.kind};if(f.kind==='text')out.text=f.text;out.x=f.x;out.y=f.y;out.font=f.font;out.size=f.size;return out})}}
-function jsonText(){const errors=validate();if(errors.length){showErrors(errors);return null}return JSON.stringify(exportObject(),null,2)}
-function download(name=S.layout.name){const text=jsonText();if(!text)return;const output=exportObject();output.name=name;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(output,null,2)],{type:'application/json'}));a.download='label-'+name.replace(/[\\/:*?"<>|\s]+/g,'_')+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
-function copyDialog(){const body=el('div');body.append(el('p',null,'Копия получит своё имя; текущая раскладка не изменится.'));const row=el('div','form-row'),label=el('label',null,'Имя копии'),input=el('input'),error=el('div','error');input.value=S.layout.name+'-copy';label.append(input);row.append(label);body.append(row,error);modal('Сохранить как копию',body,[{text:'Отмена'},{text:'Скачать копию',primary:true,action:()=>{const name=input.value.trim();if(!name){error.textContent='Введите имя копии';return false}download(name)}}]);input.select()}
-function pasteDialog(){const body=el('div');body.append(el('p',null,'Вставьте JSON раскладки. Текущая раскладка будет заменена.'));const area=el('textarea');Object.assign(area.style,{width:'100%',minHeight:'170px',resize:'vertical',padding:'10px',border:'1px solid #c8d1cc',borderRadius:'7px',font:'12px monospace'});area.placeholder='{"format":1,"name":"58x40",...}';const err=el('div','error');body.append(area,err);modal('Импорт из буфера',body,[{text:'Отмена'},{text:'Открыть JSON',primary:true,action:()=>{try{loadLayout(JSON.parse(area.value))}catch(e){err.textContent='Не удалось открыть JSON: '+e.message;return false}}}]);area.focus();if(navigator.clipboard?.readText)navigator.clipboard.readText().then(text=>{if(!area.value)area.value=text}).catch(()=>{})}
-function removeField(i){checkpoint();S.layout.fields.splice(i,1);S.sel=S.sel===i?Math.min(i,S.layout.fields.length-1):S.sel>i?S.sel-1:S.sel;changed();toast('Поле удалено · Ctrl+Z для отмены')}
-function duplicate(i){checkpoint();const f={...S.layout.fields[i]},g=geom(f);f.x=clamp(snap(f.x+2),0,fl2(S.layout.width_mm-g.w));f.y=clamp(snap(f.y+2),0,fl2(S.layout.height_mm-g.h));S.layout.fields.splice(i+1,0,f);S.sel=i+1;changed()}
-function startReorder(e,index){if(e.button!==0&&e.pointerType==='mouse')return;e.preventDefault();e.stopPropagation();S.reorder={index,target:index,pointerId:e.pointerId};window.addEventListener('pointermove',moveReorder);window.addEventListener('pointerup',endReorder,{once:true})}
-function moveReorder(e){if(!S.reorder||e.pointerId!==S.reorder.pointerId)return;document.querySelectorAll('.drop-target').forEach(row=>row.classList.remove('drop-target'));const row=document.elementFromPoint(e.clientX,e.clientY)?.closest('.field-row');if(row&&$('fieldList').contains(row)){S.reorder.target=+row.dataset.index;row.classList.add('drop-target')}}
-function endReorder(e){window.removeEventListener('pointermove',moveReorder);document.querySelectorAll('.drop-target').forEach(row=>row.classList.remove('drop-target'));const move=S.reorder;S.reorder=null;if(!move||e.pointerId!==move.pointerId||move.target===move.index)return;checkpoint();const [field]=S.layout.fields.splice(move.index,1);S.layout.fields.splice(move.target,0,field);S.sel=move.target;changed()}
-KINDS.forEach(kind=>{const option=el('option',null,LABELS[kind]);option.value=kind;$('kindSelect').append(option)});
-$('newBtn').onclick=newDialog;void 0;$('saveBtn').onclick=()=>download();$('copySaveBtn').onclick=()=>{const errors=validate();if(errors.length)showErrors(errors);else copyDialog()};
-$('fileInput').onchange=e=>{const file=e.target.files[0];e.target.value='';if(!file)return;const reader=new FileReader();reader.onload=()=>{try{loadLayout(JSON.parse(reader.result))}catch(err){showErrors(['Не удалось открыть файл: '+err.message],'Ошибка открытия')}};reader.onerror=()=>showErrors(['Не удалось прочитать файл'],'Ошибка открытия');reader.readAsText(file)};
-$('copyBtn').onclick=async()=>{const text=jsonText();if(!text)return;try{await navigator.clipboard.writeText(text);toast('JSON скопирован')}catch(_){const body=el('div');const area=el('textarea');area.value=text;Object.assign(area.style,{width:'100%',height:'170px'});body.append(el('p',null,'Выделите JSON и скопируйте вручную.'),area);modal('Копировать JSON',body,[{text:'Закрыть',primary:true}]);area.select()}};
-$('pasteBtn').onclick=pasteDialog;
-$('layoutName').addEventListener('focus',()=>checkpoint());$('layoutName').oninput=e=>{S.layout.name=e.target.value;S.autoName=e.target.value===S.layout.width_mm+'x'+S.layout.height_mm;saveDraft()};
-function setLayoutSize(){const w=parseFloat($('layoutWidth').value),h=parseFloat($('layoutHeight').value);if(Number.isFinite(w)&&w>0&&Number.isFinite(h)&&h>0){checkpoint();S.layout.width_mm=w;S.layout.height_mm=h;if(S.autoName)S.layout.name=w+'x'+h;changed()}else renderTop()}
-$('layoutWidth').onchange=setLayoutSize;$('layoutHeight').onchange=setLayoutSize;
-$('zoom').onchange=e=>{S.zoom=e.target.value==='auto'?'auto':+e.target.value;renderCanvas()};window.addEventListener('resize',()=>{if(S.layout&&S.zoom==='auto')renderCanvas()});
-$('addBtn').onclick=()=>{checkpoint();const kind=$('kindSelect').value,f={kind,x:2,y:2,font:'A',size:1};if(kind==='text')f.text='ТЕКСТ';S.layout.fields.push(f);S.sel=S.layout.fields.length-1;changed()};
-$('deleteBtn').onclick=()=>{if(current())removeField(S.sel)};$('resetBtn').onclick=()=>{if(!current())return;checkpoint();delete current().w;delete current().h;changed()};
-function numericProperty(id,key,natural){const input=$(id);input.onfocus=()=>{if(current()){checkpoint();S.editFocus=id}};input.oninput=()=>{const f=current(),value=parseFloat(input.value);if(!f||!Number.isFinite(value))return;if(natural){if(value>0)setOverride(f,key,value,geom(f)[natural])}else f[key]=value;changed()};input.onblur=()=>{S.editFocus=null;if(current())input.value=natural?geom(current())[key]:current()[key]}};
-numericProperty('propX','x');numericProperty('propY','y');numericProperty('propWidth','w','nw');numericProperty('propHeight','h','nh');
-for(const [id,key,convert] of [['propFont','font',v=>v],['propSize','size',Number],['propText','text',v=>v]]){$(id).onfocus=()=>checkpoint();$(id).onchange=e=>{if(current()){current()[key]=convert(e.target.value);changed()}};if(id==='propText')$(id).oninput=e=>{if(current()){current().text=e.target.value;changed()}}}
-function showTip(e,f){const tip=$('coordTip');tip.hidden=false;tip.textContent='X '+f.x+' мм  ·  Y '+f.y+' мм  ·  '+geom(f).w+' × '+geom(f).h;tip.style.left=Math.min(e.clientX+15,window.innerWidth-205)+'px';tip.style.top=Math.min(e.clientY+15,window.innerHeight-38)+'px'}
-function hideTip(){$('coordTip').hidden=true}
-function snapGuides(f,index,x,y){
-  const L=S.layout,g=geom(f),limit=Math.min(1.5,Math.max(.5,6/scale())),xs=[{value:(L.width_mm-g.w)/2,line:L.width_mm/2}],ys=[{value:(L.height_mm-g.h)/2,line:L.height_mm/2}];
-  L.fields.forEach((other,i)=>{if(i===index)return;xs.push({value:other.x,line:other.x});ys.push({value:other.y,line:other.y})});
-  const nearest=(value,targets)=>targets.reduce((best,target)=>Math.abs(value-target.value)<Math.abs(value-best.value)?target:best,{value:Infinity,line:null});
-  const sx=nearest(x,xs),sy=nearest(y,ys),guides={};if(Math.abs(x-sx.value)<=limit){x=sx.value;guides.x=sx.line}if(Math.abs(y-sy.value)<=limit){y=sy.value;guides.y=sy.line}
-  return{x:clamp(snap(x),0,fl2(L.width_mm-g.w)),y:clamp(snap(y),0,fl2(L.height_mm-g.h)),guides};
-}
-$('stage').addEventListener('pointerdown',e=>{
-  const handle=e.target.closest('.handle'),node=e.target.closest('.field');if(!node||!$('canvas').contains(node)){if(S.sel!==-1){S.sel=-1;renderAll()}return}
-  const index=+node.dataset.index;S.sel=index;const f=current(),g=geom(f);checkpoint();
-  S.interaction={type:handle?'resize':'move',dir:handle?.dataset.dir,index,cx:e.clientX,cy:e.clientY,x:f.x,y:f.y,w:g.w,h:g.h,nw:g.nw,nh:g.nh,fw:f.w,fh:f.h,font:f.font,size:f.size,moved:false};
-  if(!handle)renderAll();e.preventDefault();
-});
-// Sides alter the frame, top/bottom alter vertical scale; corners select the nearest A/B x 1/2 geometry.
-function resizeStep(e,r){
-  const f=current(),L=S.layout,z=scale(),d=r.dir,dx=(e.clientX-r.cx)/z,dy=(e.clientY-r.cy)/z;
-  f.font=r.font;f.size=r.size;f.x=r.x;f.y=r.y;if(r.fw==null)delete f.w;else f.w=r.fw;if(r.fh==null)delete f.h;else f.h=r.fh;
-  const g=geom(f);
-  if(d==='e'||d==='w'){
-    const maxW=d==='e'?L.width_mm-r.x:r.x+r.w,tw=clamp(snap(r.w+(d==='e'?dx:-dx)),g.minW,maxW);setOverride(f,'w',tw,g.nw);if(d==='w')f.x=r.x+r.w-tw;
-  }else if(d==='n'||d==='s'){
-    const maxH=Math.min(g.maxH,d==='s'?L.height_mm-r.y:r.y+r.h),th=clamp(snap(r.h+(d==='s'?dy:-dy)),g.minH,maxH);setOverride(f,'h',th,g.nh);if(d==='n')f.y=r.y+r.h-th;
-  }else{
-    const tw=r.w+(d.includes('e')?dx:-dx),th=r.h+(d.includes('s')?dy:-dy);let best=null;
-    for(const font of ['A','B'])for(const size of [1,2]){
-      if(f.kind==='barcode'&&font==='B')continue;
-      const gn=geom({...f,font,size,w:undefined,h:undefined});const bw=r.fw==null?gn.nw:snap(r.fw*gn.nw/r.nw),bh=r.fh==null?gn.nh:snap(r.fh*gn.nh/r.nh);
-      const x=d.includes('w')?r.x+r.w-bw:r.x,y=d.includes('n')?r.y+r.h-bh:r.y;
-      if(x<0||y<0||x+bw>L.width_mm+1e-9||y+bh>L.height_mm+1e-9)continue;
-      const score=Math.abs(bw-tw)/r.w+Math.abs(bh-th)/r.h;if(!best||score<best.score)best={score,font:f.kind==='barcode'?f.font:font,size,x,y,bw,bh,gn};
-    }
-    if(!best)return;f.font=best.font;f.size=best.size;f.x=best.x;f.y=best.y;setOverride(f,'w',r.fw==null?null:best.bw,best.gn.nw);setOverride(f,'h',r.fh==null?null:best.bh,best.gn.nh);
+
+// ==== src/core/format.js ====
+
+class ImportError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ImportError';
   }
 }
-window.addEventListener('pointermove',e=>{
-  const r=S.interaction;if(!r||!current())return;const f=current();let guides;
-  if(r.type==='resize')resizeStep(e,r);
-  else{const pos=snapGuides(f,r.index,r.x+(e.clientX-r.cx)/scale(),r.y+(e.clientY-r.cy)/scale());f.x=pos.x;f.y=pos.y;guides=pos.guides}
-  r.moved=true;changed(false);renderCanvas(guides);showTip(e,f);
+
+const TOP_KEYS = ['format', 'name', 'width_mm', 'height_mm', 'fields'];
+const FIELD_KEYS = ['kind', 'x', 'y', 'font', 'size', 'text', 'w', 'h'];
+const isNum = v => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= LIMITS.maxAbs;
+
+// Структурный разбор. Любая ошибка — ImportError; текущая раскладка при этом не затрагивается.
+// Допустимые, но неверные значения (вне диапазонов, не кратные 0,5) загружаются и помечаются валидатором.
+function parseLayout(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.fields)) throw new ImportError('нет массива fields');
+  if (data.format !== FORMAT_VERSION) {
+    throw new ImportError(data.format === undefined ? 'нет свойства format; поддерживается только format: 1' : 'неподдерживаемый format: ' + String(data.format) + '; поддерживается только format: 1');
+  }
+  if (data.fields.length > LIMITS.maxFields) throw new ImportError('полей больше ' + LIMITS.maxFields);
+  const size = (v, label) => {
+    if (typeof v !== 'number' || !Number.isFinite(v)) throw new ImportError(label + ' должен быть числом');
+    if (v <= 0 || v > LIMITS.maxAbs) throw new ImportError(label + ' вне допустимого диапазона разбора (0–' + LIMITS.maxAbs + ' мм)');
+    return v;
+  };
+  const width = size(data.width_mm, 'Ширина');
+  const height = size(data.height_mm, 'Высота');
+  const ignored = [];
+  Object.keys(data).forEach(k => { if (!TOP_KEYS.includes(k)) ignored.push(k); });
+  const fields = data.fields.map((f, i) => {
+    const fail = message => { throw new ImportError('битое поле №' + (i + 1) + ': ' + message); };
+    if (!f || typeof f !== 'object' || Array.isArray(f)) fail('ожидается объект');
+    if (!KINDS.includes(f.kind)) fail('неизвестный тип');
+    if (!isNum(f.x) || !isNum(f.y)) fail('некорректные координаты');
+    if (!FONTS.includes(f.font) || !SIZES.includes(f.size)) fail('некорректный шрифт или размер');
+    if (f.w !== undefined && !(isNum(f.w) && f.w > 0)) fail('некорректная ширина рамки');
+    if (f.h !== undefined && !(isNum(f.h) && f.h > 0)) fail('некорректная высота рамки');
+    if (f.kind === 'text') {
+      if (typeof f.text !== 'string') fail('некорректный текст');
+      if (f.text.length > LIMITS.textParseMax) fail('текст длиннее ' + LIMITS.textParseMax + ' символов');
+    }
+    Object.keys(f).forEach(k => { if (!FIELD_KEYS.includes(k) || (k === 'text' && f.kind !== 'text')) ignored.push('fields[' + i + '].' + k); });
+    const out = { kind: f.kind, x: f.x, y: f.y, font: f.font, size: f.size };
+    if (f.kind === 'text') out.text = f.text;
+    if (f.w !== undefined) out.w = f.w;
+    if (f.h !== undefined) out.h = f.h;
+    return out;
+  });
+  return { layout: { format: 1, name: data.name == null ? '' : String(data.name), width_mm: width, height_mm: height, fields }, ignored };
+}
+
+function parseJson(text) {
+  if (typeof text !== 'string') throw new ImportError('ожидается текст JSON');
+  if (text.length > LIMITS.maxChars) throw new ImportError('данные больше ' + LIMITS.maxChars / 1024 + ' КиБ');
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new ImportError('некорректный JSON: ' + e.message);
+  }
+  return parseLayout(data);
+}
+
+// Экспорт формата 1. Порядок ключей совпадает с оригиналом. w/h пишутся только по явному запросу
+// (includeFrames) — это расширение формата, см. docs/01-original-audit.md, вопрос Q1.
+function toObject(L, opts = {}) {
+  const { includeFrames = false, name } = opts;
+  return {
+    format: 1,
+    name: name === undefined ? L.name : name,
+    width_mm: L.width_mm,
+    height_mm: L.height_mm,
+    fields: L.fields.map(f => {
+      const o = { kind: f.kind };
+      if (f.kind === 'text') o.text = f.text;
+      o.x = f.x; o.y = f.y; o.font = f.font; o.size = f.size;
+      if (includeFrames) {
+        if (f.w !== undefined) o.w = f.w;
+        if (f.h !== undefined) o.h = f.h;
+      }
+      return o;
+    })
+  };
+}
+
+const toJson = (L, opts) => JSON.stringify(toObject(L, opts), null, 2);
+const countFrames = L => L.fields.filter(f => f.w !== undefined || f.h !== undefined).length;
+const fileNameFor = name => 'label-' + String(name).replace(/[\\/:*?"<>|\s]+/g, '_') + '.json';
+
+// Локальный черновик хранит всё, что понимает редактор, включая w/h. Формат совместим с черновиком оригинала.
+const encodeDraft = L => JSON.stringify(toObject(L, { includeFrames: true }));
+const decodeDraft = raw => parseJson(raw);
+
+// ==== src/core/model.js ====
+
+// Все операции чистые: возвращают новый объект раскладки и не изменяют аргумент.
+
+function patchField(L, i, patch) {
+  const f = { ...L.fields[i] };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) delete f[k]; else f[k] = v;
+  }
+  return { ...L, fields: L.fields.map((o, j) => (j === i ? f : o)) };
+}
+
+// Рамка w/h: значение, равное естественному размеру, не хранится как переопределение.
+function setFrame(L, i, key, value) {
+  const natural = geom(L.fields[i])[key === 'w' ? 'nw' : 'nh'];
+  return patchField(L, i, { [key]: value == null || Math.abs(value - natural) < 1e-9 ? undefined : value });
+}
+
+const resetFrame = (L, i) => patchField(L, i, { w: undefined, h: undefined });
+
+function defaultField(kind, L) {
+  const base = { kind, x: 2, y: 2, font: 'A', size: 1 };
+  if (kind === 'text') base.text = 'ТЕКСТ';
+  const fitting = FONTS.find(font => 2 + geom({ ...base, font }).nw <= L.width_mm + 1e-9);
+  const f = { ...base, font: fitting || 'B' };
+  const g = geom(f);
+  f.x = clamp(2, 0, fl2(L.width_mm - g.w));
+  f.y = clamp(2, 0, fl2(L.height_mm - g.h));
+  return f;
+}
+
+const addField = (L, kind) => ({ ...L, fields: [...L.fields, defaultField(kind, L)] });
+const removeField = (L, i) => ({ ...L, fields: L.fields.filter((_, j) => j !== i) });
+
+function duplicateField(L, i) {
+  const f = { ...L.fields[i] };
+  const g = geom(f);
+  f.x = clamp(snap(f.x + 2), 0, fl2(L.width_mm - g.w));
+  f.y = clamp(snap(f.y + 2), 0, fl2(L.height_mm - g.h));
+  const fields = [...L.fields];
+  fields.splice(i + 1, 0, f);
+  return { ...L, fields };
+}
+
+function moveField(L, from, to) {
+  const n = L.fields.length;
+  if (from === to || from < 0 || to < 0 || from >= n || to >= n) return L;
+  const fields = [...L.fields];
+  const [f] = fields.splice(from, 1);
+  fields.splice(to, 0, f);
+  return { ...L, fields };
+}
+
+// Имя вида «58x40» следует за размером, пока пользователь не задал своё.
+function resizeLayout(L, w, h) {
+  const auto = L.name === L.width_mm + 'x' + L.height_mm;
+  return { ...L, width_mm: w, height_mm: h, name: auto ? w + 'x' + h : L.name };
+}
+
+const renameLayout = (L, name) => ({ ...L, name });
+
+const mk = (kind, x, y, font, size, extra) => ({ kind, x, y, font, size, ...extra });
+// Стартовые наборы. [0] — исходный набор оригинала (подходит 58×40). Остальные подобраны так,
+// чтобы штатные пресеты 58×30, 58×20 и 40×40 не имели ошибок. Для 58×20 и 40×40 без w/h не обойтись
+// (см. docs/01-original-audit.md, F-04).
+const STARTERS = [
+  [mk('name', 2, 1, 'B', 1), mk('barcode', 2, 5, 'A', 1), mk('weight', 2, 21, 'A', 1), mk('price', 2, 26, 'A', 1), mk('sum', 2, 31, 'A', 1)],
+  [mk('name', 2, 1, 'B', 1), mk('barcode', 2, 5, 'A', 1), mk('weight', 40, 5, 'B', 1), mk('price', 2, 19.5, 'A', 1), mk('sum', 2, 24, 'B', 1)],
+  [mk('name', 2, 0.5, 'B', 1), mk('barcode', 2, 4, 'A', 1, { h: 8 }), mk('weight', 2, 12.5, 'B', 1), mk('price', 2, 16, 'B', 1), mk('sum', 26, 12.5, 'B', 1)],
+  [mk('name', 2, 1, 'B', 1, { w: 36 }), mk('barcode', 2, 5, 'A', 1), mk('weight', 2, 20, 'A', 1), mk('price', 2, 25, 'A', 1), mk('sum', 2, 30, 'B', 1)]
+];
+
+function starterFields(w, h) {
+  let best = STARTERS[0];
+  let bestScore = Infinity;
+  for (const c of STARTERS) {
+    const score = validateLayout({ format: 1, name: 'x', width_mm: w, height_mm: h, fields: c }).length;
+    if (score < bestScore) { best = c; bestScore = score; }
+  }
+  return best.map(f => ({ ...f }));
+}
+
+const createLayout = (w, h) => ({ format: 1, name: w + 'x' + h, width_mm: w, height_mm: h, fields: starterFields(w, h) });
+const layoutsEqual = (a, b) => toJson(a, { includeFrames: true }) === toJson(b, { includeFrames: true });
+
+// ==== src/core/gestures.js ====
+
+// Жесты вычисляются от неизменной базовой раскладки (base), поэтому отмена жеста — это возврат к base.
+
+function moveGesture(base, index, dx, dy, scale) {
+  const f = base.fields[index];
+  const p = snapMove(base, index, f.x + dx, f.y + dy, scale);
+  return { layout: patchField(base, index, { x: p.x, y: p.y }), guides: p.guides };
+}
+
+function nudge(L, index, dx, dy, step) {
+  const f = L.fields[index];
+  const g = geom(f);
+  return patchField(L, index, {
+    x: clamp(snap(f.x + dx * step), 0, fl2(L.width_mm - g.w)),
+    y: clamp(snap(f.y + dy * step), 0, fl2(L.height_mm - g.h))
+  });
+}
+
+// Семантика маркеров:
+//  e, w        — ширина рамки (переопределение w); w сохраняет правый край;
+//  n, s        — высота рамки (переопределение h, вертикальный масштаб знака); n сохраняет нижний край;
+//  ne,nw,se,sw — ближайшее сочетание шрифта A/B и размера знака 1×/2×; w/h масштабируются пропорционально.
+function resizeGesture(L, index, dir, dx, dy) {
+  const f0 = L.fields[index];
+  const g0 = geom(f0);
+  const W = L.width_mm, H = L.height_mm;
+  const ov = (v, natural) => (Math.abs(v - natural) < 1e-9 ? undefined : v);
+  if (dir === 'e' || dir === 'w') {
+    const maxW = fl2(dir === 'e' ? W - f0.x : f0.x + g0.w);
+    const tw = clamp(snap(g0.w + (dir === 'e' ? dx : -dx)), g0.minW, maxW);
+    const patch = { w: ov(tw, g0.nw) };
+    if (dir === 'w') patch.x = f0.x + g0.w - tw;
+    return patchField(L, index, patch);
+  }
+  if (dir === 'n' || dir === 's') {
+    const maxH = fl2(Math.min(g0.maxH, dir === 's' ? H - f0.y : f0.y + g0.h));
+    const th = clamp(snap(g0.h + (dir === 's' ? dy : -dy)), g0.minH, maxH);
+    const patch = { h: ov(th, g0.nh) };
+    if (dir === 'n') patch.y = f0.y + g0.h - th;
+    return patchField(L, index, patch);
+  }
+  const east = dir.includes('e'), south = dir.includes('s');
+  const tw = g0.w + (east ? dx : -dx);
+  const th = g0.h + (south ? dy : -dy);
+  let best = null;
+  for (const font of FONTS) {
+    for (const size of SIZES) {
+      if (f0.kind === 'barcode' && font === 'B') continue;
+      const gn = geom({ ...f0, font, size, w: undefined, h: undefined });
+      const bw = f0.w === undefined ? gn.nw : clamp(snap(f0.w * gn.nw / g0.nw), gn.minW, Infinity);
+      const bh = f0.h === undefined ? gn.nh : clamp(snap(f0.h * gn.nh / g0.nh), gn.minH, gn.maxH);
+      const x = east ? f0.x : f0.x + g0.w - bw;
+      const y = south ? f0.y : f0.y + g0.h - bh;
+      if (x < 0 || y < 0 || x + bw > W + 1e-9 || y + bh > H + 1e-9) continue;
+      const score = Math.abs(bw - tw) / g0.w + Math.abs(bh - th) / g0.h;
+      if (!best || score < best.score) best = { score, font: f0.kind === 'barcode' ? f0.font : font, size, x, y, bw, bh, gn };
+    }
+  }
+  if (!best) return L;
+  return patchField(L, index, {
+    font: best.font,
+    size: best.size,
+    x: best.x,
+    y: best.y,
+    w: f0.w === undefined ? undefined : ov(best.bw, best.gn.nw),
+    h: f0.h === undefined ? undefined : ov(best.bh, best.gn.nh)
+  });
+}
+
+// ==== src/core/history.js ====
+// История отмены. Запись: {label, layout, sel, key}; layout и sel — состояние ДО действия.
+// Записи с одинаковым key подряд объединяются (набор текста, повторы стрелок) до breakGroup().
+function createHistory(limit) {
+  const stack = [];
+  let lastKey = null;
+  return {
+    push(entry) {
+      if (entry.key !== undefined && entry.key === lastKey) return false;
+      stack.push(entry);
+      if (stack.length > limit) stack.shift();
+      lastKey = entry.key === undefined ? null : entry.key;
+      return true;
+    },
+    undo() {
+      lastKey = null;
+      return stack.pop() || null;
+    },
+    breakGroup() {
+      lastKey = null;
+    },
+    clear() {
+      stack.length = 0;
+      lastKey = null;
+    },
+    get size() {
+      return stack.length;
+    }
+  };
+}
+
+// ==== src/app/platform.js ====
+// Адаптеры браузерных API. Принимают зависимости параметрами, чтобы отказы можно было проверять без браузера.
+const errMsg = e => (e && e.message) || String(e);
+
+function createDraftStore(getStorage, key) {
+  return {
+    read() {
+      try {
+        const s = getStorage();
+        if (!s) return { ok: false, error: 'хранилище недоступно' };
+        return { ok: true, value: s.getItem(key) };
+      } catch (e) {
+        return { ok: false, error: errMsg(e) };
+      }
+    },
+    write(text) {
+      try {
+        const s = getStorage();
+        if (!s) return { ok: false, error: 'хранилище недоступно' };
+        s.setItem(key, text);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: errMsg(e) };
+      }
+    }
+  };
+}
+
+async function copyText(clipboard, text) {
+  if (!clipboard || typeof clipboard.writeText !== 'function') return { ok: false, error: 'Clipboard API недоступен' };
+  try {
+    await clipboard.writeText(text);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: errMsg(e) };
+  }
+}
+
+async function readClipboardText(clipboard) {
+  if (!clipboard || typeof clipboard.readText !== 'function') return { ok: false, error: 'Clipboard API недоступен' };
+  try {
+    return { ok: true, value: await clipboard.readText() };
+  } catch (e) {
+    return { ok: false, error: errMsg(e) };
+  }
+}
+
+// Браузер сохраняет новый файл; открытый файл на диске этим не изменяется.
+function downloadFile(env, filename, text) {
+  try {
+    const url = env.URL.createObjectURL(new env.Blob([text], { type: 'application/json' }));
+    const a = env.document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    env.document.body.append(a);
+    a.click();
+    a.remove();
+    env.setTimeout(() => env.URL.revokeObjectURL(url), 1000);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: errMsg(e) };
+  }
+}
+
+// ==== src/app/main.js ====
+
+// Оболочка интерфейса. Правила документа — в src/core; браузерные API — через env и platform.js.
+function start(env) {
+  const doc = env.document;
+  const $ = id => doc.getElementById(id);
+  const el = (tag, cls, text) => {
+    const n = doc.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  };
+  const setText = (n, t) => { if (n.textContent !== t) n.textContent = t; };
+  const store = createDraftStore(() => env.storage(), DRAFT_KEY);
+  const history = createHistory(LIMITS.historyMax);
+  const state = { layout: null, sel: -1, zoom: 'auto', z: 1, gesture: null, reorder: null, guides: {}, draft: '', file: '', issuesSig: '' };
+  const canvas = $('canvas');
+  const fieldsBox = $('canvasFields');
+  const list = $('fieldList');
+  const HANDLES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
+  const clock = () => new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const nameOf = f => LABELS[f.kind] || f.kind;
+
+  // ---------- сообщения и сохранение ----------
+  function say(text, withUndo) {
+    const box = $('statusMsg');
+    box.replaceChildren(el('span', null, text));
+    if (withUndo) {
+      const b = el('button', 'link', 'Отменить');
+      b.type = 'button';
+      b.addEventListener('click', undo);
+      box.append(b);
+    }
+  }
+  function persist() {
+    const r = store.write(encodeDraft(state.layout));
+    state.draft = r.ok ? 'Черновик в браузере: сохранён ' + clock() : 'Черновик не сохраняется: ' + r.error;
+  }
+  function rescue(fallback) {
+    const a = doc.activeElement;
+    if (!a || a === doc.body || a.disabled) fallback.focus();
+  }
+
+  // ---------- отрисовка: обновление на месте, узлы не пересоздаются ----------
+  function scaleFor() {
+    const L = state.layout;
+    const z = state.zoom === 'auto' ? Math.max(1, Math.min(12, ($('stage').clientWidth - 48) / Math.max(1, L.width_mm))) : state.zoom;
+    return Math.min(z, LIMITS.canvasMaxPx / Math.max(L.width_mm, L.height_mm, 1));
+  }
+  function makeRow() {
+    const li = el('li', 'row');
+    const grip = el('span', 'grip', '⋮⋮');
+    grip.setAttribute('aria-hidden', 'true');
+    grip.title = 'Перетащите, чтобы изменить порядок печати';
+    const b = el('button', 'row-select');
+    b.type = 'button';
+    const body = el('span', 'row-body');
+    body.append(el('span', 'row-title'), el('span', 'row-meta'));
+    b.append(el('span', 'row-num'), body, el('span', 'row-flag'));
+    li.append(grip, b);
+    return li;
+  }
+  function makeNode() {
+    const n = el('div', 'field');
+    n.append(el('span', 'tag'), el('div', 'clip'));
+    return n;
+  }
+  function syncTop(ctx) {
+    const L = state.layout;
+    for (const [id, v] of [['layoutName', L.name], ['layoutWidth', L.width_mm], ['layoutHeight', L.height_mm]]) {
+      const n = $(id);
+      if ((ctx.force || doc.activeElement !== n) && n.value !== String(v)) n.value = String(v);
+    }
+    $('btnUndo').disabled = history.size === 0;
+    $('zoom').value = String(state.zoom);
+    setText($('paperSize'), fmt(L.width_mm) + ' × ' + fmt(L.height_mm) + ' мм');
+  }
+  function syncList(ctx) {
+    const L = state.layout;
+    while (list.children.length < L.fields.length) list.append(makeRow());
+    while (list.children.length > L.fields.length) list.lastElementChild.remove();
+    L.fields.forEach((f, i) => {
+      const li = list.children[i];
+      const b = li.children[1];
+      const g = geom(f);
+      const bad = ctx.byField.has(i);
+      li.classList.toggle('selected', i === state.sel);
+      li.classList.toggle('bad', bad);
+      if (i === state.sel) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current');
+      setText(b.querySelector('.row-num'), String(i + 1));
+      setText(b.querySelector('.row-title'), nameOf(f));
+      setText(b.querySelector('.row-meta'), 'X ' + fmt(f.x) + ', Y ' + fmt(f.y) + ' · ' + fmt(g.w) + ' × ' + fmt(g.h) + ' мм' + (f.kind === 'text' ? ' · ' + (f.text || '') : ''));
+      setText(b.querySelector('.row-flag'), bad ? 'Ошибка' : '');
+    });
+    setText($('fieldCount'), String(L.fields.length));
+    const has = state.sel >= 0;
+    $('btnUp').disabled = !has || state.sel === 0;
+    $('btnDown').disabled = !has || state.sel === L.fields.length - 1;
+    $('btnDup').disabled = !has;
+    $('btnDel').disabled = !has;
+  }
+  function syncProps(ctx) {
+    const f = state.layout.fields[state.sel];
+    $('propEmpty').hidden = !!f;
+    $('propBody').hidden = !f;
+    setText($('propKind'), f ? nameOf(f) : '');
+    if (!f) return;
+    const g = geom(f);
+    const issues = ctx.byField.get(state.sel) || [];
+    const put = (id, v) => {
+      const n = $(id);
+      if ((ctx.force || doc.activeElement !== n) && n.value !== String(v)) n.value = String(v);
+    };
+    put('propX', f.x); put('propY', f.y); put('propFont', f.font); put('propSize', f.size);
+    put('propW', g.w); put('propH', g.h); put('propText', f.text === undefined ? '' : f.text);
+    $('textGroup').hidden = f.kind !== 'text';
+    $('modW').hidden = f.w === undefined;
+    $('modH').hidden = f.h === undefined;
+    $('btnResetFrame').disabled = f.w === undefined && f.h === undefined;
+    const slots = { msgPos: ['pos', 'bounds'], msgView: ['style', 'kind'], msgFrame: ['w', 'h'], msgText: ['text'] };
+    for (const id in slots) setText($(id), issues.filter(i => slots[id].includes(i.prop)).map(i => 'Ошибка: ' + i.message).join(' '));
+    const has = p => issues.some(i => i.prop === p);
+    const bounds = has('bounds');
+    const bx = bounds && (f.x < 0 || f.x + g.w > state.layout.width_mm + 1e-9);
+    const by = bounds && (f.y < 0 || f.y + g.h > state.layout.height_mm + 1e-9);
+    const invalid = { propX: has('pos') || bx, propY: has('pos') || by, propFont: has('style'), propSize: has('style'), propW: has('w'), propH: has('h'), propText: has('text') };
+    for (const id in invalid) {
+      if (invalid[id]) $(id).setAttribute('aria-invalid', 'true'); else $(id).removeAttribute('aria-invalid');
+    }
+    setText($('frameHint'), 'Естественный размер ' + fmt(g.nw) + ' × ' + fmt(g.nh) + ' мм. Допустимо: ширина от ' + fmt(g.minW) + ', высота ' + fmt(g.minH) + '–' + fmt(g.maxH) + ' мм.' + (f.kind === 'barcode' && g.w <= 30 ? ' Достигнута минимальная ширина штрихкода.' : ''));
+  }
+  function syncCanvas(ctx) {
+    const L = state.layout;
+    const z = scaleFor();
+    state.z = z;
+    canvas.style.width = L.width_mm * z + 'px';
+    canvas.style.height = L.height_mm * z + 'px';
+    canvas.classList.toggle('fine', z >= 5);
+    const major = 5 * z + 'px ' + 5 * z + 'px';
+    const minor = z + 'px ' + z + 'px';
+    canvas.style.backgroundSize = z >= 5 ? major + ',' + major + ',' + minor + ',' + minor : major + ',' + major;
+    while (fieldsBox.children.length < L.fields.length) fieldsBox.append(makeNode());
+    while (fieldsBox.children.length > L.fields.length) fieldsBox.lastElementChild.remove();
+    L.fields.forEach((f, i) => {
+      const node = fieldsBox.children[i];
+      const g = geom(f);
+      const bad = ctx.byField.has(i);
+      node.style.left = f.x * z + 'px';
+      node.style.top = f.y * z + 'px';
+      node.style.width = g.w * z + 'px';
+      node.style.height = g.h * z + 'px';
+      node.classList.toggle('selected', i === state.sel);
+      node.classList.toggle('bad', bad);
+      node.title = nameOf(f);
+      setText(node.firstChild, (bad ? '! ' : '') + nameOf(f));
+      const clip = node.children[1];
+      if (node.dataset.kind !== f.kind) {
+        node.dataset.kind = f.kind;
+        clip.replaceChildren(...(f.kind === 'barcode' ? [el('div', 'bars'), el('div', 'digits')] : [el('div', 'text-preview')]));
+      }
+      if (f.kind === 'barcode') {
+        setText(clip.lastChild, g.txt);
+        clip.lastChild.style.fontSize = Math.max(6, Math.min(12, g.h * z * 0.19)) + 'px';
+      } else {
+        const t = clip.firstChild;
+        const vis = g.txt.slice(0, Math.ceil(g.w / g.cwm) + 1);
+        setText(t, vis);
+        t.style.width = Math.min(g.nw, vis.length * g.cwm) * z + 'px';
+        t.style.height = g.nh * z + 'px';
+        t.style.transform = 'scaleY(' + g.h / g.nh + ')';
+        t.style.fontSize = Math.max(5, Math.min(g.nh * z * 0.8, g.cwm * z / 0.6)) + 'px';
+      }
+      const has = node.querySelector('.handle') !== null;
+      if (i === state.sel && !has) HANDLES.forEach(d => { const h = el('span', 'handle'); h.dataset.dir = d; node.append(h); });
+      if (i !== state.sel && has) node.querySelectorAll('.handle').forEach(h => h.remove());
+    });
+    const gx = $('guideX'), gy = $('guideY');
+    gx.hidden = state.guides.x == null;
+    gy.hidden = state.guides.y == null;
+    if (!gx.hidden) gx.style.left = state.guides.x * z + 'px';
+    if (!gy.hidden) gy.style.top = state.guides.y * z + 'px';
+  }
+  function syncInfo() {
+    setText($('persistInfo'), [state.draft, state.file].filter(Boolean).join(' · '));
+  }
+  function fillIssues(issues) {
+    const texts = issues.map(i => describeIssue(state.layout, i));
+    const sig = texts.join('\n');
+    const ul = $('issueList');
+    if (sig === state.issuesSig && ul.children.length) return;
+    state.issuesSig = sig;
+    ul.replaceChildren();
+    issues.forEach((is, k) => {
+      const li = el('li');
+      const b = el('button', 'link', texts[k]);
+      b.type = 'button';
+      b.addEventListener('click', () => gotoIssue(is));
+      li.append(b);
+      ul.append(li);
+    });
+  }
+  function setIssuesOpen(open) {
+    $('issuesPanel').hidden = !open;
+    $('btnIssues').setAttribute('aria-expanded', String(open));
+    if (open) fillIssues(validateLayout(state.layout));
+  }
+  function syncStatus(ctx) {
+    const n = ctx.issues.length;
+    const b = $('btnIssues');
+    setText(b, n ? 'Ошибок: ' + n : 'Ошибок нет');
+    b.disabled = n === 0;
+    b.classList.toggle('bad', n > 0);
+    if (n === 0 && !$('issuesPanel').hidden) setIssuesOpen(false);
+    if (!$('issuesPanel').hidden) fillIssues(ctx.issues);
+    syncInfo();
+  }
+  function render(opts) {
+    const issues = validateLayout(state.layout);
+    const byField = new Map();
+    issues.forEach(is => {
+      if (is.field >= 0) {
+        if (!byField.has(is.field)) byField.set(is.field, []);
+        byField.get(is.field).push(is);
+      }
+    });
+    const ctx = { force: !!(opts && opts.force), issues, byField };
+    syncTop(ctx); syncList(ctx); syncProps(ctx); syncCanvas(ctx); syncStatus(ctx);
+  }
+
+  // ---------- изменения документа ----------
+  function commit(label, next, opts) {
+    const o = opts || {};
+    if (layoutsEqual(state.layout, next)) return false;
+    history.push({ label, layout: state.layout, sel: state.sel, key: o.key });
+    state.layout = next;
+    if (o.sel !== undefined) state.sel = o.sel;
+    $('statusMsg').replaceChildren();
+    persist();
+    render({ force: o.force !== false });
+    return true;
+  }
+  function select(i) {
+    if (state.sel === i) return;
+    state.sel = i;
+    history.breakGroup();
+    render({ force: true });
+  }
+  function undo() {
+    if (cancelActive()) return;
+    const e = history.undo();
+    if (!e) { say('Нечего отменять'); return; }
+    state.layout = e.layout;
+    state.sel = e.sel;
+    persist();
+    render({ force: true });
+    say('Отменено: ' + e.label);
+    rescue(canvas);
+  }
+  function gotoIssue(is) {
+    const target = { pos: 'propX', bounds: 'propX', style: 'propFont', kind: 'propFont', w: 'propW', h: 'propH', text: 'propText', name: 'layoutName', width: 'layoutWidth', height: 'layoutHeight', required: 'kindSelect', format: 'layoutName' }[is.prop];
+    if (is.field >= 0) select(is.field);
+    $(target).focus();
+  }
+  function removeSelected() {
+    const i = state.sel;
+    if (i < 0) return;
+    const f = state.layout.fields[i];
+    const next = removeField(state.layout, i);
+    commit('удаление поля', next, { sel: Math.min(i, next.fields.length - 1) });
+    say('Удалено поле «' + nameOf(f) + '»', true);
+    rescue(state.sel >= 0 ? list.children[state.sel].children[1] : $('kindSelect'));
+  }
+  function duplicateSelected() {
+    commit('дублирование поля', duplicateField(state.layout, state.sel), { sel: state.sel + 1 });
+    say('Поле продублировано: №' + (state.sel + 1));
+  }
+  function moveSelected(d) {
+    const i = state.sel, j = i + d;
+    if (i < 0 || j < 0 || j >= state.layout.fields.length) return;
+    commit('изменение порядка полей', moveField(state.layout, i, j), { sel: j });
+    say('Поле перемещено на позицию ' + (j + 1) + ' из ' + state.layout.fields.length);
+    rescue(list.children[state.sel].children[1]);
+  }
+
+  // ---------- жесты на макете ----------
+  function endGesture(apply) {
+    const g = state.gesture;
+    state.gesture = null;
+    state.guides = {};
+    $('coordTip').hidden = true;
+    const after = state.layout;
+    state.layout = g.base;
+    const done = apply && g.moved && commit(g.type === 'move' ? 'перемещение поля' : 'изменение размера поля', after, { sel: g.index });
+    if (!done) render({ force: true });
+  }
+  function clearDrop() {
+    list.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+  }
+  function endReorder(apply) {
+    const r = state.reorder;
+    state.reorder = null;
+    clearDrop();
+    if (apply && r.to !== r.from) {
+      commit('изменение порядка полей', moveField(state.layout, r.from, r.to), { sel: r.to });
+      say('Поле перемещено на позицию ' + (r.to + 1) + ' из ' + state.layout.fields.length);
+    }
+  }
+  function cancelActive() {
+    if (state.gesture) {
+      try { canvas.releasePointerCapture(state.gesture.pointerId); } catch (_) { /* захват уже снят */ }
+      endGesture(false);
+      return true;
+    }
+    if (state.reorder) {
+      endReorder(false);
+      return true;
+    }
+    return false;
+  }
+  function showTip(e) {
+    const f = state.layout.fields[state.gesture.index];
+    const g = geom(f);
+    const tip = $('coordTip');
+    tip.hidden = false;
+    setText(tip, 'X ' + fmt(f.x) + ' · Y ' + fmt(f.y) + ' · ' + fmt(g.w) + ' × ' + fmt(g.h) + ' мм');
+    tip.style.left = Math.min(e.clientX + 14, env.window.innerWidth - 220) + 'px';
+    tip.style.top = Math.min(e.clientY + 14, env.window.innerHeight - 40) + 'px';
+  }
+  canvas.addEventListener('pointerdown', e => {
+    if (state.gesture || state.reorder || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    canvas.focus({ preventScroll: true });
+    const node = e.target.closest('.field');
+    if (!node) {
+      if (state.sel !== -1) { state.sel = -1; history.breakGroup(); render({ force: true }); }
+      return;
+    }
+    e.preventDefault();
+    const handle = e.target.closest('.handle');
+    const index = Array.prototype.indexOf.call(fieldsBox.children, node);
+    if (state.sel !== index) { state.sel = index; history.breakGroup(); render({ force: true }); }
+    state.gesture = { pointerId: e.pointerId, type: handle ? 'resize' : 'move', dir: handle ? handle.dataset.dir : null, index, x0: e.clientX, y0: e.clientY, base: state.layout, moved: false };
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* указатель уже недоступен */ }
+  });
+  canvas.addEventListener('pointermove', e => {
+    const g = state.gesture;
+    if (!g || e.pointerId !== g.pointerId) return;
+    const dx = (e.clientX - g.x0) / state.z, dy = (e.clientY - g.y0) / state.z;
+    if (g.type === 'move') {
+      const r = moveGesture(g.base, g.index, dx, dy, state.z);
+      state.layout = r.layout;
+      state.guides = r.guides;
+    } else {
+      state.layout = resizeGesture(g.base, g.index, g.dir, dx, dy);
+    }
+    g.moved = true;
+    render({ force: true });
+    showTip(e);
+  });
+  canvas.addEventListener('pointerup', e => {
+    if (state.gesture && e.pointerId === state.gesture.pointerId) endGesture(true);
+  });
+  const lost = e => {
+    if (state.gesture && e.pointerId === state.gesture.pointerId) endGesture(false);
+  };
+  canvas.addEventListener('pointercancel', lost);
+  canvas.addEventListener('lostpointercapture', lost);
+  canvas.addEventListener('focus', () => history.breakGroup());
+  canvas.addEventListener('blur', () => history.breakGroup());
+  canvas.addEventListener('keydown', e => {
+    if (e.altKey || e.ctrlKey || e.metaKey || state.sel < 0 || state.gesture) return;
+    const dx = { ArrowLeft: -1, ArrowRight: 1 }[e.key] || 0;
+    const dy = { ArrowUp: -1, ArrowDown: 1 }[e.key] || 0;
+    if (!dx && !dy) return;
+    e.preventDefault();
+    commit('перемещение поля', nudge(state.layout, state.sel, dx, dy, e.shiftKey ? 2 : 0.5), { key: 'nudge:' + state.sel });
+  });
+
+  // ---------- список полей ----------
+  const rowOf = n => n.closest('.row');
+  const rowIndex = row => Array.prototype.indexOf.call(list.children, row);
+  list.addEventListener('click', e => {
+    const b = e.target.closest('.row-select');
+    if (b) select(rowIndex(rowOf(b)));
+  });
+  list.addEventListener('pointerdown', e => {
+    const grip = e.target.closest('.grip');
+    if (!grip || state.reorder || state.gesture || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault();
+    const from = rowIndex(rowOf(grip));
+    state.reorder = { pointerId: e.pointerId, from, to: from };
+    try { grip.setPointerCapture(e.pointerId); } catch (_) { /* указатель уже недоступен */ }
+  });
+  list.addEventListener('pointermove', e => {
+    const r = state.reorder;
+    if (!r || e.pointerId !== r.pointerId) return;
+    const hit = doc.elementFromPoint(e.clientX, e.clientY);
+    const row = hit && hit.closest('.row');
+    clearDrop();
+    if (row && list.contains(row)) { r.to = rowIndex(row); row.classList.add('drop-target'); }
+  });
+  list.addEventListener('pointerup', e => {
+    if (state.reorder && e.pointerId === state.reorder.pointerId) endReorder(true);
+  });
+  const lostReorder = e => {
+    if (state.reorder && e.pointerId === state.reorder.pointerId) endReorder(false);
+  };
+  list.addEventListener('pointercancel', lostReorder);
+  list.addEventListener('lostpointercapture', lostReorder);
+
+  // ---------- диалоги (нативный <dialog>: изоляция фона, Esc, возврат фокуса) ----------
+  const labeled = (text, input) => {
+    const l = el('label', 'stack');
+    l.append(el('span', null, text), input);
+    return l;
+  };
+  const numInput = value => {
+    const n = el('input');
+    n.type = 'number';
+    n.step = '0.5';
+    n.value = String(value);
+    return n;
+  };
+  const alertLine = () => {
+    const p = el('p', 'msg');
+    p.setAttribute('role', 'alert');
+    return p;
+  };
+  function openDialog(title, build, buttons) {
+    const prev = doc.activeElement;
+    const d = el('dialog', 'dlg');
+    const body = el('div', 'dlg-body');
+    const bar = el('div', 'dlg-actions');
+    const h = el('h2', null, title);
+    h.id = 'dlgTitle';
+    d.setAttribute('aria-labelledby', 'dlgTitle');
+    const ctx = { dialog: d };
+    build(body, ctx);
+    let primary = null;
+    buttons.forEach(spec => {
+      const b = el('button', spec.primary ? 'primary' : '', spec.text);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        if (spec.run && spec.run(ctx) === false) return;
+        d.close();
+      });
+      if (spec.primary) primary = b;
+      bar.append(b);
+    });
+    d.append(h, body, bar);
+    d.addEventListener('close', () => {
+      d.remove();
+      if (prev && prev.isConnected && !prev.disabled) prev.focus();
+    });
+    body.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && e.target.tagName === 'INPUT' && primary) { e.preventDefault(); primary.click(); }
+    });
+    doc.body.append(d);
+    d.showModal();
+    (ctx.focus || body.querySelector('input,textarea') || primary).focus();
+    if (ctx.ready) ctx.ready();
+    return ctx;
+  }
+  const openInfo = (title, text) => openDialog(title, body => body.append(el('p', null, text)), [{ text: 'Закрыть', primary: true }]);
+
+  function dialogNew() {
+    openDialog('Новая раскладка', (body, ctx) => {
+      const w = numInput(58), h = numInput(40), presets = el('div', 'preset-row');
+      PRESETS.forEach(p => {
+        const b = el('button', null, p.label + ' ' + p.w + '×' + p.h);
+        b.type = 'button';
+        b.addEventListener('click', () => { w.value = String(p.w); h.value = String(p.h); });
+        presets.append(b);
+      });
+      ctx.w = w; ctx.h = h; ctx.err = alertLine();
+      body.append(el('p', 'muted', 'Текущая раскладка будет заменена. Действие можно отменить.'), presets, labeled('Ширина, мм (20–80)', w), labeled('Высота, мм (20–200)', h), ctx.err);
+    }, [{ text: 'Отмена' }, {
+      text: 'Создать',
+      primary: true,
+      run: ctx => {
+        const w = ctx.w.valueAsNumber, h = ctx.h.valueAsNumber;
+        const m = widthIssue(w) || heightIssue(h);
+        if (m) { setText(ctx.err, 'Ошибка: ' + m); return false; }
+        commit('новая раскладка', createLayout(w, h), { sel: -1 });
+        say('Создана раскладка ' + fmt(w) + ' × ' + fmt(h) + ' мм', true);
+        return true;
+      }
+    }]);
+  }
+
+  function applyImport(parsed, label) {
+    const changed = commit(label, parsed.layout, { sel: -1 });
+    const n = validateLayout(state.layout).length;
+    let msg = changed ? 'Раскладка открыта.' : 'Раскладка совпадает с текущей.';
+    if (n) { msg += ' Ошибок: ' + n + ' — исправьте их перед скачиванием.'; setIssuesOpen(true); }
+    if (parsed.ignored.length) msg += ' Не поддерживаются и отброшены: ' + parsed.ignored.slice(0, 10).join(', ') + (parsed.ignored.length > 10 ? '…' : '') + '.';
+    say(msg, changed);
+  }
+
+  function dialogPaste() {
+    openDialog('Вставить JSON раскладки', (body, ctx) => {
+      const area = el('textarea', 'json');
+      area.setAttribute('aria-label', 'JSON раскладки');
+      area.spellcheck = false;
+      const note = el('p', 'muted');
+      ctx.area = area; ctx.err = alertLine(); ctx.focus = area;
+      body.append(el('p', 'muted', 'Текущая раскладка будет заменена. Действие можно отменить.'), area, note, ctx.err);
+      ctx.ready = () => {
+        readClipboardText(env.clipboard()).then(r => {
+          if (!ctx.dialog.isConnected) return;
+          if (!r.ok) setText(note, 'Буфер недоступен (' + r.error + '). Вставьте JSON вручную: Ctrl+V.');
+          else if (!area.value && r.value) area.value = r.value;
+        });
+      };
+    }, [{ text: 'Отмена' }, {
+      text: 'Открыть',
+      primary: true,
+      run: ctx => {
+        try {
+          applyImport(parseJson(ctx.area.value), 'вставка раскладки');
+        } catch (e) {
+          setText(ctx.err, 'Ошибка: не удалось открыть JSON — ' + e.message);
+          return false;
+        }
+        return true;
+      }
+    }]);
+  }
+
+  function framesNote(includeFrames) {
+    const n = countFrames(state.layout);
+    if (!n) return '';
+    return includeFrames ? ' Размеры рамок w/h записаны у полей: ' + n + ' (расширение формата 1).' : ' Размеры рамок w/h у полей (' + n + ') не записаны: формат 1 их не содержит.';
+  }
+  function exportBlocked() {
+    const n = validateLayout(state.layout).length;
+    if (!n) return false;
+    say('Скачивание и копирование недоступны: ошибок ' + n + '. Исправьте их.');
+    setIssuesOpen(true);
+    return true;
+  }
+  function download(name, includeFrames) {
+    if (exportBlocked()) return;
+    const file = fileNameFor(name);
+    const r = downloadFile(env, file, toJson(state.layout, { name, includeFrames }));
+    if (!r.ok) { say('Не удалось скачать файл: ' + r.error); return; }
+    state.file = 'Файл скачан ' + clock();
+    syncInfo();
+    say('Скачана копия ' + file + ' (папка загрузок браузера). Открытый файл не изменён.' + framesNote(includeFrames));
+  }
+  async function copyJson() {
+    if (exportBlocked()) return;
+    const text = toJson(state.layout);
+    const r = await copyText(env.clipboard(), text);
+    if (r.ok) { say('JSON раскладки скопирован в буфер обмена.' + framesNote(false)); return; }
+    openDialog('Копирование JSON', (body, ctx) => {
+      const ta = el('textarea', 'json');
+      ta.readOnly = true;
+      ta.value = text;
+      ta.setAttribute('aria-label', 'JSON раскладки');
+      ctx.focus = ta;
+      ctx.ready = () => ta.select();
+      body.append(el('p', null, 'Буфер обмена недоступен: ' + r.error + '. Выделите JSON и скопируйте вручную.'), ta);
+    }, [{ text: 'Закрыть', primary: true }]);
+  }
+  function dialogSaveAs() {
+    if (exportBlocked()) return;
+    const frames = countFrames(state.layout);
+    openDialog('Скачать под другим именем', (body, ctx) => {
+      const name = el('input');
+      name.value = state.layout.name + '-copy';
+      const line = el('p', 'muted');
+      const upd = () => setText(line, 'Файл: ' + fileNameFor(name.value.trim() || '…'));
+      name.addEventListener('input', upd);
+      upd();
+      ctx.name = name; ctx.err = alertLine(); ctx.focus = name; ctx.ready = () => name.select();
+      body.append(el('p', 'muted', 'Браузер сохранит новый файл. Открытый файл на диске не будет перезаписан.'), labeled('Имя раскладки в файле', name), line);
+      if (frames) {
+        const cb = el('input');
+        cb.type = 'checkbox';
+        const l = el('label', 'check');
+        l.append(cb, el('span', null, 'Записать размеры рамок w/h у полей: ' + frames + '. Это расширение формата 1, получатель файла может его не поддерживать.'));
+        body.append(l);
+        ctx.frames = cb;
+      }
+      body.append(ctx.err);
+    }, [{ text: 'Отмена' }, {
+      text: 'Скачать копию',
+      primary: true,
+      run: ctx => {
+        const n = ctx.name.value.trim();
+        if (!n) { setText(ctx.err, 'Ошибка: введите имя'); return false; }
+        download(n, !!(ctx.frames && ctx.frames.checked));
+        return true;
+      }
+    }]);
+  }
+  function dialogHelp() {
+    openDialog('Справка', body => {
+      const sec = (title, items) => {
+        body.append(el('h3', null, title));
+        const ul = el('ul');
+        items.forEach(t => ul.append(el('li', null, t)));
+        body.append(ul);
+      };
+      sec('Маркеры выбранного поля', [
+        'Левый и правый — ширина рамки (w). Левый сохраняет правый край.',
+        'Верхний и нижний — высота рамки (h), вертикальный масштаб знака. Верхний сохраняет нижний край.',
+        'Угловые — ближайшее сочетание шрифта A/B и размера знака 1×/2×; w и h масштабируются пропорционально.',
+        'Шаг везде 0,5 мм. Те же значения без перетаскивания задаются в блоке «Свойства поля».'
+      ]);
+      sec('Клавиатура', [
+        'Фокус на макете: стрелки — сдвиг выбранного поля на 0,5 мм, Shift+стрелки — на 2 мм, Delete — удалить поле.',
+        'Ctrl+Z (⌘Z) — отменить, если фокус не в поле ввода. Esc во время перетаскивания отменяет жест.',
+        'Порядок печати меняют кнопки «Выше» и «Ниже» или перетаскивание значка ⋮⋮ в списке.'
+      ]);
+      sec('Предпросмотр и хранение', [
+        'Предпросмотр приблизителен: шрифты не печатные, штрихкод схематичен, текст полей — образец.',
+        'Черновик хранится только в этом браузере и обновляется после каждого изменения. Файл появляется только после «Скачать JSON».',
+        'Формат 1 не содержит w/h: по умолчанию размеры рамок в файл не записываются.'
+      ]);
+    }, [{ text: 'Закрыть', primary: true }]);
+  }
+
+  // ---------- меню «Обмен JSON» ----------
+  const menuBtn = $('btnExchange'), menu = $('menuExchange'), menuWrap = menuBtn.parentElement;
+  function setMenu(open) {
+    menu.hidden = !open;
+    menuBtn.setAttribute('aria-expanded', String(open));
+    if (open) menu.querySelector('button').focus();
+  }
+  menuBtn.addEventListener('click', () => setMenu(menu.hidden));
+  menu.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.stopPropagation(); setMenu(false); menuBtn.focus(); }
+  });
+  doc.addEventListener('pointerdown', e => { if (!menu.hidden && !menuWrap.contains(e.target)) setMenu(false); });
+  doc.addEventListener('focusin', e => { if (!menu.hidden && !menuWrap.contains(e.target)) setMenu(false); });
+  [['miCopy', copyJson], ['miPaste', dialogPaste], ['miSaveAs', dialogSaveAs]].forEach(([id, fn]) => {
+    $(id).addEventListener('click', () => { setMenu(false); menuBtn.focus(); fn(); });
+  });
+
+  // ---------- команды ----------
+  KINDS.forEach(k => { const o = el('option', null, LABELS[k]); o.value = k; $('kindSelect').append(o); });
+  $('btnUndo').addEventListener('click', undo);
+  $('btnNew').addEventListener('click', dialogNew);
+  $('btnOpen').addEventListener('click', () => $('fileInput').click());
+  $('btnDownload').addEventListener('click', () => download(state.layout.name, false));
+  $('btnHelp').addEventListener('click', dialogHelp);
+  $('btnIssues').addEventListener('click', () => setIssuesOpen($('issuesPanel').hidden));
+  $('fileInput').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      if (file.size > LIMITS.maxChars) throw new Error('файл больше ' + LIMITS.maxChars / 1024 + ' КиБ');
+      applyImport(parseJson(await file.text()), 'открытие файла');
+    } catch (err) {
+      openInfo('Не удалось открыть файл', err.message + '. Текущая раскладка не изменена.');
+    }
+  });
+  $('btnAdd').addEventListener('click', () => {
+    const kind = $('kindSelect').value;
+    const next = addField(state.layout, kind);
+    commit('добавление поля', next, { sel: next.fields.length - 1 });
+    say('Добавлено поле «' + LABELS[kind] + '»');
+  });
+  $('btnUp').addEventListener('click', () => moveSelected(-1));
+  $('btnDown').addEventListener('click', () => moveSelected(1));
+  $('btnDup').addEventListener('click', duplicateSelected);
+  $('btnDel').addEventListener('click', removeSelected);
+  $('btnResetFrame').addEventListener('click', () => commit('сброс рамки', resetFrame(state.layout, state.sel)));
+  $('zoom').addEventListener('change', e => {
+    state.zoom = e.target.value === 'auto' ? 'auto' : Number(e.target.value);
+    render();
+  });
+
+  // ---------- свойства документа и поля ----------
+  const nameInput = $('layoutName');
+  nameInput.addEventListener('focus', () => history.breakGroup());
+  nameInput.addEventListener('blur', () => history.breakGroup());
+  nameInput.addEventListener('input', () => {
+    if (!commit('изменение имени', renameLayout(state.layout, nameInput.value), { key: 'name', force: false })) render();
+  });
+  function applySize() {
+    const w = $('layoutWidth').valueAsNumber, h = $('layoutHeight').valueAsNumber;
+    const ok = w > 0 && h > 0 && w <= LIMITS.maxAbs && h <= LIMITS.maxAbs;
+    if (!ok) say('Размер этикетки должен быть числом от 0 до ' + LIMITS.maxAbs + ' мм');
+    if (!ok || !commit('изменение размера этикетки', resizeLayout(state.layout, w, h))) render({ force: true });
+  }
+  $('layoutWidth').addEventListener('change', applySize);
+  $('layoutHeight').addEventListener('change', applySize);
+
+  function bindNumber(id, label, apply, positive) {
+    const n = $(id);
+    n.addEventListener('focus', () => history.breakGroup());
+    n.addEventListener('blur', () => { history.breakGroup(); render({ force: true }); });
+    n.addEventListener('input', () => {
+      const v = n.valueAsNumber;
+      if (!Number.isFinite(v) || Math.abs(v) > LIMITS.maxAbs || (positive && v <= 0)) {
+        n.setAttribute('aria-invalid', 'true');
+        setText($(n.dataset.msg), 'Ошибка: введите число' + (positive ? ' больше 0' : '') + ' в пределах ±' + LIMITS.maxAbs);
+        return;
+      }
+      if (!commit(label, apply(state.layout, state.sel, v), { key: id + ':' + state.sel, force: false })) render();
+    });
+  }
+  bindNumber('propX', 'изменение X', (L, i, v) => patchField(L, i, { x: v }));
+  bindNumber('propY', 'изменение Y', (L, i, v) => patchField(L, i, { y: v }));
+  bindNumber('propW', 'изменение ширины рамки', (L, i, v) => setFrame(L, i, 'w', v), true);
+  bindNumber('propH', 'изменение высоты рамки', (L, i, v) => setFrame(L, i, 'h', v), true);
+  $('propFont').addEventListener('change', e => commit('изменение шрифта', patchField(state.layout, state.sel, { font: e.target.value })));
+  $('propSize').addEventListener('change', e => commit('изменение размера знака', patchField(state.layout, state.sel, { size: Number(e.target.value) })));
+  const textInput = $('propText');
+  textInput.addEventListener('focus', () => history.breakGroup());
+  textInput.addEventListener('blur', () => { history.breakGroup(); render({ force: true }); });
+  textInput.addEventListener('input', () => {
+    if (!commit('изменение текста', patchField(state.layout, state.sel, { text: textInput.value }), { key: 'text:' + state.sel, force: false })) render();
+  });
+
+  // ---------- глобальные сочетания ----------
+  doc.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (cancelActive()) e.preventDefault();
+      return;
+    }
+    if (doc.querySelector('dialog[open]')) return;
+    const t = e.target;
+    const typing = t.closest && t.closest('input,textarea,[contenteditable]');
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'z') {
+      if (!typing) { e.preventDefault(); undo(); }
+      return;
+    }
+    if (e.key === 'Delete' && state.sel >= 0 && (t === canvas || (t.classList && t.classList.contains('row-select')))) {
+      e.preventDefault();
+      removeSelected();
+    }
+  });
+
+  // ---------- запуск ----------
+  const saved = store.read();
+  let layout = null, notice = '';
+  if (!saved.ok) {
+    state.draft = 'Черновик не сохраняется: ' + saved.error;
+  } else if (saved.value != null) {
+    try {
+      layout = decodeDraft(saved.value).layout;
+      state.draft = 'Черновик в браузере: восстановлен';
+      notice = 'Восстановлен локальный черновик. Он хранится только в этом браузере.';
+    } catch (e) {
+      notice = 'Сохранённый черновик повреждён и не загружен (' + e.message + '). Он будет заменён при первом изменении.';
+    }
+  }
+  state.layout = layout || createLayout(58, 40);
+  render({ force: true });
+  if (notice) say(notice);
+  // Масштаб «Авто» зависит от ширины области; при фиксированном масштабе перерисовка не нужна.
+  new env.window.ResizeObserver(() => { if (state.zoom === 'auto') render(); }).observe($('stage'));
+}
+
+// ==== src/app/entry.js ====
+
+start({
+  document,
+  window,
+  storage: () => window.localStorage,
+  clipboard: () => navigator.clipboard,
+  URL,
+  Blob,
+  setTimeout: (fn, ms) => window.setTimeout(fn, ms)
 });
-window.addEventListener('pointerup',()=>{const r=S.interaction;if(!r)return;if(r.moved)saveDraft();else S.history.pop();S.interaction=null;hideTip();renderCanvas()});
-window.addEventListener('pointercancel',()=>{if(S.interaction){S.interaction=null;hideTip();renderCanvas();saveDraft()}});
-window.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){const m=[...document.querySelectorAll('.modal-back')].pop();if(m&&!m.dataset.locked)m.remove();return}
-  const textEditing=/^(INPUT|TEXTAREA)$/.test(e.target.tagName)||e.target.isContentEditable;
-  const editable=textEditing||/^(SELECT|BUTTON)$/.test(e.target.tagName);
-  if((e.ctrlKey||e.metaKey)&&!textEditing){if(e.key.toLowerCase()==='z'){e.preventDefault();undo();return}if(e.key.toLowerCase()==='c'){e.preventDefault();$('copyBtn').click();return}if(e.key.toLowerCase()==='v'){e.preventDefault();pasteDialog();return}}
-  if(!current()||editable||document.querySelector('.modal-back'))return;
-  const dx={ArrowLeft:-1,ArrowRight:1}[e.key]||0,dy={ArrowUp:-1,ArrowDown:1}[e.key]||0;if(!dx&&!dy)return;e.preventDefault();checkpoint();
-  const step=e.shiftKey?2:.5,f=current(),g=geom(f),L=S.layout;f.x=clamp(snap(f.x+dx*step),0,fl2(L.width_mm-g.w));f.y=clamp(snap(f.y+dy*step),0,fl2(L.height_mm-g.h));changed();
-});
-const draft=loadDraft();if(draft){newLayout(58,40,false);modal('Найден черновик',el('p',null,'Продолжить работу с последней сохранённой раскладкой?'),[{text:'Начать заново',action:()=>newLayout(58,40)},{text:'Продолжить',primary:true,action:()=>{try{loadLayout(draft)}catch(err){newLayout(58,40);showErrors(['Черновик повреждён: '+err.message])}}}],true)}else{newLayout(58,40,false)}
+})();
 </script>
 </body>
 </html>
