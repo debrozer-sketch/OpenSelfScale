@@ -76,7 +76,7 @@ def _connect_jump(cfg: dict) -> paramiko.SSHClient:
         look_for_keys=False,
     )
     key_path = cfg.get("SCALE_JUMP_KEY") or str(
-        Path.home() / ".ssh" / "openscale_bastion"
+        Path.home() / ".ssh" / "scalefw_bastion"
     )
     if Path(key_path).exists():
         kwargs["pkey"] = paramiko.Ed25519Key.from_private_key_file(key_path)
