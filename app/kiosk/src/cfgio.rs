@@ -1,19 +1,8 @@
-//! Экспорт и импорт конфигурации весов: файл TOML в каталоге обмена.
-//! В файл НЕ включаются сетевые настройки и IP-адрес весов — они
-//! индивидуальны для устройства и живут только в локальном конфиге.
-//! Передаётся всё остальное: настройки экрана, торговые правила, отделы
-//! с цветами плиток. Формат версионированный — старые файлы читаются
-//! новыми версиями, незнакомые поля игнорируются.
 
 use std::path::{Path, PathBuf};
-
 use serde::{Deserialize, Serialize};
-
 use crate::config::Config;
-
-/// Актуальная версия формата файла конфигурации.
 pub const FORMAT: i64 = 1;
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConfigFile {
     pub format: i64,
@@ -31,15 +20,9 @@ pub struct ConfigFile {
     pub card_show_name: Option<bool>,
     #[serde(default)]
     pub catalog_back_btn: Option<bool>,
-    /// Отделы в экранным порядке. Совместимость формата: старые файлы —
-    /// строка (имя), новые — таблица { name, bg, fg } с цветами плитки.
-    /// Импорт создаёт отсутствующие, выставляет порядок и применяет цвета;
-    /// лишние на устройстве отделы не удаляются.
     #[serde(default)]
     pub depts: Vec<DeptEntry>,
 }
-
-/// Элемент списка отделов: строка (старый формат) или таблица с цветами.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum DeptEntry {
@@ -52,7 +35,6 @@ pub enum DeptEntry {
         fg: Option<String>,
     },
 }
-
 impl DeptEntry {
     pub fn name(&self) -> &str {
         match self {
@@ -60,16 +42,12 @@ impl DeptEntry {
             DeptEntry::Detailed { name, .. } => name,
         }
     }
-
-    /// Цвет фона (только для Detailed-варианта), иначе None.
     pub fn bg_ref(&self) -> Option<&str> {
         match self {
             DeptEntry::Name(_) => None,
             DeptEntry::Detailed { bg, .. } => bg.as_deref(),
         }
     }
-
-    /// Цвет текста (только для Detailed-варианта), иначе None.
     pub fn fg_ref(&self) -> Option<&str> {
         match self {
             DeptEntry::Name(_) => None,
@@ -77,13 +55,9 @@ impl DeptEntry {
         }
     }
 }
-
-/// Каталог обмена конфигурацией (по умолчанию рядом с приёмом выгрузки).
 pub fn export_dir(cfg: &Config) -> PathBuf {
     cfg.kiosk.cfg_export_dir.clone()
 }
-
-/// Экспорт: текущие настройки в TOML-файл с меткой времени. Возвращает путь.
 pub fn export(cfg: &Config) -> Result<PathBuf, String> {
     let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
     let cal = |k: &str| datastore::get_calibration(&conn, k).ok().flatten();
@@ -125,8 +99,6 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
     std::fs::write(&path, body).map_err(|e| format!("запись {}: {e}", path.display()))?;
     Ok(path)
 }
-
-/// Список файлов импорта в каталоге (свежие сверху).
 pub fn list(cfg: &Config) -> Vec<PathBuf> {
     let dir = export_dir(cfg);
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
@@ -140,12 +112,7 @@ pub fn list(cfg: &Config) -> Vec<PathBuf> {
     files.sort_by_key(|p| std::cmp::Reverse(p.metadata().and_then(|m| m.modified()).ok()));
     files
 }
-
-/// Чтение и разбор файла. Неверная версия формата — ошибка (не рискуем
-/// применить непонятное). Размер ограничен: каталог доступен по FTP,
-/// гигантский файл не должен осмысленно разбираться.
 pub const MAX_FILE_BYTES: u64 = 256 * 1024;
-
 pub fn parse(path: &Path) -> Result<ConfigFile, String> {
     let len = std::fs::metadata(path)
         .map_err(|e| format!("чтение {}: {e}", path.display()))?
@@ -169,9 +136,6 @@ pub fn parse(path: &Path) -> Result<ConfigFile, String> {
     }
     Ok(parsed)
 }
-
-/// Применение разобранного файла: калибровки + отделы. Возвращает текст
-/// для превью-подтверждения ещё ДО применения.
 pub fn preview(f: &ConfigFile) -> String {
     let cols = f.dept_cols.unwrap_or(2).clamp(1, 5);
     let idle = f.idle_timeout_secs.unwrap_or(30).clamp(10, 60);
@@ -192,10 +156,6 @@ pub fn preview(f: &ConfigFile) -> String {
         f.depts.len()
     )
 }
-
-/// Запись настроек из файла в БД. Возвращает краткий итог для попапа.
-/// Всё применяется в одной транзакции: сбой на середине не оставляет
-/// наполовину изменённой конфигурации.
 pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
     const MAX_DEPTS: usize = 64;
     const MAX_NAME_CHARS: usize = 24;
@@ -283,11 +243,9 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
         f.dept_cols.unwrap_or(2).clamp(1, 5)
     ))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn roundtrip_toml() {
         let f = ConfigFile {
@@ -322,7 +280,6 @@ mod tests {
             _ => panic!("expected detailed dept entry"),
         }
     }
-
     #[test]
     fn legacy_string_depts_still_parse() {
         let s = "format = 1\ndepts = [\"ОВОЩИ\", \"ФРУКТЫ\"]\n";
@@ -330,7 +287,6 @@ mod tests {
         assert_eq!(f.depts.len(), 2);
         assert_eq!(f.depts[0].name(), "ОВОЩИ");
     }
-
     #[test]
     fn unknown_fields_are_ignored() {
         let s = "format = 1\ndept_cols = 4\nfuture_key = \"x\"\n";
@@ -338,7 +294,6 @@ mod tests {
         assert_eq!(f.dept_cols, Some(4));
         assert!(f.depts.is_empty());
     }
-
     #[test]
     fn preview_and_clamps() {
         let f = ConfigFile {
@@ -356,11 +311,8 @@ mod tests {
         assert!(p.contains("Колонок: 5"), "{p}");
         assert!(p.contains("10 с"), "{p}");
     }
-
     #[test]
     fn export_does_not_leak_device_state() {
-        // Состояние конкретного устройства (мастер настройки, PIN-ы,
-        // раскладка) не должно выезжать из весов в файле переноса настроек.
         let dir = std::env::temp_dir().join(format!("scalefw-cfgio-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

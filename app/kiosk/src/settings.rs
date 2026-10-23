@@ -1,10 +1,5 @@
-//! Меню настроек: вход по паролю (PIN-флоу), хаб «Настройки весов»
-//! (товары и экран, торговые правила, обслуживание), экспорт/импорт
-//! конфигурации, редактор отделов, сеть, оборудование, смена пароля,
-//! таймаут простоя.
 
 use std::time::Instant;
-
 use crate::admin;
 use crate::cfgio;
 use crate::context::AppContext;
@@ -15,11 +10,7 @@ use crate::diag;
 use crate::print;
 use crate::setup;
 use crate::MainWindow;
-
-/// Идёт применение сетевых настроек (защита от двойного нажатия).
 static NET_APPLYING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Всплывающее окно результата (экспорт/импорт/применение настроек).
 fn show_cfg_popup(
     ui_handle: &slint::Weak<MainWindow>,
     ok: bool,
@@ -35,8 +26,6 @@ fn show_cfg_popup(
         }
     });
 }
-
-/// Значения переключаемых пунктов на экранах 13/14 — по живым настройкам.
 fn refresh_setting_labels(
     ui_handle: &slint::Weak<MainWindow>,
     trade: &crate::context::TradeSettings,
@@ -63,9 +52,6 @@ fn refresh_setting_labels(
         ui.set_trade_minw(format!("{} г", trade.min_weight_g.get() as i64).into());
     }
 }
-
-/// Запись калибровки в БД; при успехе — применение в живые Cell.
-/// Ошибка БД не меняет состояние.
 fn save_setting(db_path: &std::path::Path, key: &str, value: i64, apply: impl FnOnce(i64)) {
     match datastore::open(db_path) {
         Ok(conn) => match datastore::set_calibration(&conn, key, value) {
@@ -75,8 +61,6 @@ fn save_setting(db_path: &std::path::Path, key: &str, value: i64, apply: impl Fn
         Err(e) => log::error!("меню: {key}: база: {e}"),
     }
 }
-
-/// Регистрирует все колбэки меню настроек.
 pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     let ui = ctx.ui.upgrade().expect("UI init");
     let ui_handle = ctx.ui.clone();
@@ -85,14 +69,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     let app_state = ctx.app_state.clone();
     let idle_secs = ctx.idle_secs.clone();
     let trade = ctx.trade.clone();
-
     NTP_ON.store(cfg.time.ntp, std::sync::atomic::Ordering::Relaxed);
     if cfg.time.ntp && !cfg.time.server.is_empty() {
         spawn_settime(&cfg, &["ntp-server", cfg.time.server.as_str()], ui_handle.clone(), "NTP-сервер применён");
     }
-
-    // Строки меню настроек (редактор отделов): правки пишутся в БД сразу,
-    // главный экран перестраивается при закрытии меню (refresh_data).
     let admin_reload = {
         let ui_handle = ui_handle.clone();
         let cfg = cfg.clone();
@@ -112,10 +92,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let ui_handle = ui_handle.clone();
         move || {
             let mut k = kiosk.borrow_mut();
-            // Экран диагностики — «ВЫХОД» возвращает в подменю оборудования,
-            // не в меню и не наружу. Смена пароля — в обслуживание (бросить
-            // смену можно; при заводском пароле следующий вход снова
-            // потребует её). Новые экраны — к своим разделам хаба.
             match k.admin_stage {
                 4 => {
                     k.admin_stage = 6;
@@ -153,27 +129,19 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 }
                 _ => {}
             }
-            // подтверждаем только реальным весом, иначе ожидание висит
             k.admin_open = false;
             k.admin_stage = 1;
             k.admin_pin_buf.clear();
-            // Сеанс мастера закрывается вместе с меню: продолжить можно
-            // из пункта «Мастер настройки» (состояние шагов — в БД).
             k.setup_active = false;
             k.setup_pin_stage = 0;
             k.setup_print_sub = 0;
             k.setup_scales_seen = false;
-            // Роль сбрасывается вместе с сеансом меню: повторный вход —
-            // только через пароль.
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_role(0);
                 ui.set_pin_mask("".into());
             }
         }
     });
-    // Вход в меню настроек: 5 тапов по индикатору веса за 3 с. Серия живёт,
-    // пока пауза между тапами не больше 3 с; открытие — только из главного
-    // экрана при покое. Дальше — экран пароля: меню не откроется без него.
     ui.on_admin_tap({
         let kiosk = kiosk.clone();
         let ui_handle = ui_handle.clone();
@@ -185,27 +153,21 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 return;
             }
             if k.admin_tap(Instant::now()) {
-                // Не экран меню, а вход по паролю; строки отделов читаются
-                // после успешной проверки (admin_reload в pin-try).
                 k.admin_stage = 1;
                 k.admin_open = true;
                 k.admin_pin_buf.clear();
                 if let Some(ui) = ui_handle.upgrade() {
-                    // Адрес весов в углу экрана входа — персонал смотрит IP
-                    // для подключения из центра/поддержки.
                     ui.set_ip_note(format!("IP: {}", net::read_live().ip).into());
                 }
                 log::info!("вход в настройки: запрошен пароль");
             }
         }
     });
-    // Набор пароля: цифры, максимум 8 (проверка формата — в datastore::auth).
     ui.on_pin_digit({
         let ui_handle = ui_handle.clone();
         let kiosk = kiosk.clone();
         move |d| {
             let mut k = kiosk.borrow_mut();
-            // Лимит длины: PIN — 8 цифр, ввод времени (34) — 14.
             let max_len = if k.admin_stage == 34 { 14 } else { 8 };
             if (k.admin_stage != 1
                 && !(7..=9).contains(&k.admin_stage)
@@ -242,12 +204,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     });
-    // Проверка пароля и этапы смены (7 старый / 8 новый / 9 повтор).
-    // Верный пароль — меню; заводской пароль принудительно ведёт на смену.
-    // Неверный — поле чистится, пауза перебора растёт и переживает
-    // перезапуск (счётчик в БД). PIN никуда не логируется.
-    // Открытие мастера/чек-листа: из меню и при незавершённом мастере
-    // на старте. mode: 1 = мастер, 0 = чек-лист.
     let setup_render = {
         let ui_handle = ui_handle.clone();
         let kiosk = kiosk.clone();
@@ -290,8 +246,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     };
-
-
     ui.on_pin_try({
         let ui_handle = ui_handle.clone();
         let kiosk = kiosk.clone();
@@ -311,8 +265,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
             let stage = k.admin_stage;
             if stage == 1 {
-                // Таблица пользователей пуста: проверять нечего, вход
-                // невозможен — подсказка вместо молчаливого отказа.
                 let no_users = match datastore::open(&cfg.db_path) {
                     Ok(conn) => {
                         !datastore::auth::user_exists(&conn).unwrap_or(false)
@@ -336,11 +288,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             "вход: пароль принят, роль {}",
                             if role == datastore::auth::Role::Admin { "admin" } else { "staff" }
                         );
-                        // Вход выполнен. Заводского PIN больше нет: мастером
-                        // создаются оба пароля, принудительной смены не нужно.
                         k.pin_forced = false;
-                        // Прерванный мастер: после входа — в мастер, не в
-                        // меню; PIN кассира в мастер не пускает.
                         if k.setup_active {
                             if role == datastore::auth::Role::Admin {
                                 k.admin_stage = 20;
@@ -353,8 +301,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             return;
                         }
                         k.admin_stage = 2;
-                        // Открытая карточка товара закрывается: из меню
-                        // выходим на чистый главный экран.
                         k.pending = None;
                         if let Some(ui) = ui_handle.upgrade() {
                             ui.set_role(if role == datastore::auth::Role::Admin { 1 } else { 0 });
@@ -364,8 +310,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     }
                     Ok(datastore::auth::Auth::Denied { wait_secs }) => {
                         log::info!("вход: отказ, пауза {wait_secs} с");
-                        // Без паузы перебора — обычный неверный пароль:
-                        // молчаливый отказ выглядит как зависание кнопки.
                         if wait_secs == 0 {
                             set_err(&ui_handle, "Неверный пароль");
                         } else {
@@ -378,8 +322,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 }
                 return;
             }
-            // PIN и время мастера настройки: 30/31 — админ (ввод, повтор),
-            // 32/33 — кассир, 34 — дата/время ДД.ММ.ГГГГ ЧЧ:ММ (14 цифр).
             if (30..=34).contains(&stage) {
                 match stage {
                     30 | 32 => {
@@ -415,7 +357,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                 log::info!("настройка: PIN {role_name} создан");
                                 k.setup_pin_stage = 0;
                                 if k.setup_active {
-                                    // В мастере: шаг закрыт, дальше по порядку.
                                     let Ok(conn) = datastore::open(&cfg.db_path) else { return };
                                     let next = setup::advance(
                                         setup::stage(&conn),
@@ -426,8 +367,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                     drop(k);
                                     setup_render();
                                 } else {
-                                    // Создание кассира из меню админа: назад
-                                    // в меню.
                                     k.admin_stage = 2;
                                     if let Some(ui) = ui_handle.upgrade() {
                                         ui.set_pin_forced(false);
@@ -439,10 +378,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         }
                     }
                     _ => {
-                        // Ввод времени: 14 цифр ДДММГГГГЧЧММ. Диапазоны
-                        // дополнительно проверяет sudo-хелпер. Шаг
-                        // продвигается сразу (состояние — в БД, переживает
-                        // сбой питания); результат хелпера — в заметке.
                         if pin.len() != 14 {
                             set_err(&ui_handle, "Формат: ДД.ММ.ГГГГ ЧЧ:ММ (14 цифр)");
                             return;
@@ -459,8 +394,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         k.admin_stage = 20;
                         drop(k);
                         spawn_settime(&cfg, &[arg.as_str()], ui_handle.clone(), "время установлено");
-                        // Перерисовка шага 8: значения — данными в invoke
-                        // (Rc-состояние киоска в замыкание invoke не уходит).
                         let (mode, note, action, enabled, skip, skip_label, next_vis) =
                             wizard_step_ui(next, 0, false);
                         let ui_handle2 = ui_handle.clone();
@@ -481,13 +414,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 }
                 return;
             }
-            // Этапы смены пароля. Экран 10 доступен только после входа.
             if !(7..=9).contains(&stage) {
                 return;
             }
             if stage == 7 {
-                // Старый пароль: сверка без счётчика перебора (pin_is),
-                // смена идёт админскому входу (id = 1).
                 let ok = match datastore::open(&cfg.db_path) {
                     Ok(conn) => datastore::auth::pin_is(&conn, 1, &pin).unwrap_or(false),
                     Err(e) => {
@@ -513,7 +443,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 k.admin_stage = 9;
                 return;
             }
-            // Этап 9: повтор нового пароля и запись.
             if pin != k.pin_new {
                 k.pin_new.clear();
                 k.admin_stage = 8;
@@ -540,7 +469,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 }
                 Ok(Err(msg)) => {
                     set_err(&ui_handle, msg);
-                    // Неверный старый — заново с этапа 7.
                     if msg.contains("старый") {
                         k.admin_stage = 7;
                     }
@@ -552,11 +480,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     ui.on_depts_close({
         let kiosk = kiosk.clone();
         move || {
-            // Куда ведёт «НАЗАД»: из «Возврат на главный экран» — в
-            // «Товары и экран», из хаба — в общее меню, из редактора
-            // отделов и разделов хаба — в хаб, из импорта — в «Товары»,
-            // из отчётов — в «Обслуживание», из сети/оборудования — в меню.
-            // Из сети, открытой из мастера настройки, — назад в мастер.
             let mut k = kiosk.borrow_mut();
             if k.setup_active && k.admin_stage == 5 {
                 k.admin_stage = 20;
@@ -572,13 +495,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             };
         }
     });
-
-    // ---------- Мастер настройки / чек-лист (экран 19) ----------
-    // Состояние мастера — в БД (setup::*); UI перерисовывается целиком на
-    // каждое изменение шага. Тяжёлое (печать, калибровки, время) — в
-    // фоновых потоках: результат возвращается через invoke_from_event_loop
-    // готовыми данными (Rc-состояние киоска в потоки не уходит).
-
     ui.on_setup_tap({
         let cfg = cfg.clone();
         let kiosk = kiosk.clone();
@@ -589,7 +505,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             let mut k = kiosk.borrow_mut();
             let Ok(conn) = datastore::open(&cfg.db_path) else { return };
             if setup::wizard_done(&conn) {
-                // Чек-лист: единственное действие — ввод в эксплуатацию.
                 if act == "action" {
                     let mask =
                         ui_handle.upgrade().map(|ui| ui.get_setup_mask() as u32).unwrap_or(0);
@@ -618,8 +533,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     setup_render();
                 }
                 "back" => match stage {
-                    // Подгонка зазора: «уехало далеко» — откат меньше и
-                    // новый тест. Остаёмся на шаге (sub уже 1).
                     6 if k.setup_print_sub == 1 => {
                         drop(k);
                         adjust_feed(&conn, -16);
@@ -640,7 +553,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         drop(k);
                         setup_render();
                     }
-                    // Шаг 7: NTP вкл/выкл (хелпер со своим таймаутом).
                     7 => {
                         drop(k);
                         let on = !NTP_ON.load(std::sync::atomic::Ordering::Relaxed);
@@ -649,14 +561,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         spawn_settime(&cfg, &[arg], ui_handle.clone(), if on { "NTP включён" } else { "NTP выключен" });
                         setup_render();
                     }
-                    // Сеть: DHCP по умолчанию, шаг можно пропустить.
                     3 => {
                         let next = setup::advance(stage, setup::Action::Next);
                         setup::set_stage(&conn, next);
                         drop(k);
                         setup_render();
                     }
-                    // Шаги 5/6: значения уже в БД, калибровку можно отложить.
                     5 | 6 => {
                         let next = setup::advance(stage, setup::Action::Next);
                         setup::set_stage(&conn, next);
@@ -685,8 +595,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         }
                     }
                     3 => {
-                        // Экран сети: поля предзаполняются текущими
-                        // настройками системы; «НАЗАД» вернёт в мастер.
                         if let Some(ui) = ui_handle.upgrade() {
                             k.net_dhcp = net::read_mode();
                             k.net_buf = net::read_live().fields();
@@ -717,8 +625,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         spawn_wizard_test_print(&cfg);
                     }
                     5 => {
-                        // Скан занимает порт демона: при весе на платформе
-                        // не запускать (как и в «Оборудовании»).
                         let snap = app_state.snapshot();
                         if snap.mass_kg >= 0.01 {
                             drop(k);
@@ -738,16 +644,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             let (text, saved) = calibrate_label_text(&cfg2);
                             if saved.is_some() {
                                 let Ok(conn) = datastore::open(&cfg2.db_path) else { return };
-                                // Гонка с «НАЗАД»/«ПРОПУСТИТЬ» во время скана:
-                                // шаг двигаем только если оператор ещё на 5-м.
                                 if setup::stage(&conn) != 5 {
                                     return;
                                 }
                                 let next =
                                     setup::advance(setup::stage(&conn), setup::Action::Next);
                                 setup::set_stage(&conn, next);
-                                // Готовый вид следующего шага — данными
-                                // (Rc-состояние в поток не передаётся).
                                 let (mode, action, enabled, skip, skip_label, next_vis) = {
                                     let (m, _note, a, e, s, sl, nv) =
                                         wizard_step_ui(next, 0, false);
@@ -795,9 +697,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 _ => {}
             }
         }
-    });    // Правки порядка/состава отделов применяются к главному экрану сразу:
-    // relayout перечитывает БД (при ручном режиме — порядок ord) и
-    // перестраивает плитки без ожидания следующей синхронизации.
+    });    
     let relayout = flow.relayout.clone();
     ui.on_admin_up({
         let cfg = cfg.clone();
@@ -830,8 +730,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             relayout();
         }
     });
-    // Цвет плитки отдела: цикл Авто → пресеты, запись в БД и мгновенная
-    // перерисовка (редактор + главный экран).
     ui.on_admin_color({
         let cfg = cfg.clone();
         let admin_reload = admin_reload.clone();
@@ -845,11 +743,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     });
-    // Пункты меню: диспетчеризация по id строки MenuRow. Печать/подача —
-    // в фоновом потоке: открытие tty и передача занимают секунды, в потоке
-    // колбэка они замораживали UI; результат виден в логе. Обнуление уходит
-    // во владеющий портом поток весов; диагностика — отдельный экран;
-    // перезапуск — через флаг, тик завершает процесс, systemd перезапускает.
     ui.on_menu_tap({
         let cfg = cfg.clone();
         let setup_render = setup_render.clone();
@@ -882,7 +775,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     setup_render();
                 }
                 "scaleset" => {
-                    // Хаб настроек: значения пунктов — из живых настроек.
                     refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                     kiosk.borrow_mut().admin_stage = 11;
                 }
@@ -901,7 +793,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     admin_reload();
                     kiosk.borrow_mut().admin_stage = 3;
                 }
-                // Колонки: цикл 1..=5 с записью в БД и пересборкой раскладки.
                 "cols" => {
                     let next = trade.cols.get().max(1) % 5 + 1;
                     let relayout = relayout.clone();
@@ -914,7 +805,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         log::info!("меню: колонок на экране: {v}");
                     });
                 }
-                // Порядок отделов: алфавит ↔ ручной (порядок из редактора).
                 "sortalpha" => {
                     let next = !trade.sort_alpha.get();
                     let relayout = relayout.clone();
@@ -930,7 +820,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         );
                     });
                 }
-                // Название товара в карточке: ВКЛ ↔ ВЫКЛ.
                 "cardname" => {
                     let next = !trade.card_show_name.get();
                     let trade = trade.clone();
@@ -944,7 +833,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         );
                     });
                 }
-                // Кнопка «← Назад» в сетке каталога: ВКЛ ↔ ВЫКЛ.
                 "backbtn" => {
                     let next = !trade.catalog_back.get();
                     let trade = trade.clone();
@@ -958,7 +846,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         );
                     });
                 }
-                // Округление цены: выкл → 10 коп → 1 руб → выкл.
                 "rounding" => {
                     let next = (trade.rounding.get() + 1) % 3;
                     let trade = trade.clone();
@@ -969,8 +856,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         log::info!("меню: округление цены: режим {v}");
                     });
                 }
-                // Минимальный вес печати: 10 / 20 / 50 г. Шага 5 г нет:
-                // шум пустой платформы −6 г, Min торговых весов выше.
                 "minweight" => {
                     const STEPS: [i64; 3] = [10, 20, 50];
                     let cur = trade.min_weight_g.get() as i64;
@@ -1017,7 +902,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                 )
                             })
                             .collect();
-                        // Полные пути параллельно именам: apply берёт по имени.
                         kiosk.borrow_mut().imp_files = files;
                         if let Some(ui) = ui_handle.upgrade() {
                             ui.set_imp_files(slint::ModelRc::new(slint::VecModel::from(
@@ -1036,7 +920,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     }
                     refresh_report(&cfg, &kiosk, &ui_handle);
                 }
-                // Период и тип событий отчёта: циклы, отчёт пересобирается.
                 "report-period" | "report-kind" => {
                     const PERIODS: [&str; 5] =
                         ["Сегодня", "3 дня", "Неделя", "Месяц", "Всё время"];
@@ -1055,7 +938,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     }
                     refresh_report(&cfg, &kiosk, &ui_handle);
                 }
-                // Возврат на главный экран: цикл 10..60 с шагом 10, дефолт 30.
                 "idletimeout" => {
                     const STEPS: [u64; 6] = [10, 20, 30, 40, 50, 60];
                     let cur = idle_secs.get();
@@ -1087,8 +969,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 "net" => {
                     let (ui, mut k) = (ui_handle.upgrade(), kiosk.borrow_mut());
                     if let Some(ui) = ui {
-                        // Поля предзаполняются текущими настройками системы:
-                        // экранный буфер — черновик, применение только по кнопке.
                         k.net_dhcp = net::read_mode();
                         k.net_buf = net::read_live().fields();
                         k.net_focus = 0;
@@ -1105,8 +985,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         Err(e) => log::warn!("меню: подача: {e}"),
                     });
                 }
-                // Принтер: обновить диагностику / сбросить аварию. Опрос
-                // занимает ~3 с на порту — фоновый поток, результат в UI.
                 "prn-refresh" => {
                     refresh_printer_diag(&cfg, &ui_handle);
                 }
@@ -1135,8 +1013,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                 )
                             }
                         };
-                        // Weak::upgrade с set_* допустим только в UI-потоке:
-                        // из фонового обновляем текст через invoke_from_event_loop.
                         slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_handle.upgrade() {
                                 ui.set_prn_diag_text(text.into());
@@ -1146,8 +1022,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     });
                 }
                 "prn-calib" => {
-                    // На время скана демон порта занят и покупательская
-                    // печать простаивает: при весе на платформе не запускать.
                     let snap = app_state.snapshot();
                     if snap.mass_kg >= 0.01 {
                         if let Some(ui) = ui_handle.upgrade() {
@@ -1168,10 +1042,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     std::thread::spawn(move || {
                         let text = match print::calibrate_label(&cfg) {
                             Ok(mm) if mm < 15 => {
-                                // Этикетки короче 15 мм в системе нет (минимум
-                                // раскладки 20 мм): такой результат — мусорный
-                                // скан (половинное положение, сбой сенсора).
-                                // Старое значение не трогаем.
                                 log::warn!("меню: калибровка: подозрительная длина {mm} мм — не сохранена");
                                 "Калибровка дала подозрительный результат\n(слишком короткая этикетка).\nСтарое значение сохранено. Повторите калибровку.".to_string()
                             }
@@ -1223,15 +1093,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     app_state.request_zero();
                     log::info!("меню: запрошено обнуление весов");
                     let mut k = kiosk.borrow_mut();
-                    // Результат виден на индикаторе веса — меню закрываем.
                     k.admin_open = false;
                     k.admin_stage = 1;
                     k.admin_pin_buf.clear();
                 }
                 "diag" => {
-                    // Сбор отчёта — в фоне: два открытия портов с таймаутами
-                    // замораживали UI на ~секунду. Пока идёт сборка, экран
-                    // показывает «Собираю отчёт…».
                     kiosk.borrow_mut().admin_stage = 4;
                     if let Some(ui) = ui_handle.upgrade() {
                         ui.set_diag_text("Собираю отчёт…".into());
@@ -1256,16 +1122,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     });
-    // Экран «Сеть»: клавиатура пишет в поле в фокусе (цифры и точка,
-    // «←» забой, «C» очистка), применение — через root-помощника.
     ui.on_net_mode({
         let kiosk = kiosk.clone();
         let ui_handle = ui_handle.clone();
         move |dhcp: bool| {
             let mut k = kiosk.borrow_mut();
             k.net_dhcp = dhcp;
-            // Ручной после DHCP: полученные автоматически значения остаются
-            // в полях как исходная точка для правки.
             k.net_buf = net::read_live().fields();
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_net_dhcp(dhcp);
@@ -1305,9 +1167,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     });
-    // Применение сетевых настроек — в фоновом потоке: sudo + dhcpcd
-    // занимают до 30 с, UI-поток обязан продолжать рисовать. Результат
-    // возвращается через invoke_from_event_loop (Slint-компоненты не Send).
     let show_net_result = {
         let ui_handle = ui_handle.clone();
         move |ok: bool, text: String| {
@@ -1324,16 +1183,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let kiosk = kiosk.clone();
         let show_net_result = show_net_result.clone();
         move || {
-            // Один помощник за раз: два параллельных `scale-net-apply` портят
-            // резервную копию и файл interfaces.
             if NET_APPLYING.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 log::info!("сеть: применение уже идёт, повторное нажатие проигнорировано");
                 return;
             }
             let (dhcp, buf) = {
                 let k = kiosk.borrow();
-                // Копия, не take: поля не пустеют на время применения
-                // (sudo + dhcpcd могут занять до 30 с).
                 (k.net_dhcp, k.net_buf.clone())
             };
             let show = show_net_result.clone();
@@ -1352,8 +1207,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 } else {
                     match net::validate(&buf[0], &buf[1], &buf[2], &buf[3]) {
                         Ok((ip, pre, gw, dns)) => {
-                            // Живая смена адреса рвёт только соединения по
-                            // старому главному IP; dev-адрес не трогается.
                             match net::apply(&ip.to_string(), pre, &gw.to_string(), &dns.to_string()) {
                                 Ok(()) => {
                                     log::info!("сеть: применено {ip}/{pre} шлюз {gw} dns {dns}");
@@ -1374,8 +1227,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 NET_APPLYING.store(false, std::sync::atomic::Ordering::SeqCst);
                 show(ok, text);
             });
-            // Поля обновятся из фактического состояния при закрытии попапа —
-            // см. net-popup-close.
         }
     });
     ui.on_net_popup_close({
@@ -1386,13 +1237,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         move || {
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_net_popup_open(false);
-                // После применения перечитываем фактическое состояние: попап
-                // закрывает продавец, к этому моменту сеть уже устаканилась.
                 kiosk.borrow_mut().net_buf = net::read_live().fields();
                 let k = kiosk.borrow();
                 net_rows_set(&ui, &k);
             }
-            // Мастер настройки: сеть настроена — шаг 3 закрыт, назад в мастер.
             if kiosk.borrow().setup_active {
                 if let Ok(conn) = datastore::open(&cfg.db_path) {
                     if setup::stage(&conn) == 3 {
@@ -1405,9 +1253,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     });
-    // Импорт: тап по файлу — разбор в фоне, превью в попапе; «ПРИМЕНИТЬ» —
-    // запись настроек и пересборка экрана. Файл с ошибкой формата не
-    // применяется, попап показывает причину.
     ui.on_import_tap({
         let kiosk = kiosk.clone();
         let ui_handle = ui_handle.clone();
@@ -1455,8 +1300,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 }
                 return;
             }
-            // Разбор и запись — несколько коротких SQL-операций и чтение
-            // небольшого файла: в callback, как и сохранение калибровок.
             match cfgio::parse(std::path::Path::new(&path))
                 .and_then(|f| cfgio::apply(&cfg, &f).map(|_| f))
             {
@@ -1466,7 +1309,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         f.depts.len(),
                         f.dept_cols
                     );
-                    // Живые настройки — из данных файла, экраны пересобрать.
                     if let Some(v) = f.dept_cols {
                         trade.cols.set(v.clamp(1, 5) as usize);
                     }
@@ -1526,11 +1368,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         }
     });
 }
-
-/// Текст отчёта для экрана 17: счётчики печатей и последние операции.
-/// Сбор — в фоновом потоке (открытие БД), ошибки — строкой в отчёте.
-/// Отчёт печатей: сборка в фоне (SQLite — короткая транзакция),
-/// результат — в текстовый экран через invoke_from_event_loop.
 fn refresh_report(
     cfg: &crate::config::Config,
     kiosk: &std::rc::Rc<std::cell::RefCell<crate::session::Kiosk>>,
@@ -1555,8 +1392,6 @@ fn refresh_report(
         .ok();
     });
 }
-
-/// Опрос принтера в фоне, результат — в текст экрана диагностики.
 fn refresh_printer_diag(cfg: &crate::config::Config, ui_handle: &slint::Weak<MainWindow>) {
     if let Some(ui) = ui_handle.upgrade() {
         ui.set_prn_diag_text("Идёт опрос принтера…".into());
@@ -1571,8 +1406,6 @@ fn refresh_printer_diag(cfg: &crate::config::Config, ui_handle: &slint::Weak<Mai
             }
             Err(e) => format!("Опрос не удался: {e}\n\nЕсли принтер отключён от сети,\nсначала проверьте питание."),
         };
-        // Чек-лист готовности (спека §5): список живёт в «Оборудовании»
-        // для диагностики — только просмотр, без кнопок.
         let checklist = match datastore::open(&cfg.db_path) {
             Ok(conn) => {
                 let goods = datastore::plu_count(&conn).unwrap_or(0);
@@ -1597,9 +1430,6 @@ fn refresh_printer_diag(cfg: &crate::config::Config, ui_handle: &slint::Weak<Mai
         .ok();
     });
 }
-
-/// Информация об этикетке для отчёта: длина из калибровки и имя загруженного
-/// шаблона раскладки. База — короткое чтение ключей, ошибки молча в None.
 fn label_info(cfg: &crate::config::Config) -> (Option<i64>, Option<String>) {
     let conn = match datastore::open(&cfg.db_path) {
         Ok(c) => c,
@@ -1609,13 +1439,11 @@ fn label_info(cfg: &crate::config::Config) -> (Option<i64>, Option<String>) {
     let layout = datastore::get_setting(&conn, "label_layout_name").ok().flatten();
     (len, layout)
 }
-
 fn build_report(cfg: &crate::config::Config, period: usize, kind: usize) -> String {
     let conn = match datastore::open(&cfg.db_path) {
         Ok(c) => c,
         Err(e) => return format!("Отчёт недоступен: база: {e}"),
     };
-    // Граница периода: локальная полночь хоста минус полные сутки.
     let since = match period {
         0 => Some(print::today_start()),
         1 => Some(print::today_start() - 2 * 86_400),
@@ -1632,7 +1460,6 @@ fn build_report(cfg: &crate::config::Config, period: usize, kind: usize) -> Stri
         Ok(r) => r,
         Err(e) => return format!("Журнал: {e}"),
     };
-    // Реальное число операций с теми же фильтрами — без LIMIT 20.
     let total = match datastore::print_log_count_filtered(&conn, since, ok) {
         Ok(n) => n,
         Err(e) => return format!("Журнал: {e}"),
@@ -1673,27 +1500,13 @@ fn build_report(cfg: &crate::config::Config, period: usize, kind: usize) -> Stri
     }
     text
 }
-
-/// Текст попапа после применения: фактические настройки с системы,
-/// каждый параметр на своей строке, маска — точечным видом.
 fn net_popup_text(c: &net::NetConfig) -> String {
     format!(
         "Настройки применены:\nIP: {}\nМаска: {}\nШлюз: {}\nDNS: {}",
         c.ip, c.mask, c.gateway, c.dns
     )
 }
-
-// ---------- Мастер настройки: шаги, печать, время ----------
-
-/// NTP-переключатель шага 7: начальное значение из конфига, дальше —
-/// переключается кнопкой (системное состояние меняет sudo-хелпер).
 static NTP_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
-
-/// Стартовая синхронизация NTP: сервер из [time] (если задан) и состояние
-/// из конфига. Один вызов на старте киоска.
-
-/// Вид шага мастера: (mode, note, action, action_enabled, skip_visible,
-/// skip_label, next_visible). Чистая функция — по stage и подэтапам киоска.
 fn wizard_step_ui(
     stage: u8,
     print_sub: u8,
@@ -1830,9 +1643,6 @@ fn wizard_step_ui(
         ),
     }
 }
-
-/// Открытие мастера на старте киоска: рендер активного шага данными.
-/// Без этого экран остаётся с slint-дефолтами (режим чек-листа).
 pub(crate) fn startup_setup_render(
     ui_handle: &slint::Weak<MainWindow>,
     kiosk: &std::rc::Rc<std::cell::RefCell<crate::session::Kiosk>>,
@@ -1845,7 +1655,6 @@ pub(crate) fn startup_setup_render(
         let k = kiosk.borrow();
         wizard_step_ui(stage, k.setup_print_sub, k.setup_scales_seen)
     } else {
-        // Чек-лист ввода в эксплуатацию (после завершения мастера).
         let all = ui_handle
             .upgrade()
             .map(|ui| setup::all_green(ui.get_setup_mask() as u32))
@@ -1875,8 +1684,6 @@ pub(crate) fn startup_setup_render(
         ui.set_setup_next_visible(next_visible);
     }
 }
-
-/// Правка зазора печати шагом ±16 точек (значения калибровки — в БД).
 fn adjust_feed(conn: &rusqlite::Connection, delta: i64) {
     match calib::FeedCalibration::load(conn) {
         Ok(mut c) => {
@@ -1890,8 +1697,6 @@ fn adjust_feed(conn: &rusqlite::Connection, delta: i64) {
         Err(e) => log::error!("настройка: калибровка печати: чтение: {e}"),
     }
 }
-
-/// Тестовая этикетка из мастера: демон порта печатает сам, результат — в лог.
 fn spawn_wizard_test_print(cfg: &Config) {
     let cfg = cfg.clone();
     std::thread::spawn(move || match print::print_test_label(&cfg) {
@@ -1899,13 +1704,8 @@ fn spawn_wizard_test_print(cfg: &Config) {
         Err(e) => log::warn!("настройка: тестовая печать: {e}"),
     });
 }
-
-/// Шаг-скан длины этикетки с санити <15 мм и записью в БД.
-/// Возвращает (текст для UI, сохранённая длина).
 fn calibrate_label_text(cfg: &Config) -> (String, Option<i64>) {
     match print::calibrate_label(cfg) {
-        // Этикетки короче 15 мм в системе нет: мусорный скан — старое
-        // значение не трогаем.
         Ok(mm) if mm < 15 => (
             "Калибровка дала подозрительный результат\n(слишком короткая этикетка).\n\
              Старое значение сохранено. Повторите калибровку."
@@ -1935,10 +1735,6 @@ fn calibrate_label_text(cfg: &Config) -> (String, Option<i64>) {
         }
     }
 }
-
-/// Запуск sudo-хелпера времени в фоне с дедлайном 5 с. Поздний ответ
-/// игнорируется (инвариант «программа не зависает»), зависший поток
-/// хелпера не блокирует UI.
 fn spawn_settime(
     _cfg: &Config,
     args: &[&str],

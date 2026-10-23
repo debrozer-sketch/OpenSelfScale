@@ -1,8 +1,3 @@
-// Экран покупателя: светлая тема, «как воздух».
-// Главный экран: отделы одной строкой, вписаны в ширину экрана (поля 8 px,
-// зазоры 8 px); меньше отделов — колонки шире, больше пяти — плитка «ЕЩЁ».
-// Отдел → его товарные группы → товар; тап по товару = печать.
-// Только встроенные элементы; повторители раскладываются вручную через x/y.
 
 export struct DeptDef {
     id: string,
@@ -13,67 +8,47 @@ export struct DeptDef {
     img: image,
     has-img: bool,
 }
-
 export struct PluTile {
     id: string,
     name: string,
     price: string,
-    // Скидочная цена (по карте); "" = второй цены нет.
     card-price: string,
     has-img: bool,
     img: image,
-    // Подсветка совпадения в поиске: «до / совпадение / после».
-    // hl-match == "" — обычный каталог, имя рисуется целиком.
     hl-before: string,
     hl-match: string,
     hl-after: string,
 }
-
-// Строка меню настроек: имя отдела + флаги краёв списка (стрелки видны
-// только там, где перемещение возможно).
 export struct AdminRow {
     name: string,
     first: bool,
     last: bool,
-    // Цвет плитки отдела: «Авто» или hex пресета — для подписи кнопки.
     color-label: string,
     color: color,
 }
-
 export struct MenuRow {
     label: string,
     id: string,
     admin: bool,
 }
-
 export struct NetworkField {
     label: string,
     value: string,
 }
-
-// Строка списка мастера настройки / чек-листа (экран 19).
 export struct SetupRow {
     label: string,
-    // 0 = ожидание (серый), 1 = активен (подсвечен), 2 = готов (галка).
     state: int,
 }
-
-// Колонка отдела: ширина = равная доля строки; скругления сглаживает рендер,
-// рамка 2 px — светло-серый контур зоны нажатия.
 component DeptTile inherits Rectangle {
     in property <int> idx;
     in property <length> col-w;
     in property <length> tile-h;
     in property <length> font;
     in property <DeptDef> d;
-    // false — во время печати: и тап, и свайп гасятся.
     in property <bool> active: true;
-
     callback tapped(string);
-    // Перелистывание страниц отделов свайпом (карусель).
     callback next-page;
     callback prev-page;
-
     width: root.col-w;
     x: 8px + self.idx * (root.col-w + 8px);
     y: 8px;
@@ -82,12 +57,6 @@ component DeptTile inherits Rectangle {
     border-width: 2px;
     border-color: #C9CFD7;
     background: ta.pressed ? d.bg-pressed : d.bg;
-
-    // Зона картинки: вся плитка над полем подписи. Картинка вписывается
-    // в зону целиком (image-fit: contain), по центру: широкая колонка —
-    // крупная картинка, узкая — центрированная. Нет файла — светлая плашка.
-    // Картинка с тем же скруглением, что у плитки/заглушки: clip в
-    // Rectangle со скруглением срезает прямые углы изображения.
     if d.has-img : Rectangle {
         x: 8px;
         y: 8px;
@@ -110,26 +79,20 @@ component DeptTile inherits Rectangle {
         border-radius: 20px;
         background: rgba(255, 255, 255, 0.75);
     }
-
     Text {
         x: 8px;
         y: parent.height - 110px;
         width: parent.width - 16px;
         height: 90px;
         text: d.name;
-        // Единый кегль ряда: считает бэкенд по самой длинной подписи,
-        // чтобы слово всегда влезало целиком.
         font-size: root.font;
         font-weight: 700;
         color: d.fg;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
-
     ta := TouchArea {
         enabled: root.active;
-        // Свайп: горизонтальный сдвиг > 80 px листает страницу; тап — только
-        // если палец почти не сместился (< 60 px), иначе клик подавляется.
         pointer-event(ev) => {
             if ev.kind == PointerEventKind.up {
                 if ta.mouse-x - ta.pressed-x < -80px {
@@ -146,28 +109,19 @@ component DeptTile inherits Rectangle {
         }
     }
 }
-
-// Карточка товара: 9 колонок × 3 строки (27 на страницу), шаг 112×182.
-// Квадратная картинка 100×100 сверху, название до 3 строк, цена ниже.
-// Вторая цена (по карте): обычная мелко серым, карточная зелёным.
 component PluCard inherits Rectangle {
     in property <int> idx;
     in property <int> cell-offset: 0;
     in property <PluTile> p;
     in property <bool> active: true;
     in property <bool> card-show-name: true;
-
     callback tapped;
-
     width: 108px;
     height: 178px;
     x: 8px + Math.mod(self.idx + self.cell-offset, 9) * 112px;
     y: 56px + Math.floor((self.idx + self.cell-offset) / 9) * 182px;
     border-radius: 12px;
     background: !root.active ? #EDEFF2 : ta.pressed ? #E4E8ED : #FFFFFF;
-
-    // Зона картинки квадратная (источник 378×378/118×118), contain —
-    // без обрезки. Без подписи блок центрируется по высоте до строки цены.
     Rectangle {
         x: 2px;
         y: root.card-show-name ? 2px : 21px;
@@ -183,7 +137,6 @@ component PluCard inherits Rectangle {
             source: root.p.img;
         }
     }
-
     if root.card-show-name : Text {
         x: 3px;
         y: 108px;
@@ -197,9 +150,6 @@ component PluCard inherits Rectangle {
         vertical-alignment: center;
         color: !root.active ? #A6ADB8 : #1A1E24;
     }
-
-    // Цена: одна — по центру; две — столбиком: обычная серым, карточная
-    // зелёным. Кегль цены меньше кегля названия.
     if root.p.card-price == "" : Text {
         x: 3px;
         y: 150px;
@@ -235,21 +185,16 @@ component PluCard inherits Rectangle {
         vertical-alignment: center;
         color: #2FA36B;
     }
-
     ta := TouchArea {
         enabled: root.active;
         clicked => { root.tapped(); }
     }
 }
-
-// Клавиша экранной клавиатуры поиска.
 component KbKey inherits Rectangle {
     in property <string> key;
     in property <length> kw: 72px;
     in property <length> kx;
-
     callback key-tapped(string);
-
     x: root.kx;
     width: root.kw;
     height: 58px;
@@ -265,99 +210,64 @@ component KbKey inherits Rectangle {
     k-ta := TouchArea {
         clicked => { root.key-tapped(root.key); }
     }
-    // Удержание «←»/«ЗАБОЙ» = автозабой: 250 мс и далее по такту, пока
-    // палец на клавише (клавиатуры сети и поиска называют ключ по-разному).
-    // Отпускание останавливает таймер (running = pressed).
     Timer {
         interval: 250ms;
         running: k-ta.pressed && (root.key == "←" || root.key == "ЗАБОЙ");
         triggered => { root.key-tapped("ЗАБОЙ"); }
     }
 }
-
 export component MainWindow inherits Window {
     title: "ScaleFW";
-    // Размер экрана задаёт бэкенд (смена панели — без правки разметки).
     in property <length> screen-w: 1024px;
     in property <length> screen-h: 768px;
     width: screen-w;
     height: screen-h;
     background: #F6F7F9;
     default-font-family: "DejaVu Sans";
-
-    // ---- данные от бэкенда ----
     in property <string> weight-text: "0.000";
-    // 0 пусто, 1 нестабилен, 2 стабилен
     in property <int> weight-state: 0;
-    // Связь с весовым модулем: опросный поток отдаёт данные.
     in property <bool> scales-ok: false;
-    // Принтер не отвечает/офлайн (фоновый опрос статуса).
     in property <bool> printer-fault: false;
-    // Этикет-лента: 0 в норме, 1 заканчивается, 2 закончилась.
     in property <int> paper-state: 0;
-    // Модальная блокировка «лента закончилась»: закрывается сама, когда
-    // фоновый опрос снова отвечает (заправка + протяжка выполнены).
     in property <bool> paper-popup-open: false;
     in property <bool> printer-power-hint: false;
-    // В выходном лотке лежит напечатанная этикетка (датчик лотка).
     in property <bool> label-waiting: false;
-    // 0 покой, 1 ожидание стабилизации, 2 печать, 3 готово, 4 ошибка принтера
     in property <int> phase: 0;
     in property <string> status-text: "";
-    in property <int> status-level: 0; // 0 норма, 1 внимание, 2 ошибка
-    // 0 отделы, 1 группы отдела, 2 товары группы, 4 настройки отделов
+    in property <int> status-level: 0; 
     in property <int> screen: 0;
     in property <string> screen-title: "";
-    // Пейджинг отделов: страницы по колонкам, кнопка перелистывания —
-    // под колонками, по центру.
     in property <int> page-no: 0;
     in property <int> pages-total: 1;
-    // Пейджинг товаров группы: страницы по 10 карточек (5×2).
     in property <int> items-page-no: 0;
-    // Сдвиг сетки карточек: на страницах, кроме первой, ячейка 0 занята
-    // кнопкой «← НАЗАД», товары начинаются с ячейки 1.
     in property <int> items-cell-offset: 0;
     in property <int> items-pages-total: 1;
-    // Страницы отделов в шапке экрана товаров: видимость «НАЗАД»/«ДАЛЕЕ».
     in property <int> dept-pages-total: 1;
-
-    // Детальная карточка товара: оверлей поверх сетки товаров. Крупная
-    // картинка, цены, живой вес и стоимость текущего веса (обычная и по
-    // карте). Клик вне панели закрывает.
     in property <PluTile> popup-plu;
     in property <bool> popup-open: false;
     in property <string> popup-weight;
     in property <string> popup-sum;
     in property <string> popup-card-sum;
     in property <bool> popup-empty: true;
-    // Вес на платформе есть, но ниже минимального веса печати.
     in property <bool> popup-under-min: false;
     callback plu-confirm();
     callback plu-cancel();
-    in property <length> dept-font: 30px; // единый кегль подписи отдела
-    // Логотип компании: зона справа от блока веса. Файл <img_dir>/logo.png
-    // подкинули — картинка (вписана в зону), нет — пустое место.
+    in property <length> dept-font: 30px; 
     in property <image> logo-img;
     in property <bool> logo-has: false;
-    in property <length> col-w: 195px; // ширина колонки (считает бэкенд)
-    in property <length> tile-h: 592px; // высота колонки
-    in property <[DeptDef]> depts;         // отделы текущей страницы
-    in property <[DeptDef]> header-depts;  // отделы в шапке экрана товаров
-    in property <[PluTile]> items;        // карточки товаров отдела, до 10
-
+    in property <length> col-w: 195px; 
+    in property <length> tile-h: 592px; 
+    in property <[DeptDef]> depts;         
+    in property <[DeptDef]> header-depts;  
+    in property <[PluTile]> items;        
     callback dept-tapped(string);
     callback plu-tapped(string);
     callback more();
     callback back();
-    // Промотка отделов в шапке экрана товаров.
     callback dept-next();
     callback dept-prev();
-    // Выход на уровень выше: товары → отделы (кнопка в шапке).
     callback up();
-    // Тап по индикатору веса: 5 подряд за 3 с открывают меню настроек.
     callback admin-tap();
-
-    // Поиск (экран 3): открытие зоны поиска, нажатие клавиши, сброс.
     callback search-open();
     callback key-tapped(string);
     callback search-clear();
@@ -365,86 +275,45 @@ export component MainWindow inherits Window {
     property <[string]> kb1: ["й","ц","у","к","е","н","г","ш","щ","з","х","ъ"];
     property <[string]> kb2: ["ф","ы","в","а","п","р","о","л","д","ж","э"];
     property <[string]> kb3: ["я","ч","с","м","и","т","ь","б","ю"];
-    // Четвёртый ряд: цифры, дефис и Ё — названия вида «ЧАЙ 100 ГР» и
-    // «ИЗЮМ С КОСТОЧКОЙ» ищутся по буквам и цифрам.
     property <[string]> kb4: ["1","2","3","4","5","6","7","8","9","0","-","ё"];
-
     property <bool> can-tap: phase != 2 && phase != 3 && phase != 4;
-
-    // Скрытый вход в настройки: 5 быстрых тапов по полосе статуса.
-    // Распознаёт бэкенд (5 тапов за 3 с), тапы ловит полоса.
-
-    // ---- меню настроек (экраны 4-7, оверлей поверх каталога) ----
-    // Экран: 4 = редактор отделов, 5 = вход по паролю, 6 = меню, 7 = диагностика.
     in property <[AdminRow]> admin-rows;
-    // Маска введённого пароля (точки), чистит бэкенд.
     in property <string> pin-mask;
-    // Смена пароля (экран 10): подсказка этапа и текст ошибки.
     in property <string> pin-prompt: "Введите старый пароль";
     in property <string> pin-error;
-    // Заводской пароль: «НАЗАД» скрыт, смена обязательна.
     in property <bool> pin-forced: false;
-    // Остаток паузы после перебора, с; 0 — ввод разрешён.
     in property <int> lock-left;
-    // Роль вошедшего: 1 = администратор (полный доступ), 0 = персонал.
     in property <int> role: 0;
-
     callback pin-digit(string);
     callback pin-clear();
     callback pin-back();
     callback pin-try();
-    // Пункт «Настройки весов»: редактор отделов.
-    // Из редактора отделов назад в меню.
     callback depts-close();
-    // Полный выход: назад к каталогу, вход по паролю заново.
     callback admin-close();
     callback admin-up(string);
     callback admin-down(string);
     callback admin-del(string);
     callback admin-color(string);
-    // Пункт меню (id из MenuRow): диспетчеризация в бэкенде.
     callback menu-tap(string);
-
-    // ---- мастер настройки / чек-лист (экран 19) ----
-    // mode: 0 = чек-лист (живые галки, кнопка ввода в эксплуатацию),
-    // 1 = мастер (пошагово). stage — шаг мастера 1..8, mask — битмаск
-    // чек-листа (setup::evaluate).
     in property <int> setup-mode;
     in property <int> setup-stage;
     in property <int> setup-mask;
-    // Контент активного шага: подсказка оператору.
     in property <string> setup-note;
-    // Главная кнопка шага («ПЕЧАТЬ ТЕСТА», «ПРИМЕНИТЬ ВРЕМЯ», ...).
     in property <string> setup-action-label;
     in property <bool> setup-action-enabled: false;
-    // Левая кнопка шага: обычно «НАЗАД», на подгонке зазора — «УЕХАЛО −16».
     in property <string> setup-back-label: "НАЗАД";
-    // Кнопка «ПРОПУСТИТЬ» (подпись меняется: на шаге 5 — «ГОТОВО»,
-    // на шаге 7 — состояние NTP).
     in property <bool> setup-skip-visible: false;
     in property <string> setup-skip-label: "ПРОПУСТИТЬ";
-    // Отдельная кнопка «ДАЛЕЕ» (шаг 7: время и NTP — два разных действия).
     in property <bool> setup-next-visible: false;
-    // Пункт «Мастер настройки» в меню — только при первой установке
-    // (мастер не завершён); в рабочей весы пункта нет.
     in property <bool> setup-menu-visible: false;
     callback setup-tap(string);
-
-    // Экран «Сеть»: поля IP/маска/шлюз/DNS, тап по полю = фокус,
-    // клавиатура цифр и точек, ПРИМЕНИТЬ живо меняет адрес.
     in property <[NetworkField]> net-rows;
     in property <int> net-focus;
-    // Итог применения сети: модальное окно с сообщением и кнопкой ОК.
     in property <string> net-popup-text;
     in property <bool> net-popup-ok: true;
     in property <bool> net-popup-open;
     callback net-popup-close();
-    // Режим главного адреса: false — ручной, true — DHCP (поля только чтение).
     in property <bool> net-dhcp;
-
-    // ---------- Настройки весов (экраны 12–17) ----------
-    // Товары и экран: колонки, сортировка. Торговые правила: округление,
-    // минимальный вес. Значения ставит бэкенд при открытии экрана.
     in property <string> goods-cols: "2";
     in property <string> goods-sort: "по алфавиту";
     in property <string> goods-idle: "30 с";
@@ -452,11 +321,9 @@ export component MainWindow inherits Window {
     in property <string> goods-backbtn: "ВКЛ";
     in property <bool> card-show-name: true;
     in property <bool> catalog-back-btn: true;
-    // Страница кнопок отделов в шапке товаров — независима от колонок главного.
     in property <int> header-page: 0;
     in property <string> trade-rounding: "выкл";
     in property <string> trade-minw: "10 г";
-    // Импорт: список файлов каталога, подтверждение применения, результат.
     in property <[string]> imp-files;
     in property <bool> imp-popup-open: false;
     in property <bool> imp-confirm: false;
@@ -465,27 +332,17 @@ export component MainWindow inherits Window {
     callback import-tap(string);
     callback import-apply();
     callback imp-popup-close();
-    // Отчёты: текст собирается в фоне.
     in property <string> report-text;
     in property <string> report-period: "Сегодня";
     in property <string> report-kind: "Все события";
     in property <string> prn-diag-text: "Идёт опрос принтера…";
-    // Данные сети заполнены и корректны — кнопка ПРИМЕНИТЬ активна.
     in property <bool> net-valid: false;
     callback net-mode(bool);
     callback net-tap(int);
     callback net-key(string);
     callback net-apply();
-    // IP весов в углу экрана входа по паролю (для персонала).
     in property <string> ip-note;
-    // Отчёт диагностики (экран 7).
     in property <string> diag-text;
-
-    // ---------- A. статус = индикатор исправности ----------
-    // Вся полоса — сводное состояние кассы: светло-зелёная — всё работает;
-    // персиковая — расходник (этикет-лента); ярко-красная — критично
-    // (нет связи с весовым модулем или принтер не отвечает).
-    // Текст в полосе — активное сообщение печати либо причина цвета.
     Rectangle {
         x: 0; y: 0;
         width: root.width;
@@ -510,10 +367,6 @@ export component MainWindow inherits Window {
                  : root.paper-state != 0 || status-level == 1 ? #6B4A1B : #4E8A67;
         }
     }
-
-    // ---------- B1. вес ----------
-    // Скрытый вход в настройки: 5 быстрых тапов по индикатору веса
-    // (за 3 с после первого). Обрабатывает бэкенд, здесь только счёт.
     admin-tap-zone := TouchArea {
         x: 0;
         y: 24px;
@@ -540,10 +393,7 @@ export component MainWindow inherits Window {
         font-size: 32px;
         color: weight-state == 0 ? #A6ADB8 : #707A86;
     }
-    // Индикатор стабильности: линия под весом во всю ширину экрана,
-    // скруглённая на концах. Зелёная — можно брать товар, янтарная — ждём.
     if weight-state == 1 || weight-state == 2 : Rectangle {
-        // Линия на ширину весового блока (вес + «кг»), не всего экрана.
         x: 16px;
         y: 150px;
         width: 444px;
@@ -551,10 +401,6 @@ export component MainWindow inherits Window {
         border-radius: 3px;
         background: weight-state == 2 ? #2FA36B : #E0A100;
     }
-
-    // Логотип компании: невидимая зона справа от блока веса. Пропорция зоны
-    // равна пропорции logo.png (480x88): ширина всей полосы, высота по ней.
-    // Нет файла — пустое место.
     property <length> logo-h: (root.width - 496px) * (88px / 480px);
     if root.logo-has : Rectangle {
         x: 480px;
@@ -568,13 +414,10 @@ export component MainWindow inherits Window {
             source: root.logo-img;
         }
     }
-
-    // ---------- C. главный экран: отделы одной строкой ----------
     if screen == 0 : Rectangle {
         x: 0; y: 160px;
         width: root.width;
         height: root.height - 160px;
-
         for d[i] in root.depts : DeptTile {
             idx: i;
             col-w: root.col-w;
@@ -587,9 +430,6 @@ export component MainWindow inherits Window {
             prev-page => { root.back(); }
         }
     }
-
-    // ---------- C. пейджер: под колонками отделов, с отступом ----------
-    // Экран 0 — страницы отделов; на экране товаров «ДАЛЕЕ» — плитка в гриде.
     if screen == 0 && pages-total > 1 : Rectangle {
         y: 160px + root.tile-h + 16px;
         x: 0;
@@ -634,15 +474,10 @@ export component MainWindow inherits Window {
             }
         }
     }
-
-    // ---------- C. товары отдела ----------
     if screen == 2 : Rectangle {
         x: 0; y: 160px;
         width: root.width;
         height: root.height - 160px;
-
-        // Кнопки отделов в шапке: столько же, сколько колонок на главном.
-        // Текущий отдел подсвечен; сверх колонок — кнопка промотки.
         for d[i] in root.header-depts : Rectangle {
             x: 8px + i * 114px;
             y: 8px;
@@ -667,7 +502,6 @@ export component MainWindow inherits Window {
                 clicked => { root.dept-tapped(d.name); }
             }
         }
-        // «НАЗАД» — только когда промотка уже делалась.
         if root.header-page > 0 : Rectangle {
             x: 8px + root.header-depts.length * 114px;
             y: 8px;
@@ -685,7 +519,6 @@ export component MainWindow inherits Window {
                 clicked => { root.dept-prev(); }
             }
         }
-        // «ДАЛЕЕ» — только если есть следующая порция отделов.
         if root.header-page < root.dept-pages-total - 1 : Rectangle {
             x: 8px + root.header-depts.length * 114px
                 + (root.page-no > 0 ? 66px : 0px);
@@ -704,7 +537,6 @@ export component MainWindow inherits Window {
                 clicked => { root.dept-next(); }
             }
         }
-        // Поиск доступен отовсюду: пилюля в шапке экрана товаров.
         Rectangle {
             x: root.width - 308px; y: 8px;
             width: 300px; height: 40px;
@@ -725,7 +557,6 @@ export component MainWindow inherits Window {
                 clicked => { root.search-open(); }
             }
         }
-        // «← НАЗАД» — ячейка 0 на всех страницах, кроме первой (можно скрыть).
         if root.items-page-no > 0 && root.catalog-back-btn : Rectangle {
             x: 8px;
             y: 56px;
@@ -753,8 +584,6 @@ export component MainWindow inherits Window {
             card-show-name: root.card-show-name;
             tapped => { root.plu-tapped(p.id); }
         }
-        // «ДАЛЕЕ →» — ячейка сразу за последним товаром (на полной странице
-        // — последняя ячейка сетки), как в оригинальном ПО.
         if root.items-page-no < root.items-pages-total - 1 : Rectangle {
             x: 8px + Math.mod(root.items.length + root.items-cell-offset, 9) * 112px;
             y: 56px + Math.floor((root.items.length + root.items-cell-offset) / 9) * 182px;
@@ -777,9 +606,6 @@ export component MainWindow inherits Window {
             }
         }
     }
-
-    // ---------- C. зона поиска: внизу, между «← НАЗАД» и «ДАЛЕЕ →» ----------
-    // Тап открывает экран поиска (3): клавиатура + живая выдача.
     if screen == 0 : Rectangle {
         x: root.width / 2 - 200px;
         y: 160px + root.tile-h + 16px;
@@ -802,14 +628,10 @@ export component MainWindow inherits Window {
             clicked => { root.search-open(); }
         }
     }
-
-    // ---------- C. поиск: строка ввода, выдача, клавиатура (экран 3) ----------
     if screen == 3 : Rectangle {
         x: 0; y: 160px;
         width: root.width;
         height: root.height - 160px;
-
-        // Шапка: «← Назад», поле ввода, «ОЧИСТИТЬ».
         Rectangle {
             x: 8px; y: 8px;
             width: 180px; height: 56px;
@@ -859,8 +681,6 @@ export component MainWindow inherits Window {
                 clicked => { root.search-clear(); }
             }
         }
-
-        // Выдача: до 5 строк «название — цены». Совпадение подсвечено.
         for p[i] in root.items : Rectangle {
             x: 8px;
             y: 72px + i * 64px;
@@ -950,8 +770,6 @@ export component MainWindow inherits Window {
             horizontal-alignment: center;
             color: #A6ADB8;
         }
-
-        // Клавиатура: ЙЦУКЕН, пробел, забой.
         for k[i] in root.kb1 : KbKey {
             kx: 8px + i * 78px;
             y: 404px;
@@ -991,18 +809,14 @@ export component MainWindow inherits Window {
             key-tapped(k) => { root.key-tapped(k); }
         }
     }
-
-    // ---------- E. детальная карточка товара: оверлей поверх сетки ----------
     if root.popup-open : Rectangle {
         x: 0; y: 0;
         width: root.width;
         height: root.height;
         background: transparent;
-        // Клик мимо панели закрывает карточку.
         popup-back-ta := TouchArea {
             clicked => { root.plu-cancel(); }
         }
-
         Rectangle {
             x: 152px; y: 150px;
             width: 720px; height: 468px;
@@ -1010,11 +824,7 @@ export component MainWindow inherits Window {
             border-width: 2px;
             border-color: #C9CFD7;
             background: #FFFFFF;
-            // Панель глушит клики (закрытие — только мимо панели/«ОТМЕНА»).
             popup-panel-ta := TouchArea { }
-
-            // Картинка: зона 280×280 (источник квадратный, contain — без
-            // обрезки). Без названия — по центру панели.
             Rectangle {
                 x: root.card-show-name ? 24px : 220px;
                 y: 24px;
@@ -1030,8 +840,6 @@ export component MainWindow inherits Window {
                     source: root.popup-plu.img;
                 }
             }
-
-            // Название и цены за килограмм.
             if root.card-show-name : Text {
                 x: 328px; y: 24px;
                 width: 368px; height: 64px;
@@ -1061,7 +869,6 @@ export component MainWindow inherits Window {
                 vertical-alignment: center;
                 color: #2FA36B;
             }
-            // Без названия: цена (и карта) бейджем поверх картинки.
             if !root.card-show-name && (root.popup-plu.price != "" || root.popup-plu.card-price != "") : Rectangle {
                 x: 428px; y: 236px;
                 width: 244px; height: root.popup-plu.card-price != "" ? 68px : 44px;
@@ -1088,8 +895,6 @@ export component MainWindow inherits Window {
                     color: #2FA36B;
                 }
             }
-
-            // Вес и стоимость текущего веса; на пустых весах — подсказка.
             if !root.popup-empty : Text {
                 x: 24px; y: 312px;
                 width: 300px; height: 72px;
@@ -1127,15 +932,11 @@ export component MainWindow inherits Window {
                 vertical-alignment: center;
                 color: root.popup-under-min ? #B3261E : #707A86;
             }
-            // Скрытый вход в настройки доступен и из карточки: тапы по
-            // зоне веса считаются той же серией (кнопки ниже не задеты).
             admin-pop-zone := TouchArea {
                 x: 24px; y: 300px;
                 width: 300px; height: 88px;
                 clicked => { root.admin-tap(); }
             }
-
-            // Кнопки: отмена и переход к печати.
             Rectangle {
                 x: 24px; y: 392px;
                 width: 200px; height: 56px;
@@ -1157,8 +958,6 @@ export component MainWindow inherits Window {
                 x: 496px; y: 392px;
                 width: 200px; height: 56px;
                 border-radius: 16px;
-                // Печать доступна только при стабильном весе: без товара
-                // и на дрожащей платформе кнопка гаснет.
                 background: !popup-ok-ta.enabled ? #C9CFD7
                          : popup-ok-ta.pressed ? #268A5A : #2FA36B;
                 Text {
@@ -1174,12 +973,6 @@ export component MainWindow inherits Window {
             }
         }
     }
-
-    // ---------- Модальное окно «лента закончилась» ----------
-    // Верхний уровень окна (вне экранов и админ-оверлея), иначе не видно
-    // на покупательских экранах. Показ при fault (screen <= 3): тапы не
-    // проходят сквозь. Уходит сам после заправки и перезагрузки весов
-    // (опрос статуса снова отвечает).
     if root.paper-popup-open && root.screen <= 3 : Rectangle {
         x: 0; y: 0;
         width: root.width;
@@ -1215,24 +1008,12 @@ export component MainWindow inherits Window {
             }
         }
     }
-
-    // ---------- B2. уведомления — только верхняя строка (нейтральные) ----------
-    // Центральных всплывашек нет: покупатель может перекладывать товар и
-    // листать каталог одновременно.
-
-    // ---------- Меню настроек: оверлей поверх каталога ----------
-    // Одно окно: вход по паролю, меню, редактор отделов и диагностика —
-    // экраны главного окна (второе X-окно на этом железе с winit 0.30 без
-    // WM нестабильно по размеру). Полноэкранный прямоугольник + гасящий
-    // TouchArea: клики каталога под оверлеем не проходят.
     if root.screen >= 4 : Rectangle {
         x: 0; y: 0;
         width: root.screen-w;
         height: root.screen-h;
         background: #F6F7F9;
         admin-block-ta := TouchArea { }
-
-        // Шапка: заголовок по экрану, справа «НАЗАД» (редактор) и «ГОТОВО»/«ВЫХОД».
         Rectangle {
             x: 8px; y: 8px;
             width: parent.width - 16px;
@@ -1287,9 +1068,6 @@ export component MainWindow inherits Window {
                     clicked => { root.depts-close(); }
                 }
             }
-            // «ВЫХОД» скрыт на экране 19 (мастер и чек-лист): выход в
-            // каталог до завершения настройки = софт-лок без пользователей;
-            // в чек-листе — до ввода в эксплуатацию.
             if root.screen != 19 : Rectangle {
                 x: parent.width - 176px;
                 y: 8px;
@@ -1308,14 +1086,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // ---------- Экран 10: смена пароля ----------
-        // Тот же пин-пад, что и на входе; подсказка этапа — pin-prompt.
         if root.screen == 10 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             Text {
                 x: 0; y: 8px;
                 width: parent.width;
@@ -1354,7 +1128,6 @@ export component MainWindow inherits Window {
                 color: #B3261E;
                 horizontal-alignment: center;
             }
-
             property <[string]> keys: ["1","2","3","4","5","6","7","8","9","C","0","←"];
             for k[i] in keys : Rectangle {
                 x: 262px + mod(i, 3) * 170px;
@@ -1379,7 +1152,6 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-
             Rectangle {
                 x: 262px;
                 y: 608px;
@@ -1401,16 +1173,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // ---------- Экран 19: мастер настройки / чек-лист ----------
-        // Разметка под 800×480: слева список шагов (компактные строки),
-        // справа контент шага и два ряда кнопок. Ширины заданы так, чтобы
-        // ряды не пересекались при любой видимости кнопок.
         if root.screen == 19 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             property <[SetupRow]> wizard-rows: [
                 { label: "1 · Пароль администратора", state: root.setup-stage > 1 ? 2 : (root.setup-stage == 1 ? 1 : 0) },
                 { label: "2 · Пароль кассира", state: root.setup-stage > 2 ? 2 : (root.setup-stage == 2 ? 1 : 0) },
@@ -1421,7 +1187,6 @@ export component MainWindow inherits Window {
                 { label: "7 · Дата и время", state: root.setup-stage > 7 ? 2 : (root.setup-stage == 7 ? 1 : 0) },
                 { label: "8 · Готово", state: root.setup-stage > 8 ? 2 : (root.setup-stage == 8 ? 1 : 0) },
             ];
-            // Slint не имеет битовых операций: биты маски через mod/floor.
             property <int> bit-goods: mod(root.setup-mask, 2);
             property <int> bit-layout: mod(floor(root.setup-mask / 2), 2);
             property <int> bit-printer: mod(floor(root.setup-mask / 4), 2);
@@ -1432,11 +1197,6 @@ export component MainWindow inherits Window {
                 { label: "Принтер исправен", state: bit-printer == 1 ? 2 : 1 },
                 { label: "Весы исправны", state: bit-scales == 1 ? 2 : 1 },
             ];
-
-            // Список шагов: 8 строк по 42px + зазор 6 — влезает в высоту.
-            // Мастер: state 1 = активный шаг (зелёная рамка). Чек-лист:
-            // state 1 = НЕ выполнено (янтарный), state 2 = выполнено
-            // (зелёный с галкой), state 0 = ещё не наступало (серый).
             for row[i] in (root.setup-mode == 1 ? wizard-rows : checklist-rows) : Rectangle {
                 x: 8px;
                 y: 6px + i * 48px;
@@ -1472,8 +1232,6 @@ export component MainWindow inherits Window {
                     vertical-alignment: center;
                 }
             }
-
-            // Контент активного шага.
             Rectangle {
                 x: 320px;
                 y: 6px;
@@ -1495,8 +1253,6 @@ export component MainWindow inherits Window {
                     vertical-alignment: top;
                 }
             }
-
-            // Ряд 1: назад + главная кнопка шага.
             Rectangle {
                 x: 320px;
                 y: parent.height - 156px;
@@ -1535,9 +1291,6 @@ export component MainWindow inherits Window {
                     clicked => { root.setup-tap("action"); }
                 }
             }
-
-            // Ряд 2: пропуск (подпись по шагу: ПРОПУСТИТЬ / ГОТОВО / NTP)
-            // и ДАЛЕЕ (только шаг 7). Позиции не пересекаются с рядом 1.
             if root.setup-skip-visible : Rectangle {
                 x: 320px;
                 y: parent.height - 80px;
@@ -1574,13 +1327,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-        // ---------- Экран 5: вход по паролю ----------
         if root.screen == 5 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
-            // Маска: точка на каждую введённую цифру.
             Rectangle {
                 x: 262px;
                 y: 12px;
@@ -1619,8 +1369,6 @@ export component MainWindow inherits Window {
                 color: #B3261E;
                 horizontal-alignment: center;
             }
-
-            // Цифровая клавиатура: 3×4. «С» чистит поле, «←» стирает цифру.
             property <[string]> keys: ["1","2","3","4","5","6","7","8","9","C","0","←"];
             for k[i] in keys : Rectangle {
                 x: 262px + mod(i, 3) * 170px;
@@ -1645,8 +1393,6 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-
-            // Проверка на бэкенде; при активной паузе кнопка неактивна.
             Rectangle {
                 x: 262px;
                 y: 608px;
@@ -1667,8 +1413,6 @@ export component MainWindow inherits Window {
                     clicked => { root.pin-try(); }
                 }
             }
-
-            // Адрес весов для персонала: мелко в правом нижнем углу.
             Text {
                 x: parent.width - 360px;
                 y: parent.height - 30px;
@@ -1680,18 +1424,10 @@ export component MainWindow inherits Window {
                 horizontal-alignment: right;
             }
         }
-
-        // ---------- Экран 6: главное меню ----------
-        // Обслуживание доступно персоналу, настройка — только администратору
-        // (роль приходит от бэкенда после входа).
         if root.screen == 6 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
-            // Кассиру — только протяжка и перезагрузка (мастер настройки
-            // и разделы настроек — админские). Пункт мастера виден, пока
-            // весы не введены в эксплуатацию.
             property <[MenuRow]> rows-staff: [
                 { label: "Протяжка этикетки", id: "feed", admin: false },
                 { label: "Перезагрузка весов", id: "restart", admin: false },
@@ -1723,8 +1459,6 @@ export component MainWindow inherits Window {
                 border-radius: 12px;
                 border-width: 2px;
                 border-color: #C9CFD7;
-                // pressed видит любой нажавший: это отрисовка, а не права
-                // (доступ пунктов ограничивается opacity и menu-tap).
                 background: menu-ta.pressed ? #E4E8ED : #FFFFFF;
                 opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
                 Text {
@@ -1745,13 +1479,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // ---------- Экран 7: диагностика ----------
         if root.screen == 7 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             Rectangle {
                 x: 8px; y: 12px;
                 width: parent.width - 16px;
@@ -1761,7 +1492,6 @@ export component MainWindow inherits Window {
                 border-color: #C9CFD7;
                 background: #FFFFFF;
                 clip: true;
-
                 Flickable {
                     x: 16px; y: 16px;
                     width: parent.width - 32px;
@@ -1778,14 +1508,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // ---------- Экран 8: сеть (IP/маска/шлюз/DNS) ----------
         if root.screen == 8 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
-            // Переключатель режима: в DHCP поля только чтение.
             Rectangle {
                 x: 8px;
                 y: 12px;
@@ -1826,9 +1552,6 @@ export component MainWindow inherits Window {
                     TouchArea { clicked => { root.net-mode(true); } }
                 }
             }
-
-            // Поля: тап по строке — фокус (только в ручном режиме); в DHCP
-            // строки серые и не нажимаются, показывают полученные значения.
             for f[i] in root.net-rows : Rectangle {
                 x: 8px;
                 y: 72px + i * 58px;
@@ -1865,8 +1588,6 @@ export component MainWindow inherits Window {
                     clicked => { root.net-tap(i); }
                 }
             }
-
-            // Клавиатура: цифры, точка, забой (три ряда) + C рядом с ПРИМЕНИТЬ.
             property <[string]> net-keys: ["7","8","9","4","5","6","1","2","3",".","0","←"];
             for k[j] in net-keys : Rectangle {
                 x: 8px + Math.mod(j, 3) * ((parent.width - 32px) / 3);
@@ -1881,7 +1602,6 @@ export component MainWindow inherits Window {
                 Text { text: k; font-size: 30px; font-weight: 700; color: #1A1E24; }
                 net-key-ta := TouchArea { enabled: !root.net-dhcp; clicked => { root.net-key(k); } }
             }
-
             Rectangle {
                 x: 8px;
                 y: 614px;
@@ -1898,7 +1618,6 @@ export component MainWindow inherits Window {
                 width: parent.width - 196px;
                 height: 50px;
                 border-radius: 12px;
-                // Серая = данные неполные/неверные (живая валидация net-valid).
                 background: root.net-valid
                     ? (net-apply-ta.pressed ? #2456C4 : #2F6FED)
                     : (net-apply-ta.pressed ? #9AA5B1 : #C3CAD3);
@@ -1910,7 +1629,6 @@ export component MainWindow inherits Window {
                 }
                 net-apply-ta := TouchArea { enabled: root.net-valid; clicked => { root.net-apply(); } }
             }
-            // Модальное окно результата: затемнение, сообщение, ОК.
             if root.net-popup-open : Rectangle {
                 x: 0; y: 0;
                 width: parent.width;
@@ -1947,15 +1665,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // ---------- Экран 9: оборудование (подменю меню настроек) ----------
-        // Диагностика/протяжка/тест-печать спрятаны сюда, чтобы не занимать
-        // главное меню. Доступны персоналу, как и раньше.
         if root.screen == 9 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             property <[MenuRow]> rows: [
                 { label: "Диагностика", id: "diag", admin: false },
                 { label: "Принтер", id: "printerdiag", admin: false },
@@ -1987,13 +1700,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // ---------- Экран 12: хаб «Настройки весов» ----------
         if root.screen == 12 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             property <[MenuRow]> rows: [
                 { label: "Товары и экран", id: "goods", admin: true },
                 { label: "Торговые правила", id: "trade", admin: true },
@@ -2027,13 +1737,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // ---------- Экран 13: товары и экран ----------
         if root.screen == 13 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             property <[MenuRow]> rows: [
                 { label: "Компоновка разделов", id: "layout", admin: true },
                 { label: "Колонок на экране", id: "cols", admin: true },
@@ -2065,7 +1772,6 @@ export component MainWindow inherits Window {
                     vertical-alignment: center;
                     overflow: elide;
                 }
-                // Значение справа для переключаемых пунктов.
                 if r.id == "cols" : Text {
                     x: parent.width - 230px;
                     width: 190px;
@@ -2128,13 +1834,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // ---------- Экран 14: торговые правила ----------
         if root.screen == 14 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             property <[MenuRow]> rows: [
                 { label: "Округление цены", id: "rounding", admin: true },
                 { label: "Минимальный вес печати", id: "minweight", admin: true },
@@ -2189,13 +1892,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // ---------- Экран 15: обслуживание ----------
         if root.screen == 15 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             property <[MenuRow]> rows: [
                 { label: "Сменить пароль", id: "changepin", admin: false },
                 { label: "Отчёты", id: "reports", admin: false },
@@ -2228,13 +1928,10 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // ---------- Экран 16: импорт конфигурации ----------
         if root.screen == 16 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             if root.imp-files.length == 0 : Text {
                 x: 16px;
                 y: 24px;
@@ -2269,16 +1966,11 @@ export component MainWindow inherits Window {
                     clicked => { root.import-tap(name); }
                 }
             }
-
         }
-
-        // ---------- Экран 17: отчёты ----------
         if root.screen == 17 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
-            // Фильтры: период и тип событий — циклы, отчёт пересобирается.
             Rectangle {
                 x: 8px; y: 8px;
                 width: (parent.width - 24px) / 2;
@@ -2322,7 +2014,6 @@ export component MainWindow inherits Window {
                 }
                 rep-k-ta := TouchArea { clicked => { root.menu-tap("report-kind"); } }
             }
-
             Text {
                 x: 24px;
                 y: 76px;
@@ -2336,13 +2027,10 @@ export component MainWindow inherits Window {
                 wrap: word-wrap;
             }
         }
-
-        // ---------- Экран 18: принтер · диагностика ----------
         if root.screen == 18 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             Rectangle {
                 x: 8px; y: 8px;
                 width: (parent.width - 32px) / 3;
@@ -2408,7 +2096,6 @@ export component MainWindow inherits Window {
                 }
                 prn-x-ta := TouchArea { clicked => { root.menu-tap("prn-reset"); } }
             }
-
             Text {
                 x: 24px;
                 y: 76px;
@@ -2422,13 +2109,10 @@ export component MainWindow inherits Window {
                 wrap: word-wrap;
             }
         }
-
-        // ---------- Экран 4: редактор отделов ----------
         if root.screen == 4 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-
             for r[i] in root.admin-rows : Rectangle {
                 x: 8px;
                 y: 12px + i * 72px;
@@ -2449,8 +2133,6 @@ export component MainWindow inherits Window {
                     vertical-alignment: center;
                     overflow: elide;
                 }
-                // Цвет плитки: цикл Авто → пресеты палитры, тап — следующий.
-                // Кнопка стоит сразу после имени, вдали от стрелок порядка.
                 Rectangle {
                     x: 250px;
                     y: 8px;
@@ -2513,7 +2195,6 @@ export component MainWindow inherits Window {
                 }
             }
         }
-            // Подтверждение / результат импорта.
             if root.imp-popup-open : Rectangle {
                 x: 0; y: 0;
                 width: parent.width;
@@ -2576,6 +2257,5 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-
     }
 }

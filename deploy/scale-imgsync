@@ -1,20 +1,13 @@
 #!/bin/bash
-# Зеркалирование картинок товаров с центрального FTP на весы.
-# Креды и пути — в /etc/scalefw/imgsync.conf (600, root). Вызывается
-# systemd-таймером scale-imgsync.timer; повторный запуск под lock-файлом.
 set -u
 CONF=/etc/scalefw/imgsync.conf
 LOCK=/run/scale-imgsync.lock
-
 [ -r "$CONF" ] || { echo "imgsync: нет $CONF" >&2; exit 1; }
-# shellcheck disable=SC1090
 . "$CONF"
 : "${host:?}" "${user:?}" "${password:?}" "${remote_path:?}" "${local_dir:?}"
-
 mkdir -p "$local_dir"
 exec 9>"$LOCK"
 flock -n 9 || exit 0
-
 lftp -u "$user","$password" "$host" \
     -e "set net:timeout 30; set net:max-retries 2; \
         mirror --only-newer --no-perms $remote_path $local_dir; bye" \

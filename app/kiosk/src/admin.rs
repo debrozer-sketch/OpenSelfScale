@@ -1,11 +1,5 @@
-//! Меню настроек (экраны 4-7 главного окна): модель строк и операции
-//! порядка/состава отделов. Правки пишутся в БД сразу; каталог
-//! перестраивается при выходе из меню.
 
 use crate::config;
-
-/// Строки меню настроек: экранный порядок отделов + флаги краёв.
-/// Цвет плитки: подпись «Авто»/имя пресета + образец.
 pub fn admin_rows_set(
     ui: &crate::MainWindow,
     conn: &rusqlite::Connection,
@@ -30,8 +24,6 @@ pub fn admin_rows_set(
         .collect();
     ui.set_admin_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
 }
-
-/// Подписи стоковых пресетов — в порядке DEPT_PALETTE.
 pub(crate) const PALETTE_NAMES: [&str; 8] = [
     "Зелёный",
     "Янтарный",
@@ -42,9 +34,6 @@ pub(crate) const PALETTE_NAMES: [&str; 8] = [
     "Лавандовый",
     "Персиковый",
 ];
-
-/// Текущий цвет отдела: индекс в цикле (0 = «Авто»), подпись и образец.
-/// Нестандартный hex из CLI показывается как «свой».
 pub fn color_state(
     bg: &Option<String>,
     palette: &[(u32, u32)],
@@ -80,9 +69,6 @@ pub fn color_state(
         ),
     }
 }
-
-/// Шаг отдела на одну позицию вверх (delta −1) или вниз (+1): своп соседей
-/// в экранном порядке, затем перезапись ord всем списком.
 pub fn admin_step(cfg: &config::Config, name: &str, delta: i64) {
     let Ok(conn) = datastore::open(&cfg.db_path) else {
         log::error!("меню: база недоступна");
@@ -104,8 +90,6 @@ pub fn admin_step(cfg: &config::Config, name: &str, delta: i64) {
         log::error!("порядок отделов: {e}");
     }
 }
-
-/// Убрать отдел (привязки групп снимаются вместе с ним).
 pub fn admin_delete(cfg: &config::Config, name: &str) {
     match datastore::open(&cfg.db_path) {
         Ok(conn) => {
@@ -116,9 +100,6 @@ pub fn admin_delete(cfg: &config::Config, name: &str) {
         Err(e) => log::error!("меню: база: {e}"),
     }
 }
-
-/// Следующий цвет плитки отдела: Авто → пресеты палитры → Авто.
-/// Возвращает true при успешной записи.
 pub fn admin_color_next(
     cfg: &config::Config,
     name: &str,

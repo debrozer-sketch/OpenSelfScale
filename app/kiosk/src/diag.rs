@@ -1,22 +1,12 @@
-//! Диагностика аппаратуры «одной кнопкой» (PROBLEMS.md В3/В4).
-//! Отчёт собирается из живых проверок, не из догадок.
 
 use std::path::Path;
-
 use crate::config::Config;
-
-/// Краткий отчёт диагностики: человекочитаемый, для экрана и для центра.
 pub fn collect(cfg: &Config) -> String {
     report(cfg, None)
 }
-
-/// Отчёт внутри работающего киоска: порты уже заняты весовым потоком и
-/// демоном принтера, повторное открытие дало бы ложное «занят» и сбило бы
-/// настройки живого порта, поэтому статус берётся у владельцев портов.
 pub fn collect_live(cfg: &Config, scales: &crate::weight::Snapshot) -> String {
     report(cfg, Some(scales))
 }
-
 fn report(cfg: &Config, live: Option<&crate::weight::Snapshot>) -> String {
     let mut r = String::new();
     let scales_state = match live {
@@ -62,7 +52,6 @@ fn report(cfg: &Config, live: Option<&crate::weight::Snapshot>) -> String {
     ));
     r
 }
-
 fn probe_serial(path: &Path, baud: u32) -> String {
     match serialport::new(path.to_string_lossy(), baud)
         .timeout(std::time::Duration::from_millis(500))
@@ -72,7 +61,6 @@ fn probe_serial(path: &Path, baud: u32) -> String {
         Err(e) => format!("ошибка: {e}"),
     }
 }
-
 fn probe_db(path: &Path) -> String {
     match datastore::open(path) {
         Ok(conn) => {
@@ -84,9 +72,7 @@ fn probe_db(path: &Path) -> String {
         Err(e) => format!("ошибка: {e}"),
     }
 }
-
 fn probe_incoming(dir: &Path) -> String {
-    // Drop-протокол: источник льёт набор в каталог, триггер — ready.flg.
     let has_ready = dir.join("ready.flg").exists();
     let has_uploading = dir.join("uploading.flg").exists();
     let plu = dir.join("plu.xml");
@@ -101,11 +87,9 @@ fn probe_incoming(dir: &Path) -> String {
         (_, false, None) => "выгрузок не было (plu.xml нет)".into(),
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn report_is_human_readable_and_complete() {
         let r = collect(&Config::default());

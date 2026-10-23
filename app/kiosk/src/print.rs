@@ -1,13 +1,8 @@
-//! Сборка этикетки из данных товара: мост datastore -> escpos.
-//! Координаты — из шаблона этикетки (потом придут из центра), пока
-//! зашита совместимая раскладка, снятая с живого дампа (PROTOCOL.md §2).
 
 use std::io::Read;
 use std::time::Duration;
-
 use datastore::PluItem;
 use escpos::{FieldStyle, LabelJob};
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LabelLayout {
     pub area: (u16, u16),
@@ -21,9 +16,6 @@ pub struct LabelLayout {
     pub sum: (u16, u16),
     pub barcode: (u16, u16),
 }
-
-/// Раскладка, наблюдённая в дампе (область 448x232, направления и координаты
-/// GS $/ESC $ из реальной печати). Срок годности — под PLU, зеркально дате.
 pub const LIVE_LAYOUT: LabelLayout = LabelLayout {
     area: (448, 232),
     name: (0, 0),
@@ -36,7 +28,6 @@ pub const LIVE_LAYOUT: LabelLayout = LabelLayout {
     sum: (214, 180),
     barcode: (2, 160),
 };
-
 #[derive(Debug, Error)]
 pub enum PrintError {
     #[error("encoding: {0}")]
@@ -51,8 +42,6 @@ pub enum PrintError {
     Io(#[from] std::io::Error),
     #[error("PLU {0} не найден в базе")]
     PluNotFound(String),
-    /// EAN-13 весового товара вмещает 5 цифр массы; больше — печать отказа
-    /// (молча обрезать массу = этикетка с неверным весом).
     #[error("вес {0} г выше предела штрихкода (99999 г)")]
     WeightLimit(u32),
     #[error("принтер отключён в конфиге ([printer].enabled = false)")]
@@ -60,12 +49,7 @@ pub enum PrintError {
     #[error("{0}")]
     Printer(String),
 }
-
 use thiserror::Error;
-
-/// Собрать байтовое задание печати для товара. Чистая функция — тестируется
-/// без порта и принтера. `date`/`time` — фактические дата (ДД.ММ.ГГ) и время
-/// (ЧЧ:ММ:СС) печати; зашитые константы из дампа здесь недопустимы.
 pub fn build_label(
     item: &PluItem,
     weight_g: u32,
@@ -77,9 +61,6 @@ pub fn build_label(
     let mut job = LabelJob::begin(layout.area);
     let kg = format!("{},{:03}", weight_g / 1000, weight_g % 1000);
     let price_r = format!("{},{:02}", item.price / 100, item.price % 100);
-    // Сумма с округлением до копейки — общая функция с экраном (session):
-    // две реализации «как в старом ПО» разошлись бы при первой же правке.
-    // Поверх — округление цены покупателя из «Торговых правил».
     let sum_k = crate::session::round_sum(
         crate::session::sum_kopecks(item.price, weight_g),
         rounding,
@@ -90,8 +71,6 @@ pub fn build_label(
         .field(layout.time.0, layout.time.1, FieldStyle::FontB, time)?
         .field(layout.plu_label.0, layout.plu_label.1, FieldStyle::FontB, &format!("PLU {}", item.plu))?;
     if !item.shelflife.is_empty() {
-        // «Годен до» + нормализованная дата; нераспознанный формат —
-        // как в выгрузке (деградация без потери данных).
         let text = shelflife_label(&item.shelflife).unwrap_or_else(|| item.shelflife.clone());
         job.field(layout.shelflife.0, layout.shelflife.1, FieldStyle::FontB, &text)?;
     }
@@ -101,11 +80,6 @@ pub fn build_label(
         .barcode_ean13(layout.barcode.0, layout.barcode.1, &ean13_payload(item, weight_g))?;
     Ok(job.finish())
 }
-
-/// Штрихкод весового товара: старое ПО собирает EAN-13 из внутреннего кода:
-/// «21» + код товара (5 цифр) + масса в граммах (5 цифр) = 12 цифр,
-/// контрольную 13-ю считает принтер (GS k 0x02). Подтверждено дампом:
-/// ВИНОГРАД КИШМИШ 1350 г, код 02136 → 210213601350.
 pub fn ean13_payload(item: &PluItem, weight_g: u32) -> String {
     let digits: String = item.itemcode.chars().filter(|c| c.is_ascii_digit()).collect();
     let code5 = if digits.len() >= 5 {
@@ -115,10 +89,6 @@ pub fn ean13_payload(item: &PluItem, weight_g: u32) -> String {
     };
     format!("21{code5}{:05}", weight_g.min(99_999))
 }
-
-/// «Годен до ДД.ММ.ГГГГ» из срока годности выгрузки. Поддерживаются
-/// ДД/ММ/ГГГГ, ДД.ММ.ГГГГ, ДД.ММ.ГГ и ГГГГ-ММ-ДД (время отбрасывается).
-/// None — формат не распознан, вызывающий печатает сырую строку.
 pub fn shelflife_label(raw: &str) -> Option<String> {
     let s = raw.trim();
     if s.is_empty() {
@@ -137,7 +107,6 @@ pub fn shelflife_label(raw: &str) -> Option<String> {
         if p.len() != 3 {
             return None;
         }
-        // ГГГГ-ММ-ДД → [Д, М, Г]
         let y = p[0].parse::<u32>().ok()?;
         let m = p[1].parse::<u32>().ok()?;
         let d = p[2].parse::<u32>().ok()?;
@@ -155,10 +124,6 @@ pub fn shelflife_label(raw: &str) -> Option<String> {
     let year = if y < 100 { 2000 + y } else { y };
     Some(format!("Годен до {d:02}.{m:02}.{year:04}"))
 }
-
-/// Локальные дата (ДД.ММ.ГГ) и время (ЧЧ:ММ:СС) момента печати.
-/// unix — localtime_r; прочее (хост-сборка/тесты) — UTC по алгоритму
-/// Ховарда Хиннанта, как в sync::stamp.
 pub fn now_stamp() -> (String, String) {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -183,7 +148,6 @@ pub fn now_stamp() -> (String, String) {
         utc_stamp(secs)
     }
 }
-
 fn utc_stamp(secs: i64) -> (String, String) {
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
@@ -202,13 +166,9 @@ fn utc_stamp(secs: i64) -> (String, String) {
         format!("{:02}:{:02}:{:02}", rem / 3600, (rem % 3600) / 60, rem % 60),
     )
 }
-
-/// Локальное время unix-метки в виде ЧЧ:ММ:СС (для журнала печатей).
 pub fn local_hms(ts: i64) -> String {
     utc_stamp(ts).1
 }
-
-/// Граница текущих локальных суток (unix) — для счётчика «сегодня».
 pub fn today_start() -> i64 {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -232,50 +192,27 @@ pub fn today_start() -> i64 {
         now / 86_400 * 86_400
     }
 }
-
-/// Состояние принтера для индикации: fault — не отвечает/офлайн,
-/// paper_* — расходник (этикет-лента), label_waiting — в выходном
-/// лотке лежит напечатанная этикетка. Дефолт — всё false: до первого
-/// опроса не пугаем продавца красным.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PrinterHealth {
     pub fault: bool,
     pub paper_end: bool,
     pub paper_near_end: bool,
     pub label_waiting: bool,
-    /// Лестница восстановления исчерпана (стенд: клин 0x12 снимается только
-    /// питанием) — попап просит выключить и включить питание принтера.
     pub power_cycle_hint: bool,
 }
-
-/// Запрос демону принтера. Порт — его собственность, обращаться только
-/// через канал: одновременная запись двух потоков перемешивает байты.
 pub enum PrinterRequest {
-    /// Готовое задание (этикетка товара): печать + ожидание снятия.
-    /// `queued_at` — момент постановки: задание старше STALE_JOB покупатель
-    /// уже получил как «ошибка печати», допечатывать его нельзя.
-    /// `meta` — данные для журнала печатей (нет у тестовой этикетки).
     Print {
         bytes: Vec<u8>,
         ack: mpsc::Sender<Result<(), String>>,
         queued_at: std::time::Instant,
         meta: Option<PrintMeta>,
     },
-    /// Подача до метки следующей этикетки (GS FF) с предварительным
-    /// recovery: после заправки рулона принтер может сидеть в ошибке.
     Feed { ack: mpsc::Sender<Result<(), String>> },
-    /// Тестовая этикетка (готовые байты из calib).
     Test { bytes: Vec<u8>, ack: mpsc::Sender<Result<(), String>> },
-    /// Диагностический опрос: статусы, GS r, ESC v, идентификация.
     Diagnostics { ack: mpsc::Sender<PrinterDiagnostics> },
-    /// Сброс аварии: лестница DLE ENQ 1 → 2 → ESC @ (вручную из меню).
     Reset { ack: mpsc::Sender<Result<(), String>> },
-    /// Калибровка этикетки: шаг-скан одной этикетки → длина в мм.
     Calibrate { ack: mpsc::Sender<Result<u32, String>> },
 }
-
-/// Журнальные данные печати: заполняются сборщиком задания, пишутся
-/// демоном после фактического результата.
 #[derive(Debug, Clone)]
 pub struct PrintMeta {
     pub plu: String,
@@ -283,9 +220,6 @@ pub struct PrintMeta {
     pub weight_g: u32,
     pub sum_kop: i64,
 }
-
-/// Результат диагностического опроса принтера (экран «Оборудование»).
-/// None — команда не поддержана прошивкой/нет ответа.
 #[derive(Debug, Clone, Default)]
 pub struct PrinterDiagnostics {
     pub l1: Option<u8>,
@@ -294,45 +228,31 @@ pub struct PrinterDiagnostics {
     pub l4: Option<u8>,
     pub gs_r: Option<u8>,
     pub esc_v: Option<u8>,
-    /// GS I 65 — версия прошивки («_1.03.17 ESC/POS»).
     pub fw_version: Option<String>,
-    /// GS I 66 — производитель («_HPRT»).
     pub vendor: Option<String>,
-    /// GS I 67 — модель («_PT561»).
     pub model: Option<String>,
-    /// GS I 68 — серийный номер.
     pub serial: Option<String>,
 }
-
 use std::sync::mpsc;
-
 static PRINTER_TX: std::sync::OnceLock<mpsc::Sender<PrinterRequest>> =
     std::sync::OnceLock::new();
 static HEALTH: std::sync::OnceLock<std::sync::Mutex<PrinterHealth>> =
     std::sync::OnceLock::new();
-
-/// Работает ли демон принтера в этом процессе (в CLI-режимах его нет).
 pub fn daemon_running(cfg: &crate::config::Config) -> bool {
     cfg.printer.enabled && PRINTER_TX.get().is_some()
 }
-
-/// Текущее здоровье принтера из демона (не блокирует, копия).
 pub fn health() -> PrinterHealth {
     *HEALTH
         .get_or_init(|| std::sync::Mutex::new(PrinterHealth::default()))
         .lock()
         .unwrap_or_else(|e| e.into_inner())
 }
-
 fn set_health(h: PrinterHealth) {
     *HEALTH
         .get_or_init(|| std::sync::Mutex::new(PrinterHealth::default()))
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = h;
 }
-
-/// Запрос демону с ожиданием результата. Демон поднимается при старте UI;
-/// если его нет (вызов вне киоска) — ошибка, а не паника.
 fn request(build: impl FnOnce(mpsc::Sender<Result<(), String>>) -> PrinterRequest) -> Result<(), String> {
     let tx = PRINTER_TX.get().ok_or_else(|| "демон принтера не запущен".to_string())?;
     let (ack_tx, ack_rx) = mpsc::channel();
@@ -341,14 +261,10 @@ fn request(build: impl FnOnce(mpsc::Sender<Result<(), String>>) -> PrinterReques
         .recv_timeout(Duration::from_secs(90))
         .unwrap_or_else(|_| Err("демон принтера не ответил".into()))
 }
-
-/// Запустить демон: единственный владелец порта принтера. Печать, подача,
-/// тест и опрос статуса идут через канал; на простое (10 с без заданий) —
-/// фоновый опрос статуса с детектом заправки бумаги.
 pub fn spawn_daemon(cfg: &crate::config::Config) {
     let (tx, rx) = mpsc::channel();
     if PRINTER_TX.set(tx).is_err() {
-        return; // демон уже запущен
+        return; 
     }
     if !cfg.printer.enabled {
         log::info!("демон принтера: отключён в конфиге ([printer].enabled = false)");
@@ -358,9 +274,6 @@ pub fn spawn_daemon(cfg: &crate::config::Config) {
     std::thread::Builder::new()
         .name("printer".into())
         .spawn(move || {
-            // Паника демона не должна хоронить печать до рестарта сервиса:
-            // daemon_loop перезапускается с тем же каналом (rx по ссылке),
-            // между падением и перезапуском задания копятся в очереди.
             loop {
                 let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     daemon_loop(&cfg, &rx)
@@ -373,49 +286,27 @@ pub fn spawn_daemon(cfg: &crate::config::Config) {
                     });
                     std::thread::sleep(Duration::from_secs(2));
                 } else {
-                    // Канал закрыт — киоск завершается.
                     break;
                 }
             }
         })
         .expect("поток принтера");
 }
-
-/// Период фонового опроса: в покое, при подозрении на аварию (быстрое
-/// подтверждение/снятие) и пока в лотке лежит этикетка.
 const PROBE_IDLE: Duration = Duration::from_secs(10);
 const PROBE_FAST: Duration = Duration::from_millis(800);
 const PROBE_LABEL: Duration = Duration::from_millis(500);
-/// Дольше этого лоток опрашивается обычным периодом: этикетку могли оставить.
 const LABEL_WATCH_MAX: Duration = Duration::from_secs(60);
-/// Сколько подряд замеров с аварийным L4 нужно для поднятия fault. Одиночный
-/// сбойный замер не показывает покупателю попап.
 const FAULT_CONFIRM: u8 = 2;
-/// Сколько подряд замеров без валидного ответа считать обрывом связи.
 const SILENT_CONFIRM: u8 = 3;
-/// Сколько ждать выдачи этикетки после задания (ожидание — для контроля
-/// аварии и журнала, не для блокировки покупателя дольше необходимого).
-/// Значение из конфига ([printer] present_wait_secs, дефолт 3): на стенде
-/// детект выдачи ~600 мс; длинная этикетка/логотип печатаются дольше.
 const PRESENT_WAIT_MAX: Duration = Duration::from_secs(20);
-/// Задание печати старше этого срока не печатается (экран покупателя
-/// сдаётся по таймауту 30 с, поэтому берём чуть меньше).
 const STALE_JOB: Duration = Duration::from_secs(25);
-/// Повтор лестницы восстановления из фонового опроса не чаще этого.
 const RECOVER_COOLDOWN: Duration = Duration::from_secs(10);
-/// Сколько лестниц подряд пробовать, прежде чем просить питание принтера:
-/// стенд доказал, клин 0x12 программно не снимается.
 const RECOVER_MAX: u8 = 3;
-/// Таймаут чтения одного ответа DLE EOT (реальный ответ — единицы мс).
 const L4_READ_TIMEOUT: Duration = Duration::from_millis(300);
-
-/// Причина отказа операции порта: Io — порт сломан, его закрывают и
-/// переоткрывают; Printer — порт жив, принтер сообщил аварию/не готов.
 enum Fail {
     Io(String),
     Printer(String),
 }
-
 impl Fail {
     fn io(e: impl std::fmt::Display) -> Self {
         Fail::Io(e.to_string())
@@ -426,25 +317,16 @@ impl Fail {
         }
     }
 }
-
-/// Накопитель замеров L4 → здоровье принтера с подтверждением. Один замер
-/// ничего не решает: авария = FAULT_CONFIRM аварийных подряд, обрыв связи =
-/// SILENT_CONFIRM пустых подряд.
 #[derive(Default)]
 struct Monitor {
     fault_streak: u8,
     silent_streak: u8,
     label_since: Option<std::time::Instant>,
     last_recover: Option<std::time::Instant>,
-    /// Подряд неудачных лестниц восстановления. Стенд показал: клин 0x12
-    /// программно не снимается, повторять бесконечно бессмысленно — после
-    /// RECOVER_MAX попыток просим питание и ждём события от принтера.
     recover_attempts: u8,
     health: PrinterHealth,
 }
-
 impl Monitor {
-    /// Учесть замер (None — валидного ответа не было) и опубликовать здоровье.
     fn feed(&mut self, sample: Option<u8>) {
         match sample {
             Some(b) => {
@@ -453,8 +335,6 @@ impl Monitor {
                     if escpos::l4_fault(b) { self.fault_streak.saturating_add(1) } else { 0 };
                 self.health.fault = self.fault_streak >= FAULT_CONFIRM;
                 if !escpos::l4_fault(b) {
-                    // Принтер вышел из аварии (заправка, снятие этикетки):
-                    // счётчик лестниц и подсказка про питание сбрасываются.
                     self.recover_attempts = 0;
                     self.health.power_cycle_hint = false;
                 }
@@ -478,15 +358,11 @@ impl Monitor {
         }
         set_health(self.health);
     }
-
-    /// Отказ операции: сразу считаем аварию подтверждённой; ближайший быстрый
-    /// опрос её снимет, если принтер на деле в порядке.
     fn note_failure(&mut self) {
         self.fault_streak = FAULT_CONFIRM;
         self.health.fault = true;
         set_health(self.health);
     }
-
     fn next_probe(&self) -> Duration {
         if self.fault_streak > 0 || self.silent_streak > 0 {
             PROBE_FAST
@@ -497,15 +373,9 @@ impl Monitor {
         }
     }
 }
-
 fn fmt_l4(s: Option<u8>) -> String {
     s.map_or_else(|| "нет ответа".to_string(), |b| format!("{b:#04X}"))
 }
-
-/// Один замер L4 с жёсткой фильтрацией. Перед КАЖДОЙ попыткой входной буфер
-/// сбрасывается (иначе ответ читается со сдвигом), принимается только байт,
-/// похожий на ответ DLE EOT (`is_valid_l4`); посторонние байты и тишина —
-/// не авария, а повод повторить. None — валидного ответа не получено.
 fn read_l4(port: &mut Box<dyn serialport::SerialPort>, attempts: u32) -> Option<u8> {
     let prev = port.timeout();
     let _ = port.set_timeout(L4_READ_TIMEOUT);
@@ -531,10 +401,6 @@ fn read_l4(port: &mut Box<dyn serialport::SerialPort>, attempts: u32) -> Option<
     let _ = port.set_timeout(prev);
     out
 }
-
-/// Одна фаза шаг-скана: подавать по 1 мм, пока датчик не покажет нужное
-/// состояние (этикетка у сенсора / зазор). Кап шагов и дедлайн — обязательны:
-/// без бумаги скан обязан закончиться ошибкой, а не вечным ожиданием.
 fn scan_phase(
     port: &mut Box<dyn serialport::SerialPort>,
     want_label: bool,
@@ -561,22 +427,10 @@ fn scan_phase(
         "шаг-скан: не дождались «{what}» за {cap} шагов"
     )))
 }
-
-/// Калибровка этикетки шаг-сканом (подтверждено live 19-20.10): шаг
-/// ESC J 8 = 8 дот = 1,0 мм — у PT561 ESC J считает в дотах (0,125 мм)
-/// и GS P игнорирует (живая проверка: 30 «шагов по 1 мм» при реальных
-/// 38 мм рулона = 30 × 1,25 мм). GS P не используется вовсе, поэтому
-/// единицы подачи не меняются и восстановление не требуется.
-/// Фазы: дойти до зазора → до начала этикетки → считать шаги этикетки
-/// (это её длина в мм) → снова выйти на начало следующей (принтер остаётся
-/// выровненным к печати).
 fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, Fail> {
-    // Суммарный дедлайн скана: калибровка идёт через демон порта и на всё
-    // её время блокирует покупательскую печать (выполняется только из
-    // сервисного экрана). Потолок согласован с ACK-таймаутом calibrate_label.
     const TOTAL_DEADLINE: Duration = Duration::from_secs(150);
-    const STEP_CAP: u32 = 350; // ~350 мм: страховка от бесконечной подачи
-    const GAP_CAP: u32 = 60; // зазор ~3 мм, с запасом на стык рулона
+    const STEP_CAP: u32 = 350; 
+    const GAP_CAP: u32 = 60; 
     let started = std::time::Instant::now();
     let expired = |what: &str| {
         Fail::Printer(format!("шаг-скан: дедлайн фазы «{what}»"))
@@ -603,16 +457,11 @@ fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, 
         if len >= STEP_CAP {
             return Err(Fail::Printer("шаг-скан: этикетка длиннее лимита".into()));
         }
-        // Вернуть принтер на начало следующей этикетки — как после FF.
         scan_phase(port, true, GAP_CAP, "выравнивание", started, TOTAL_DEADLINE)?;
         Ok(len)
     })();
     res
 }
-
-/// Лестница восстановления после аварии. Каждый шаг журналируется вместе с
-/// L4 после него: по журналу видно, какой шаг (если какой-то) снимает
-/// конкретную аварию. Возвращает L4 первого шага, после которого аварии нет.
 fn recover_printer(port: &mut Box<dyn serialport::SerialPort>) -> Option<u8> {
     let steps: [(&str, Vec<u8>); 3] = [
         ("DLE ENQ 1", escpos::build_recover(1).to_vec()),
@@ -634,10 +483,6 @@ fn recover_printer(port: &mut Box<dyn serialport::SerialPort>) -> Option<u8> {
     }
     None
 }
-
-/// Готовность перед заданием: при аварии — лестница восстановления; если
-/// принтер всё ещё в аварии, задание НЕ отправляется (в ошибке оно молча
-/// теряется, а покупатель получил бы «Готово» без этикетки).
 fn ensure_ready(port: &mut Box<dyn serialport::SerialPort>) -> Result<(), Fail> {
     match read_l4(port, 3) {
         Some(b) if escpos::l4_fault(b) => {
@@ -650,19 +495,12 @@ fn ensure_ready(port: &mut Box<dyn serialport::SerialPort>) -> Result<(), Fail> 
             }
         }
         Some(_) => Ok(()),
-        // Нет валидного ответа — не блокируем печать: ответ мог потеряться,
-        // итог покажет контроль после задания.
         None => {
             log::warn!("принтер: нет ответа на статус перед печатью, печатаю без предпроверки");
             Ok(())
         }
     }
 }
-
-/// Печать задания с контролем: предпроверка → запись → ожидание выдачи
-/// этикетки (L4 раз в 250 мс). Две аварийные пробы подряд = отказ. Ожидание
-/// снятия этикетки здесь не делается: его ведёт фоновый опрос (Monitor), и
-/// следующий покупатель не ждёт, пока заберут предыдущую этикетку.
 fn print_job(
     port: &mut Box<dyn serialport::SerialPort>,
     bytes: &[u8],
@@ -703,12 +541,8 @@ fn print_job(
             None => {}
         }
     }
-    // Трасса — материал для калибровки: по ней видно, как L4 ведёт себя от
-    // записи задания до выдачи этикетки.
     log::info!("принтер: печать завершена, выдана={presented}, трасса L4: {trace}");
     mon.feed(last);
-    // Принтер принял задание, но этикетка за PRESENT_WAIT не вышла (крышка
-    // открыта, лента кончилась, зажёв): «Готово» без этикетки врать нельзя.
     if presented {
         Ok(())
     } else {
@@ -717,15 +551,9 @@ fn print_job(
         ))
     }
 }
-
 fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>) {
-    // Порт открыт между заданиями; при ошибке ввода-вывода закрывается и
-    // переоткроется на следующем обращении — так принтер, выключенный на
-    // ночь, не оставляет демон в вечном fault. Авария принтера порт не
-    // закрывает: принтер отвечает, порт исправен.
     let mut prn: Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>> = None;
     let mut mon = Monitor::default();
-    // Чистка журнала печатей: при старте демона и раз в 6 часов.
     let mut next_prune = std::time::Instant::now();
     loop {
         if std::time::Instant::now() >= next_prune {
@@ -761,12 +589,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                     mon.note_failure();
                 }
                 let print_ok = res.is_ok();
-                // Покупатель получает ответ до записи журнала: открытие БД
-                // и вставка могут ждать синхронизацию, UI не должен ждать
-                // вместе с ними.
                 finish(ack, res, "печать");
-                // Журнал печатей: пишется независимо от результата, ошибки
-                // журнала печать не трогают.
                 if let Some(m) = meta {
                     if let Ok(conn) = datastore::open(&cfg.db_path) {
                         datastore::print_log_add(
@@ -827,9 +650,6 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 let mut d = PrinterDiagnostics::default();
                 let _ = with_port(cfg, &mut prn, |p| {
                     let port = p.port_mut();
-                    // Статусы DLE EOT 1..4 (валидный фильтр), затем GS r,
-                    // ESC v (однобайтовые ответы без валидной маски),
-                    // идентификационные строки GS I 65/66/67/68.
                     for (_level, slot) in
                         [(1u8, &mut d.l1), (2, &mut d.l2), (3, &mut d.l3), (4, &mut d.l4)]
                     {
@@ -841,7 +661,6 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                     d.vendor = query_string(port, &escpos::build_printer_info(66));
                     d.model = query_string(port, &escpos::build_printer_info(67));
                     d.serial = query_string(port, &escpos::build_printer_info(68));
-                    // Опрос не меняет состояние аварий; свежий L4 — в Monitor.
                     mon.feed(d.l4);
                     Ok(())
                 });
@@ -904,7 +723,6 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
         }
     }
 }
-
 fn with_port<T>(
     cfg: &crate::config::Config,
     prn: &mut Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>>,
@@ -918,10 +736,6 @@ fn with_port<T>(
                 set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
                 format!("{}: {e}", cfg.printer.port)
             })?;
-        // Свежий порт — в базовое состояние. Без ESC @ принтер, переживший
-        // оборванный шаг-скан калибровки, остался бы с единицей подачи 254
-        // (GS P 0 254) и печатал бы этикетки со сдвинутыми размерами до
-        // выключения питания. Если сброс не проходит — порт считать мёртвым.
         if port.write_all(&[escpos::ESC, 0x40]).and_then(|_| port.flush()).is_err() {
             set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
             return Err(format!("{}: ESC @ после открытия не прошёл", cfg.printer.port));
@@ -935,17 +749,13 @@ fn with_port<T>(
     match res {
         Ok(v) => Ok(v),
         Err(Fail::Io(e)) => {
-            // Порт сломан и не лечится на месте: закрыть, следующий запрос
-            // переоткроет с чистыми буферами.
             *prn = None;
             set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
             Err(e)
         }
-        // Порт исправен — принтер сообщил аварию: порт не трогаем.
         Err(f @ Fail::Printer(_)) => Err(f.text()),
     }
 }
-
 fn finish(ack: mpsc::Sender<Result<(), String>>, res: Result<(), String>, what: &str) {
     let out = res.map_err(|e| {
         log::warn!("принтер: {what}: {e}");
@@ -953,11 +763,6 @@ fn finish(ack: mpsc::Sender<Result<(), String>>, res: Result<(), String>, what: 
     });
     let _ = ack.send(out);
 }
-
-/// Спайк датчика зазора: опрос уровней статуса DLE EOT, затем шаговая
-/// подача (ESC J 1 — один дот) с опросом после каждого шага. Отчёт:
-/// сырые байты уровней и индексы шагов, где байт менялся. По расстоянию
-/// между переходами считается длина этикетки в дотах и мм.
 pub fn label_probe(cfg: &crate::config::Config) -> Result<String, String> {
     use std::io::{Read as _, Write as _};
     let mut port = serialport::new(&cfg.printer.port, cfg.printer.baud)
@@ -967,10 +772,8 @@ pub fn label_probe(cfg: &crate::config::Config) -> Result<String, String> {
     let _ = port.write_all(&escpos::build_init());
     let _ = port.flush();
     drain_port_rx(&mut port);
-
     let started = std::time::Instant::now();
     let mut report = String::new();
-    // 1. Базовые байты всех уровней 1..8 (какие живые — увидим по ответам).
     report.push_str("DLE EOT уровни:\n");
     for level in 1..=8u8 {
         let _ = port.write_all(&escpos::build_status_query(level));
@@ -985,8 +788,6 @@ pub fn label_probe(cfg: &crate::config::Config) -> Result<String, String> {
             _ => report.push_str(&format!("  n={level}: нет ответа\n")),
         }
     }
-
-    // 2. Кандидаты команд статуса: печатаем сырые ответы.
     report.push_str("\nКандидаты команд:\n");
     let candidates: Vec<(&str, Vec<u8>)> = vec![
         ("ESC v", vec![escpos::ESC, b'v']),
@@ -1009,16 +810,12 @@ pub fn label_probe(cfg: &crate::config::Config) -> Result<String, String> {
         let hex: Vec<String> = buf[..got].iter().map(|b| format!("{b:02X}")).collect();
         report.push_str(&format!("  {name}: [{}]\n", hex.join(" ")));
     }
-
-    // 3. ASB-поток при шаговой подаче: включаем автоматический статус
-    // (GS a 0xFF) и собираем все входящие байты, пока двигаем бумагу.
-    // Зазор, если он виден, появится как смена байта(ов) ASB.
     report.push_str("\nASB при шаговой подаче (600 дот):\n");
     let _ = port.write_all(&[0x1D, b'a', 0xFF]);
     let _ = port.flush();
     std::thread::sleep(Duration::from_millis(150));
     drain_port_rx(&mut port);
-    let mut seen: Vec<(u8, u32)> = Vec::new(); // байт → число появлений
+    let mut seen: Vec<(u8, u32)> = Vec::new(); 
     for _step in 0..600u32 {
         if started.elapsed() > Duration::from_secs(150) {
             report.push_str("(дедлайн — остановлено)\n");
@@ -1048,9 +845,6 @@ pub fn label_probe(cfg: &crate::config::Config) -> Result<String, String> {
         list.sort();
         report.push_str(&format!("  уникальные байты: {}\n", list.join(" ")));
     }
-
-    // 4. Замер времени подачи FF (в label-режиме FF = подать до начала
-    // следующей этикетки). Время → оценка длины при известной скорости.
     report.push_str("\nЗамер FF ×3:\n");
     for i in 1..=3 {
         let t0 = std::time::Instant::now();
@@ -1058,17 +852,11 @@ pub fn label_probe(cfg: &crate::config::Config) -> Result<String, String> {
         let _ = port.flush();
         std::thread::sleep(Duration::from_millis(80));
         drain_port_rx(&mut port);
-        // Ждём, пока механика закончит: окончание = нет признака занятости
-        // по статусу; простая эвристика — фиксированная пауза после FF.
         std::thread::sleep(Duration::from_millis(1200));
         report.push_str(&format!("  FF {}: {} мс\n", i, t0.elapsed().as_millis()));
     }
-
     Ok(report)
 }
-
-/// Фоновый опрос: один замер L4 (при `[printer].debug_dump = true` ещё и
-/// полный диагностический дамп). Результат проходит через Monitor.
 fn probe(
     cfg: &crate::config::Config,
     prn: &mut Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>>,
@@ -1083,11 +871,6 @@ fn probe(
         if s.is_none() || s.is_some_and(escpos::l4_fault) {
             log::info!("принтер: замер L4 = {}", fmt_l4(s));
         }
-        // Подтверждённая авария с живым ответом: пробуем лестницу восстановления
-        // прямо из фонового опроса (с кулдауном) — после заправки ленты попап
-        // уходит сам, без печати и без «Подачи». После RECOVER_MAX неудач
-        // лестница прекращается: на стенде клин 0x12 снимается только питанием,
-        // бесконечные повторы ничего не дают — попап просит питание.
         if s.is_some_and(escpos::l4_fault) {
             let due = mon
                 .last_recover
@@ -1105,8 +888,6 @@ fn probe(
                 mon.feed(rec);
             } else if due && mon.recover_attempts >= RECOVER_MAX {
                 mon.last_recover = Some(std::time::Instant::now());
-                // Одна запись на эпизод: пока авария не снята, подсказка
-                // уже видна покупателю, журнал спамить не должен.
                 let first_hint = !mon.health.power_cycle_hint;
                 mon.health.power_cycle_hint = true;
                 set_health(mon.health);
@@ -1122,18 +903,10 @@ fn probe(
         Ok(())
     });
     if let Err(e) = res {
-        // Порт не открылся/сломан: with_port уже поднял fault и закрыл порт.
         log::warn!("опрос статуса принтера: {e}");
         mon.note_failure();
     }
 }
-
-/// Диагностический дамп (только по `debug_dump`): ответы на все запросы
-/// статуса и самопроизвольный кадр FULL STATUS BACK. Нужен для разбора
-/// аварий (в аварийном состоянии кадр говорит, восстановима ли ошибка
-/// программно). ASB (`1D E0 0F`) включается ТОЛЬКО здесь: посторонние
-/// кадры в потоке ломают схему «запрос-ответ». Состояние ASB держится до
-/// выключения питания принтера.
 fn debug_dump(port: &mut Box<dyn serialport::SerialPort>) {
     let prev = port.timeout();
     let _ = port.set_timeout(Duration::from_millis(200));
@@ -1150,7 +923,6 @@ fn debug_dump(port: &mut Box<dyn serialport::SerialPort>) {
         ("L4", escpos::build_status_query(4).to_vec()),
         ("GSR", vec![escpos::GS, b'r', 1]),
         ("ESCV", vec![escpos::ESC, b'v']),
-        // Остаток ленты до виртуального конца: ответ ASCII «NNNcm».
         ("E1", vec![0x1D, 0xE1]),
     ];
     let mut dump = String::new();
@@ -1173,7 +945,6 @@ fn debug_dump(port: &mut Box<dyn serialport::SerialPort>) {
             dump.push_str(&format!("{name}=[{}] ", hex.join(" ")));
         }
     }
-    // Самопроизвольный кадр FULL STATUS BACK (0x10 0x0F ...).
     let mut fsb = Vec::new();
     while fsb.len() < 16 {
         match Read::read(port.as_mut(), &mut sink[..1]) {
@@ -1188,15 +959,10 @@ fn debug_dump(port: &mut Box<dyn serialport::SerialPort>) {
     log::info!("принтер: дамп: {dump}");
     let _ = port.set_timeout(prev);
 }
-
-/// Слить входной буфер порта: любой остаток (посторонний байт, поздний
-/// ответ) иначе будет прочитан как ответ на следующий запрос.
 fn drain_port_rx(port: &mut Box<dyn serialport::SerialPort>) {
     let cur = port.timeout();
     if port.set_timeout(Duration::from_millis(30)).is_ok() {
         let mut sink = [0u8; 64];
-        // Предел по времени: принтер, непрерывно шлющий байты, не должен
-        // подвешивать демон в вечном «сливе».
         let deadline = std::time::Instant::now() + Duration::from_millis(300);
         while std::time::Instant::now() < deadline {
             match Read::read(port.as_mut(), &mut sink) {
@@ -1207,9 +973,6 @@ fn drain_port_rx(port: &mut Box<dyn serialport::SerialPort>) {
         let _ = port.set_timeout(cur);
     }
 }
-
-/// Подача до метки следующей этикетки (GS FF): после смены рулона/заправки.
-/// Выполняет демон принтера; вызов блокируется до результата.
 pub fn feed_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     if !cfg.printer.enabled {
         return Err(PrintError::PrinterDisabled);
@@ -1217,9 +980,6 @@ pub fn feed_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     request(|ack| PrinterRequest::Feed { ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
-
-/// Запрос одного байта без валидной маски (GS r, ESC v): байты ответа
-/// 0x03/0x00 не проходят фильтр DLE EOT.
 fn query_byte(
     port: &mut Box<dyn serialport::SerialPort>,
     payload: &[u8],
@@ -1235,9 +995,6 @@ fn query_byte(
         _ => None,
     }
 }
-
-/// Запрос ASCII-строки (GS I n): читается до NUL/паузы, NUL и ведущий
-/// подчёркивания вырезаются.
 fn query_string(
     port: &mut Box<dyn serialport::SerialPort>,
     payload: &[u8],
@@ -1273,9 +1030,6 @@ fn query_string(
     let s = s.trim_start_matches('_').trim().to_string();
     if s.is_empty() { None } else { Some(s) }
 }
-
-/// Диагностический опрос принтера (экран «Оборудование → Принтер»).
-/// Выполняет демон; вызов блокируется до результата (~3 с).
 pub fn printer_diagnostics(cfg: &crate::config::Config) -> Result<PrinterDiagnostics, PrintError> {
     if !cfg.printer.enabled {
         return Err(PrintError::PrinterDisabled);
@@ -1288,8 +1042,6 @@ pub fn printer_diagnostics(cfg: &crate::config::Config) -> Result<PrinterDiagnos
         .recv_timeout(Duration::from_secs(30))
         .map_err(|_| PrintError::Printer("демон принтера не ответил".into()))
 }
-
-/// Ручной сброс аварии принтера (лестница восстановления из меню).
 pub fn reset_printer(cfg: &crate::config::Config) -> Result<(), PrintError> {
     if !cfg.printer.enabled {
         return Err(PrintError::PrinterDisabled);
@@ -1297,9 +1049,6 @@ pub fn reset_printer(cfg: &crate::config::Config) -> Result<(), PrintError> {
     request(|ack| PrinterRequest::Reset { ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
-
-/// Калибровка длины этикетки шаг-сканом. Скан 40 мм этикетки — ~20 с,
-/// потолок на длинной/зажеванной — до 2 минут; отдельный канал с запасом.
 pub fn calibrate_label(cfg: &crate::config::Config) -> Result<u32, PrintError> {
     if !cfg.printer.enabled {
         return Err(PrintError::PrinterDisabled);
@@ -1313,10 +1062,6 @@ pub fn calibrate_label(cfg: &crate::config::Config) -> Result<u32, PrintError> {
         .map_err(|_| PrintError::Printer("демон принтера не ответил".into()))?
         .map_err(PrintError::Printer)
 }
-
-/// Текстовый отчёт диагностики для экрана (моно, расшифровка по мануалу
-/// HPRT; неподдержанные команды — «—»). Длина этикетки — из калибровки
-/// (шаг-скан), имя шаблона — из конфигурации раскладки.
 pub fn fmt_diagnostics(
     d: &PrinterDiagnostics,
     label_len_mm: Option<i64>,
@@ -1363,8 +1108,6 @@ pub fn fmt_diagnostics(
         layout_name.unwrap_or("не загружен"),
     )
 }
-
-/// Тестовая этикетка качества печати (паттерн — см. calib::test_label_bytes).
 pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     if !cfg.printer.enabled {
         return Err(PrintError::PrinterDisabled);
@@ -1373,9 +1116,6 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
-
-/// Печать по товару из базы: собрать задание и отдать демону порта.
-/// `weight_g` — текущее показание весов из WeightSource.
 pub fn print_for_plu(
     cfg: &crate::config::Config,
     weight_g: u32,
@@ -1416,11 +1156,9 @@ pub fn print_for_plu(
     .map_err(std::io::Error::other)?;
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn sample() -> PluItem {
         PluItem {
             plu: "2502192".into(),
@@ -1433,24 +1171,18 @@ mod tests {
             shelflife: "20/09/2026 18:25:45".into(),
         }
     }
-
     #[test]
     fn label_contains_weight_price_sum_from_dump() {
         let bytes = build_label(&sample(), 1350, LIVE_LAYOUT, "13.10.26", "18:40:00", 0).unwrap();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("1,350"), "вес: {text:?}");
         assert!(text.contains("199,99"), "цена: {text:?}");
-        // 19999 коп * 1350 г / 1000 = 26 998 коп = 269,99 (совпадает с дампом!)
         assert!(text.contains("269,99"), "сумма: {text:?}");
-        // Дата и время печати — фактические, не константы из дампа.
         assert!(text.contains("13.10.26"), "дата: {text:?}");
         assert!(text.contains("18:40:00"), "время: {text:?}");
-        // Срок годности нормализуется к «Годен до ДД.ММ.ГГГГ» (текст
-        // этикетки в CP866 — кириллицу ассертим по дате).
         assert!(text.contains("20.09.2026"), "срок: {text:?}");
         assert!(!text.contains("18:25:45"), "время из срока не печатается: {text:?}");
     }
-
     #[test]
     fn shelflife_label_formats() {
         assert_eq!(shelflife_label("20/09/2026 18:25:45").as_deref(), Some("Годен до 20.09.2026"));
@@ -1458,12 +1190,10 @@ mod tests {
         assert_eq!(shelflife_label("20.09.2026").as_deref(), Some("Годен до 20.09.2026"));
         assert_eq!(shelflife_label("01.01.27").as_deref(), Some("Годен до 01.01.2027"));
         assert_eq!(shelflife_label("2026-09-20").as_deref(), Some("Годен до 20.09.2026"));
-        // Нераспознанное — None (вызывающий печатает сырую строку).
         assert_eq!(shelflife_label(""), None);
         assert_eq!(shelflife_label(" soon"), None);
         assert_eq!(shelflife_label("99/99/2026"), None);
     }
-
     #[test]
     fn empty_shelflife_is_not_printed() {
         let mut item = sample();
@@ -1472,7 +1202,6 @@ mod tests {
         let text = String::from_utf8_lossy(&bytes);
         assert!(!text.contains("20/09"), "пустой срок не должен печататься: {text:?}");
     }
-
     #[test]
     fn label_barcode_from_itemcode() {
         let bytes = build_label(&sample(), 500, LIVE_LAYOUT, "01.09.26", "10:31:53", 0).unwrap();
@@ -1480,17 +1209,13 @@ mod tests {
         let pos = bytes.windows(needle.len()).position(|w| w == needle).unwrap();
         assert_eq!(&bytes[pos + 3..pos + 15], b"210213600500");
     }
-
     #[test]
     fn ean13_matches_live_dump() {
-        // Живой дамп: 1350 г, код 02136 → 210213601350 (12 цифр + КД принтера).
         assert_eq!(ean13_payload(&sample(), 1350), "210213601350");
-        // Пустой код товара → нули, не паникуем.
         let mut empty = sample();
         empty.itemcode = String::new();
         assert_eq!(ean13_payload(&empty, 0), "210000000000");
     }
-
     #[test]
     fn port_path_from_config_is_used() {
         let cfg = crate::config::Config::default();

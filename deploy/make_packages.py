@@ -1,5 +1,4 @@
 """Пересборка индекса Packages(.xz) для оффлайн-зеркала deploy/xorg.
-
 Аналог `dpkg-scanpackages . /dev/null` для машины без dpkg: читает control
 из каждого *.deb (ar + tar.xz) и пишет Packages с полями Filename/Size/MD5/SHA*.
 Запуск: python deploy/make_packages.py [каталог]  (по умолчанию deploy/xorg)
@@ -10,10 +9,7 @@ import lzma
 import sys
 import tarfile
 from pathlib import Path
-
 AR_MAGIC = b"!<arch>\n"
-
-
 def deb_control(path: Path) -> str:
     data = path.read_bytes()
     if not data.startswith(AR_MAGIC):
@@ -36,8 +32,6 @@ def deb_control(path: Path) -> str:
                         continue
             raise ValueError(f"control не найден: {path}")
     raise ValueError(f"control.tar.* не найден: {path}")
-
-
 def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).parent / "xorg")
     debs = sorted(root.glob("*.deb"))
@@ -63,7 +57,5 @@ def main() -> int:
     (root / "Packages.xz").write_bytes(lzma.compress(packages.encode("utf-8")))
     print(f"OK: {len(debs)} пакетов -> Packages, Packages.xz")
     return 0
-
-
 if __name__ == "__main__":
     sys.exit(main())

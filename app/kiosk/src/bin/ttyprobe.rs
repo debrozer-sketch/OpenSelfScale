@@ -1,7 +1,4 @@
-//! Отладочный пробник: открывает tty как open_tty_raw из weight.rs,
-//! шлёт кадр опроса и печатает всё, что видит. Только для диагностики.
-//! Unix-only: на Windows-хосте собирается заглушка, чтобы cargo build
-//! не падал на E0601.
+
 #[cfg(unix)]
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| "/dev/scales".into());
@@ -21,8 +18,6 @@ fn main() {
             c_lflag: 0,
             c_line: 0,
             c_cc: [0u8; 32],
-            // Имена полей скорости зависят от libc: musl — с подчёркиваниями,
-            // glibc (Debian 13) — без. Как в weight.rs.
             #[cfg(target_env = "musl")]
             __c_ispeed: speed,
             #[cfg(target_env = "musl")]
@@ -62,7 +57,6 @@ fn main() {
         }
     }
 }
-
 #[cfg(not(unix))]
 fn main() {
     eprintln!("ttyprobe: только Linux (нужен tty и libc termios)");

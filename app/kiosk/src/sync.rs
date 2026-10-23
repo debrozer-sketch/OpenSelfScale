@@ -1,20 +1,9 @@
-//! Синхронизация с центром: забрать plu.xml / layout.xml / картинки по FTP
-//! и применить к локальной базе. Протокол, адрес, учётка и пути — только
-//! из [center] в config.toml, никакого хардкода.
 
 use crate::config::Config;
 use std::path::Path;
-
 use serde::Deserialize;
 use suppaftp::FtpStream;
-
-/// Таймаут внешнего конвертера: конвертер обязан закончить за это время,
-/// зависший — снимается, выгрузка считается не принятой.
 const EXTERNAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// Товар в каноническом формате (docs/CANONICAL.md). Обязательны только
-/// код, название и цена — остальные поля опциональны, отсутствие любого
-/// деградирует (поле не печатается/не показывается), но не ломает выгрузку.
 #[derive(Debug, Deserialize)]
 struct CanonItem {
     plu: String,
@@ -31,10 +20,6 @@ struct CanonItem {
     #[serde(default)]
     shelf_life: Option<String>,
 }
-
-/// Разбор канонического JSON (массив товаров). Битые записи пропускаются
-/// со счётчиком, как в parse_plu_xml_counted: одна кривая строка не
-/// отменяет выгрузку целиком.
 fn parse_canonical_json(text: &str) -> Result<(Vec<datastore::PluItem>, usize), String> {
     let parsed: Result<Vec<serde_json::Value>, _> = serde_json::from_str(text);
     let values = match parsed {
@@ -53,7 +38,6 @@ fn parse_canonical_json(text: &str) -> Result<(Vec<datastore::PluItem>, usize), 
                 items.push(datastore::PluItem {
                     plu: ci.plu.trim().to_string(),
                     price: ci.price_kop,
-                    // 0 или отсутствие — скидки нет (как в старой выгрузке).
                     card_price: ci.card_price_kop.filter(|p| *p > 0),
                     itemcode: ci.itemcode.unwrap_or_default(),
                     groupcode: ci.group.unwrap_or_default(),
@@ -65,8 +49,6 @@ fn parse_canonical_json(text: &str) -> Result<(Vec<datastore::PluItem>, usize), 
             Err(_) => skipped += 1,
         }
     }
-    // Правило как у plu.xml: больше 10% битых записей — файл отвергается,
-    // конвертер поставщика явно сломался.
     if skipped > 0 && (items.is_empty() || skipped * 10 > items.len() + skipped) {
         return Err(format!(
             "канонический JSON: битых записей {skipped} из {} — файл отвергнут",
@@ -75,15 +57,7 @@ fn parse_canonical_json(text: &str) -> Result<(Vec<datastore::PluItem>, usize), 
     }
     Ok((items, skipped))
 }
-
-/// Запуск внешнего конвертера: аргумент — файл поставщика, stdout —
-/// канонический JSON. Вывод уходит во временный файл рядом с входным
-/// (каталог обмена принадлежит сервису, /tmp общий — там симлинк-атаки),
-/// создаётся эксклюзивно. stderr не читается — в null, иначе конвертер
-/// с многословным выводом зависнет в переполненном пайпе до таймаута.
-/// Лимит вывода: 32 МБ.
 const EXTERNAL_MAX_OUT: u64 = 32 * 1024 * 1024;
-
 fn run_external(cmd: &str, input: &Path) -> Result<String, String> {
     let cmd = cmd.trim();
     if cmd.is_empty() {
@@ -137,15 +111,7 @@ fn run_external(cmd: &str, input: &Path) -> Result<String, String> {
     }
     String::from_utf8(raw).map_err(|_| "вывод конвертера — не UTF-8".into())
 }
-
-/// Архив выгрузки: исходные plu.xml/layout.xml с датой в имени
-/// (аналог sss/history старого ПО — материал для разбора инцидентов).
-/// Ротация: хранится не более ARCHIVE_KEEP последних выгрузок —
-/// при получасовом интервале без лимита это десятки тысяч каталогов в год.
 const ARCHIVE_KEEP: usize = 240;
-
-/// Атомарная запись файла: temp в том же каталоге + rename. Читатель
-/// (киоск) никогда не видит наполовину записанную картинку.
 fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
     std::fs::write(&tmp, data)?;
@@ -157,7 +123,6 @@ fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
         }
     }
 }
-
 fn archive(history_dir: &Path, pairs: &[(&str, &str)]) {
     if history_dir.as_os_str().is_empty() {
         return;
@@ -169,9 +134,6 @@ fn archive(history_dir: &Path, pairs: &[(&str, &str)]) {
     for (name, data) in pairs {
         let _ = std::fs::write(dir.join(name), data);
     }
-    // Старейшие каталоги удаляются по имени (имя = метка времени, лексический
-    // порядок = хронологический). Ошибки не критичны: не удалили — доедет
-    // на следующей выгрузке.
     let mut entries: Vec<String> = std::fs::read_dir(history_dir)
         .map(|rd| {
             rd.flatten()
@@ -187,9 +149,6 @@ fn archive(history_dir: &Path, pairs: &[(&str, &str)]) {
         }
     }
 }
-
-/// Метка времени "2026-10-13 08-00-15" по UTC (без внешних крейтов);
-/// точное время операции всегда видно в журнале синхронизации.
 fn stamp() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -197,7 +156,6 @@ fn stamp() -> String {
         .as_secs() as i64;
     let days = now.div_euclid(86_400);
     let secs = now.rem_euclid(86_400);
-    // Гражданская дата из дня эпохи (алгоритм Ховарда Хиннанта).
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -215,17 +173,13 @@ fn stamp() -> String {
         secs % 60
     )
 }
-
-/// Забрать имя файла из строки листинга FTP (последний токен).
 fn listing_name(line: &str) -> Option<&str> {
     line.split_whitespace().next_back().filter(|s| !s.is_empty())
 }
-
 fn connect(cfg: &crate::config::CenterProfile) -> Result<FtpStream, String> {
     let mut ftp = FtpStream::connect((cfg.host.as_str(), cfg.port))
         .map_err(|e| format!("{}:{}: {e}", cfg.host, cfg.port))?;
     ftp.login(&cfg.user, &cfg.password).map_err(|e| format!("вход: {e}"))?;
-    // suppaftp 6: таймауты задаются на уровне сокета до передачи команд.
     let t = std::time::Duration::from_secs(cfg.timeout_secs.max(1) as u64);
     let s = ftp.get_ref();
     s.set_read_timeout(Some(t))
@@ -234,27 +188,15 @@ fn connect(cfg: &crate::config::CenterProfile) -> Result<FtpStream, String> {
         .map_err(|e| format!("таймаут записи: {e}"))?;
     Ok(ftp)
 }
-
 fn fetch_string(ftp: &mut FtpStream, path: &str) -> Result<String, String> {
     let bytes = ftp.retr_as_buffer(path).map_err(|e| format!("{path}: {e}"))?;
     String::from_utf8(bytes.into_inner()).map_err(|_| format!("{path}: не UTF-8"))
 }
-
 fn fetch_bytes(ftp: &mut FtpStream, path: &str) -> Result<Vec<u8>, String> {
     ftp.retr_as_buffer(path)
         .map(|b| b.into_inner())
         .map_err(|e| format!("{path}: {e}"))
 }
-
-/// Один проход приёмника «как старое ПО» (protocol = "drop"): источник сам
-/// кладёт выгрузку в incoming_dir (FTP-сервер весов + lftp-зеркало картинок),
-/// триггер — ready.flg. Внешне повторяет старый конвейер: после обработки
-/// каталог приёма остаётся пустым, XML уходят в history. Внутри — без гонки
-/// старого ПО: флаг ставят до plu.xml, поэтому ждём файл и стабильность
-/// размера. Ok(None) — делать нечего (молча), Ok(Some) — отчёт.
-/// Архив исходников + применение к базе: импорт товаров и раскладки.
-/// Общий хвост run_drop (drop-режим) и run (pull-FTP). Возвращает
-/// (импортировано, заметка о раскладке) для итогового отчёта.
 fn apply_upload(
     cfg: &Config,
     items: &[datastore::PluItem],
@@ -271,7 +213,6 @@ fn apply_upload(
     );
     let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
     let imported = datastore::import_plu(&conn, items).map_err(|e| format!("импорт: {e}"))?;
-    // Выгрузка — полное зеркало: товары, которых нет в файле, сняты с учёта.
     let removed = datastore::remove_absent(&conn, items).map_err(|e| format!("удаление снятых: {e}"))?;
     let removed_note = if removed > 0 { format!(", снято {removed}") } else { String::new() };
     let layout_note = match groups {
@@ -289,27 +230,20 @@ fn apply_upload(
     };
     Ok((imported, format!("{removed_note}{layout_note}")))
 }
-
 pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     let dir = &cfg.incoming_dir;
     if dir.join("uploading.flg").exists() {
-        // Источник ещё льёт (старый протокол это допускал) — тихо ждать.
         return Ok(None);
     }
     if !dir.join("ready.flg").exists() {
         return Ok(None);
     }
-
-    // Файл товаров: старый протокол — plu.xml, внешний конвертер — свой
-    // файл поставщика из [center].external_input.
     let external = cfg.center.protocol == "external";
     let input_name = if external {
         let n = cfg.center.external_input.trim();
         if n.is_empty() {
             return Err("protocol = \"external\", но [center].external_input не задан".into());
         }
-        // Только имя файла в каталоге обмена: абсолютный путь или «..»
-        // вывели бы чтение/конвертацию за пределы incoming_dir.
         if n.contains('/') || n.contains('\\') || n == ".." || n.starts_with('.') {
             return Err(format!(
                 "[center].external_input = \"{n}\": ожидается просто имя файла в каталоге обмена"
@@ -320,8 +254,6 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         std::path::PathBuf::from("plu.xml")
     };
     let plu = dir.join(&input_name);
-
-    // Дождаться файла и стабильности размера (два замера подряд с паузой).
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let mut last: Option<u64> = Some(u64::MAX);
     loop {
@@ -338,11 +270,8 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-
-    // Товары (обязательны) и раскладка (необязательна, как в FTP-режиме).
     let plu_data = std::fs::read_to_string(&plu).map_err(|e| format!("{}: {e}", plu.display()))?;
     let (items, skipped) = if external {
-        // Внешний конвертер: файл поставщика → канонический JSON → модель.
         let canon = run_external(&cfg.center.external_cmd, &plu)?;
         parse_canonical_json(&canon).map_err(|e| format!("канонический JSON: {e}"))?
     } else {
@@ -352,8 +281,6 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         log::warn!("{}: пропущено битых записей: {skipped}", input_name.display());
     }
     if items.is_empty() {
-        // Пустой/битый файл: не принимать и не подчищать — источник
-        // перезальёт; в history пустоту не архивируем.
         return Err(format!("{} не содержит товаров — выгрузка не принята", input_name.display()));
     }
     let layout = dir.join("layout.xml");
@@ -366,11 +293,6 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     } else {
         (None, String::new())
     };
-
-    // Картинки: имя файла = PLU, как в старом зеркале. Копируем только
-    // отсутствующие локально. «Горячие» (дописываются прямо сейчас) — ждём
-    // остывания в разумных пределах: иначе файл навсегда застрянет в каталоге
-    // (зеркало магазина после цикла подчищает каталог). .bmp не используются.
     let local = cfg.center.img_local_dir.join("plu");
     std::fs::create_dir_all(&local).map_err(|e| format!("{}: {e}", local.display()))?;
     let mut imgs_new = 0;
@@ -392,11 +314,6 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
             images.push(p);
         }
     }
-    // Ожидание: все картинки должны «остыть» — размер не меняется между
-    // двумя замерами (защита от копирования недокачанного файла, который
-    // иначе навсегда застрянет битым в img/plu). Два прохода по списку с
-    // одной паузой: пасс не растягивается на 300 мс × N файлов, дедлайн
-    // проверяется после каждого прохода.
     let hot_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let first: Vec<Option<u64>> = images
@@ -408,7 +325,7 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
             .iter()
             .zip(images.iter())
             .any(|(s1, p)| match s1 {
-                None => false, // исчез (удалён зеркалом) — не ждать
+                None => false, 
                 Some(s1) => p.metadata().map(|m| m.len()).ok() != Some(*s1),
             });
         if !hot || std::time::Instant::now() > hot_deadline {
@@ -418,15 +335,12 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     let mut copied: Vec<std::path::PathBuf> = Vec::new();
     for p in &images {
         let dst = local.join(p.file_name().unwrap_or_default());
-        // Одинаковый размер = та же картинка. Размер — единственное, что
-        // можно сравнить: mtime при копировании не сохраняется. Без этого
-        // смена картинки в центре не доезжала до весов никогда.
         let stale = match (
             std::fs::metadata(&dst).map(|m| m.len()).ok(),
             std::fs::metadata(p).map(|m| m.len()).ok(),
         ) {
             (Some(a), Some(b)) => a != b,
-            _ => true, // локального нет или не читается — копировать
+            _ => true, 
         };
         if stale {
             let data = std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?;
@@ -437,13 +351,8 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         }
         copied.push(p.clone());
     }
-    // Архив исходников — до удаления (материал для разбора инцидентов) —
-    // и применение к базе.
     let (imported, layout_note) =
         apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata)?;
-
-    // Подчистка каталога приёма: флаг, XML и забранные картинки. Неудачное
-    // удаление — в лог: залипший ready.flg иначе даёт цикл ошибок в тишине.
     let rm = |p: &std::path::Path| {
         if let Err(e) = std::fs::remove_file(p) {
             log::warn!("выгрузка (drop): не удалён {}: {e}", p.display());
@@ -457,14 +366,11 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     for p in &copied {
         rm(p);
     }
-
     Ok(Some(format!(
         "выгрузка (drop): {} товаров (обновлено {imported}), картинок: новых {imgs_new}, уже были {imgs_skip}, bmp {imgs_bmp}{layout_note}",
         items.len()
     )))
 }
-
-/// Полный цикл синхронизации. Возвращает краткий отчёт для лога/консоли.
 pub fn run(cfg: &Config) -> Result<String, String> {
     let c = &cfg.center;
     if !c.enabled() {
@@ -472,7 +378,6 @@ pub fn run(cfg: &Config) -> Result<String, String> {
     }
     let mut ftp = match c.protocol.as_str() {
         "ftp" => connect(c)?,
-        // suppaftp без TLS-фичи: честная ошибка вместо молчаливого plaintext.
         "ftps" => {
             return Err("протокол ftps не реализован: используйте ftp или drop-режим".into())
         }
@@ -484,16 +389,12 @@ pub fn run(cfg: &Config) -> Result<String, String> {
         }
         other => return Err(format!("протокол «{other}» не поддерживается (ftp)")),
     };
-
-    // Товары.
     let plu_data = fetch_string(&mut ftp, &c.plu_path)?;
     let (items, skipped) = datastore::parse_plu_xml_counted(&plu_data)
         .map_err(|e| format!("разбор plu.xml: {e}"))?;
     if skipped > 0 {
         log::warn!("plu.xml: пропущено битых записей: {skipped}");
     }
-
-    // Раскладка (группировка старого ПО) — необязательна.
     let (groups, ldata_str) = if c.layout_path.is_empty() {
         (None, String::new())
     } else {
@@ -502,9 +403,6 @@ pub fn run(cfg: &Config) -> Result<String, String> {
             datastore::parse_layout_xml(&ldata).map_err(|e| format!("разбор layout.xml: {e}"))?;
         (Some(parsed), ldata)
     };
-
-    // Картинки: скачать те, которых нет локально или чей размер на сервере
-    // изменился (смена картинки в центре должна доезжать до весов).
     let (mut imgs_new, mut imgs_skip) = (0usize, 0usize);
     if !c.img_dir.is_empty() {
         let local = c.img_local_dir.join("plu");
@@ -519,8 +417,6 @@ pub fn run(cfg: &Config) -> Result<String, String> {
             }
             let local_path = local.join(name);
             let remote = format!("{}/{}", c.img_dir.trim_end_matches('/'), name);
-            // SIZE поддерживается всеми серверами, но без него — старое
-            // поведение: пропуск при наличии локального файла.
             let skip = match (std::fs::metadata(&local_path).map(|m| m.len()).ok(), ftp.size(&remote)) {
                 (Some(local_len), Ok(remote_len)) => local_len == remote_len as u64,
                 (Some(_), Err(_)) => true,
@@ -536,25 +432,16 @@ pub fn run(cfg: &Config) -> Result<String, String> {
         }
     }
     let _ = ftp.quit();
-
-    // Применение к базе — после успешной загрузки всего.
     let (imported, layout_note) =
         apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata_str)?;
-
     Ok(format!(
         "выгрузка: {} товаров в файле (обновлено {imported}), картинок: новых {imgs_new}, уже были {imgs_skip}{layout_note}",
         items.len()
     ))
 }
-
-/// Фоновый поток авто-синхронизации по расписанию [center] (interval_secs,
-/// 0 — выключена; drop-режим — слежение за каталогом). Результат — в канал
-/// для таймера UI (живое обновление данных).
 pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receiver<String> {
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     if cfg.center.is_drop() {
-        // Приём «как старое ПО»: источник сам пушит выгрузку в incoming_dir,
-        // киоск следит за каталогом (ready.flg — триггер). Опрос каждые 5 с.
         log::info!(
             "режим приёма выгрузки: каталог {}, триггер ready.flg, опрос 5 с",
             cfg.incoming_dir.display()
@@ -562,7 +449,6 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
         let cfg_sync = cfg.clone();
         let tx = tx.clone();
         std::thread::spawn(move || loop {
-            // Паника не должна молча останавливать приём выгрузки.
             let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match run_drop(&cfg_sync) {
                     Ok(Some(r)) => {
@@ -572,7 +458,6 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
                     Ok(None) => {}
                     Err(e) => {
                         log::error!("выгрузка (drop): {e}");
-                        // Ошибку не молотим: пауза перед повторной попыткой.
                         std::thread::sleep(std::time::Duration::from_secs(60));
                     }
                 }
@@ -589,7 +474,6 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
             std::time::Duration::from_secs(cfg.center.interval_secs.max(30) as u64);
         std::thread::spawn(move || loop {
             std::thread::sleep(interval);
-            // Паника не должна молча останавливать авто-синхронизацию.
             let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match run(&cfg_sync) {
                     Ok(r) => {
@@ -610,11 +494,9 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
     }
     rx
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn canonical_json_minimal_and_optional() {
         let s = concat!(
@@ -637,7 +519,6 @@ mod tests {
         assert_eq!(items[1].groupcode, "ФРУКТЫ");
         assert_eq!(items[1].shelflife, "01.01.27");
     }
-
     #[test]
     fn canonical_json_skips_bad_rows() {
         // 2 битых из 22 (~9%) — ниже порога 10%, файл принимается.
@@ -653,7 +534,6 @@ mod tests {
         assert_eq!(items.len(), 20);
         assert_eq!(items[0].plu, "900");
     }
-
     #[test]
     fn canonical_json_rejects_mostly_broken() {
         // >10% битых записей — файл отвергается, как у plu.xml.
@@ -666,7 +546,6 @@ mod tests {
         let e = parse_canonical_json(s).unwrap_err();
         assert!(e.contains("отвергнут"), "{e}");
     }
-
     #[test]
     fn canonical_json_rejects_non_array() {
         assert!(parse_canonical_json("{\"plu\":\"1\"}").is_err());

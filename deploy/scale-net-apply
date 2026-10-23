@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Применение сетевых настроек главного адреса весов.
-
 Вызывается киоском через sudo (см. /etc/sudoers.d/scale-kiosk):
   scale-net-apply <IP> <PREFIX> <GATEWAY> <DNS>   — ручной (статический)
   scale-net-apply dhcp                            — DHCP (dhcpcd)
   scale-net-apply rollback                        — вернуть состояние до применения
 Применяет настройки живо (адрес, default route, resolv.conf) и перезаписывает
 /etc/network/interfaces для сохранности после перезагрузки.
-
 Откат: перед изменением состояние сохраняется в /run (скрипт восстановления
 + прежние interfaces и resolv.conf). После применения шлюз опрашивается
 пингом; недоступен (неверный шлюз, неверная маска) — настройки возвращаются
@@ -20,63 +18,46 @@ import pathlib
 import subprocess
 import sys
 import time
-
 IFACE = "enp3s0"
 INTERFACES = pathlib.Path("/etc/network/interfaces")
 RESOLV = pathlib.Path("/etc/resolv.conf")
 ROLLBACK_SH = pathlib.Path("/run/scale-net-rollback.sh")
 BACKUP_INTERFACES = pathlib.Path("/run/scale-interfaces.bak")
 BACKUP_RESOLV = pathlib.Path("/run/scale-resolv.bak")
-
-# ifupdown в Debian 13 не тянет dhcpcd сам — аренду на загрузке поднимает
-# хук /etc/network/if-up.d/scale-dhcp (метод dhcp + наш скрипт).
 INTERFACES_TEMPLATE = """\
 source /etc/network/interfaces.d/*
 auto lo
 iface lo inet loopback
-
 allow-hotplug enp3s0
 auto enp3s0
 iface enp3s0 inet static
 \taddress {ip}/{pre}
 \tgateway {gw}
 """
-
 INTERFACES_DHCP_TEMPLATE = """\
 source /etc/network/interfaces.d/*
 auto lo
 iface lo inet loopback
-
 allow-hotplug enp3s0
 auto enp3s0
 iface enp3s0 inet dhcp
 """
-
-
 def run(*args: str) -> bool:
     return subprocess.run(args, check=False).returncode == 0
-
-
 def write_interfaces(text: str) -> None:
     """Атомарная запись interfaces: temp + rename — обрыв питания не
     оставляет недописанный файл, по которому весы не поднимут сеть."""
     tmp = INTERFACES.with_suffix(".new")
     tmp.write_text(text)
     tmp.rename(INTERFACES)
-
-
 def fail(msg: str) -> None:
     print(msg, file=sys.stderr)
     sys.exit(1)
-
-
 def parse_addr(s: str, what: str) -> ipaddress.IPv4Address:
     try:
         return ipaddress.IPv4Address(s)
     except ValueError:
         fail(f"неверный {what}: {s}")
-
-
 def iface_addrs() -> list[str]:
     """Глобальные адреса интерфейса (без loopback) с префиксами."""
     out = subprocess.run(["ip", "-4", "addr", "show", "dev", IFACE],
@@ -89,8 +70,6 @@ def iface_addrs() -> list[str]:
             if not tok.startswith("127."):
                 addrs.append(tok)
     return addrs
-
-
 def iface_gateway() -> str | None:
     """Шлюз по умолчанию на интерфейсе (None — нет)."""
     out = subprocess.run(["ip", "route", "show", "default"],
@@ -102,8 +81,6 @@ def iface_gateway() -> str | None:
         if "via" in tok:
             return tok[tok.index("via") + 1]
     return None
-
-
 def save_backup() -> None:
     """Состояние до применения: скрипт восстановления живых настроек
     + копии interfaces и resolv.conf. В /run — пережить перезагрузку
@@ -132,8 +109,6 @@ def save_backup() -> None:
         BACKUP_INTERFACES.write_text(INTERFACES.read_text())
     if resolv:
         BACKUP_RESOLV.write_text(resolv)
-
-
 def restore_backup() -> None:
     subprocess.run(["sh", str(ROLLBACK_SH)], check=False)
     if BACKUP_INTERFACES.exists():
@@ -142,14 +117,10 @@ def restore_backup() -> None:
         RESOLV.write_text(BACKUP_RESOLV.read_text())
     for p in (ROLLBACK_SH, BACKUP_INTERFACES, BACKUP_RESOLV):
         p.unlink(missing_ok=True)
-
-
 def gateway_alive(gw: str) -> bool:
     time.sleep(1)
     return subprocess.run(["ping", "-c", "3", "-W", "2", gw],
                           capture_output=True, check=False).returncode == 0
-
-
 def main() -> None:
     if len(sys.argv) == 2 and sys.argv[1] == "dhcp":
         apply_dhcp()
@@ -172,39 +143,26 @@ def main() -> None:
         fail(f"неверный префикс маски: {pre_s}")
     gw = parse_addr(gw_s, "шлюз")
     dns = parse_addr(dns_s, "DNS")
-
     save_backup()
-
-    # Живое применение без разрыва интерфейса.
     run("ip", "addr", "replace", f"{ip}/{pre}", "dev", IFACE)
-    # Прежние адреса (кроме loopback) снять — главный один.
     for tok in iface_addrs():
         if tok != f"{ip}/{pre}":
             run("ip", "addr", "del", tok, "dev", IFACE)
     run("ip", "route", "replace", "default", "via", str(gw), "dev", IFACE)
-
     RESOLV.write_text(f"nameserver {dns}\n")
-
     write_interfaces(INTERFACES_TEMPLATE.format(ip=ip, pre=pre, gw=gw))
-
     if not gateway_alive(str(gw)):
         restore_backup()
         fail("применение отменено: шлюз недоступен, прежние настройки возвращены")
     for p in (ROLLBACK_SH, BACKUP_INTERFACES, BACKUP_RESOLV):
         p.unlink(missing_ok=True)
     print("ok")
-
-
 def apply_dhcp() -> None:
     """Снять статические настройки главного адреса, получить аренду."""
     save_backup()
-
-    # Прежние адреса (кроме loopback) и их default route — долой,
-    # их заменит аренда.
     for tok in iface_addrs():
         run("ip", "addr", "del", tok, "dev", IFACE)
     run("ip", "route", "del", "default", "dev", IFACE)
-
     try:
         r = subprocess.run(["/usr/sbin/dhcpcd", "-1", IFACE], check=False, timeout=30,
                            capture_output=True, text=True)
@@ -215,17 +173,13 @@ def apply_dhcp() -> None:
         restore_backup()
         fail(f"DHCP: dhcpcd завершился с ошибкой: {(r.stderr or r.stdout).strip()[:200]}; "
              "прежние настройки возвращены")
-
     gw = iface_gateway()
     if gw and not gateway_alive(gw):
         restore_backup()
         fail("DHCP: аренда получена, но шлюз недоступен, прежние настройки возвращены")
-
     write_interfaces(INTERFACES_DHCP_TEMPLATE)
     for p in (ROLLBACK_SH, BACKUP_INTERFACES, BACKUP_RESOLV):
         p.unlink(missing_ok=True)
     print("ok")
-
-
 if __name__ == "__main__":
     main()

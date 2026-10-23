@@ -1,26 +1,18 @@
-//! Одноразовый пробник счётчиков/статусов принтера (исследование протокола).
-//! Не часть киоска: собрать и запустить отдельно, сервис остановить вручную.
 
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 use escpos::{FieldStyle, LabelJob};
-
 fn main() {
     let port_path = std::env::args().nth(1).unwrap_or_else(|| "/dev/ttyS3".into());
     let mut port = serialport::new(&port_path, 19_200)
         .timeout(Duration::from_millis(400))
         .open()
         .expect("open port");
-    // DTR|RTS: принтер без них молчит по TX (подтверждено на стенде).
     port.write_data_terminal_ready(true).expect("DTR");
     port.write_request_to_send(true).expect("RTS");
     let mode = std::env::args().nth(2).unwrap_or_default();
     if mode == "series" {
-        // Серия печатей с опросом L4 после каждой (эмуляция Monitor киоска):
-        // ловим ложные аварии на конкретных этикетках серии (проблема №1).
         let n: usize = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(10);
-        // Задание как в киоске: GS FF (подача к следующей этикетке) +
-        // page-mode этикетка 448x232 с шахматкой (escpos::calib-эквивалент).
         let mut job = LabelJob::begin((448, 232));
         let _ = job.field(0, 0, FieldStyle::Normal, "ТЕСТОВАЯ ПЕЧАТЬ 12345");
         let cols = 37;
@@ -47,10 +39,9 @@ fn main() {
                 let mut b = [0u8; 64];
                 let got = port.read(&mut b).unwrap_or(0);
                 for &byte in &b[..got] {
-                    // валидный L4: маска 0x93 == 0x12
                     if byte & 0x93 == 0x12 {
                         reads += 1;
-                        let fault = byte & 0x04 == 0; // как escpos::l4_fault
+                        let fault = byte & 0x04 == 0; 
                         if fault {
                             fault_reads += 1;
                         }
@@ -71,13 +62,10 @@ fn main() {
         return;
     }
     if mode == "step" {
-        // Шаговая подача ESC J n и опрос L4 на каждом шаге: ищем переход
-        // «бумага есть → нет → есть» при проходе зазора между этикетками.
-        let _ = port.write_all(&[0x1B, 0x40]); // ESC @ — якорь в начале
+        let _ = port.write_all(&[0x1B, 0x40]); 
         let _ = port.flush();
         std::thread::sleep(Duration::from_millis(600));
         for step in 0..60 {
-            // ESC J 24: подача 24 вертикальных движений (~3 мм при 1/8"=...)
             let _ = port.write_all(&[0x1B, 0x4A, 24]);
             let _ = port.flush();
             std::thread::sleep(Duration::from_millis(160));

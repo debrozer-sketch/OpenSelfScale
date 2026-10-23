@@ -1,17 +1,12 @@
-//! Тик UI (100 мс): обновление веса и статусов, переходы фаз печати,
-//! результаты фоновых потоков, простой и авто-сброс, уведомления.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-
 use crate::context::AppContext;
 use crate::print;
 use crate::session::{DONE_TIMEOUT, ERROR_TIMEOUT, round_sum, sum_kopecks, sum_str, weight_state};
-
-/// Запускает тик. Возвращает таймер (держать живым).
 pub fn start(
     ctx: &AppContext,
     go_root: Rc<dyn Fn()>,
@@ -19,15 +14,7 @@ pub fn start(
     sync_rx: Receiver<String>,
 ) -> slint::Timer {
     let (print_tx, print_rx) = std::sync::mpsc::channel::<(u64, Result<u32, String>)>();
-    // Долгоживущее соединение для счётчика блокировок входа: тик не должен
-    // открывать файл БД 10 раз в секунду. None = открыть не удалось —
-    // попытка повторится на следующем тике.
     let lock_db: Mutex<Option<rusqlite::Connection>> = Mutex::new(None);
-    // Строковые свойства ставятся только при изменении: каждая установка
-    // гонит перерисовку текста, 10 раз/сек без нужды — джиттер полосы.
-    // Начальные значения повторяют дефолты UI-свойств (false/0/-1): иначе
-    // первый тик с поднятой связью не ставит scales_ok и полоса остаётся
-    // красной («Ошибка весов») при работающих весах.
     type TickCache = (String, i32, bool, bool, i32, bool, bool);
     let tick_cache: Rc<RefCell<TickCache>> =
         Rc::new(RefCell::new((String::new(), -1, false, false, -1, false, false)));
@@ -43,13 +30,9 @@ pub fn start(
         let trade = ctx.trade.clone();
         let refresh_data = refresh_data;
         let tick_cache = tick_cache.clone();
-        // Чек-лист (экран 19): кэш маски и редкие (раз в 10 с) обращения
-        // к БД за товарами/раскладкой — тик не должен трогать базу чаще.
         let checklist_cache: Rc<RefCell<(i32, u32, i32)>> =
             Rc::new(RefCell::new((-1, 0, 0)));
         let go_root = go_root.clone();
-        // Внутренний сторож: каждый тик отмечает живой UI-поток
-        // (watchdog.rs); надзиратель убивает процесс при замерзании UI.
         timer.start(
             slint::TimerMode::Repeated,
             Duration::from_millis(100),
@@ -58,9 +41,6 @@ pub fn start(
                 let Some(ui) = ui_handle.upgrade() else { return };
                 let snap = app_state.snapshot();
                 let ws = weight_state(&snap, trade.min_weight_g.get() / 1000.0);
-                // Порт отвалился — прошлые показания недостоверны: прочерк
-                // вместо крупной цифры (иначе покупатель читает старый вес
-                // под красной полосой «Ошибка весов»).
                 let wt = if snap.port_up {
                     format!("{:.3}", snap.mass_kg)
                 } else {
@@ -99,10 +79,6 @@ pub fn start(
                         ui.set_printer_power_hint(ph.power_cycle_hint);
                     }
                 }
-                // Модальная блокировка «лента закончилась»: пока принтер в
-                // fault, покупательский экран (0-3) перекрыт попапом; в
-                // меню обслуживания (screen >= 4) попап не мешает работе.
-                // Уходит сам, когда опрос статуса снова отвечает.
                 let want_popup = ph.fault && ui.get_screen() < 4;
                 if ui.get_paper_popup_open() != want_popup {
                     log::info!(
@@ -113,23 +89,14 @@ pub fn start(
                     );
                     ui.set_paper_popup_open(want_popup);
                 }
-
-                // Пришла авто-синхронизация → перечитать каталог и отделы
-                // (до захвата kiosk: refresh_data сам берёт borrow).
                 if sync_rx.try_recv().is_ok() {
                     refresh_data();
                 }
-
                 let mut k = kiosk.borrow_mut();
-                // Перезапуск из меню: тик завершает процесс, systemd
-                // перезапускает сервис (Restart=always).
                 if k.restart_requested {
                     log::info!("меню: перезапуск программы по запросу");
                     std::process::exit(0);
                 }
-                // Детальная карточка (оверлей поверх сетки): живой вес и стоимость.
-                // Вес показываем знаковым (минус после снятия тары), сумму
-                // считаем только от неотрицательного веса.
                 if ui.get_popup_open() {
                     if let Some(p) = k.pending.clone() {
                         let r = trade.rounding.get();
@@ -148,8 +115,6 @@ pub fn start(
                         );
                     }
                 }
-                // Результаты фоновой печати: результат без актуального id
-                // операции — запоздавший ответ после таймаута, игнорируем.
                 while let Ok((op, res)) = print_rx.try_recv() {
                     if op != k.print_op {
                         log::warn!("печать: поздний результат операции #{op} пропущен");
@@ -175,36 +140,21 @@ pub fn start(
                         }
                     }
                 }
-                // Ожидание веса без выбранного товара (сброс по простою обнулил
-                // выбор): иначе первый же стабильный вес запустил бы печать
-                // пустого PLU и покупатель получил бы «Ошибка печати».
                 if k.phase == 1 && k.selected.is_none() {
                     k.phase = 0;
                 }
-                // Автопечать: выбрали до стабилизации → вес стал стабильным.
                 if k.phase == 1 && ws == 2 {
                     k.phase = 2;
                 }
-                // Отвал весового модуля в ожидании веса: без прерывания
-                // покупатель стоит в фазе 1 навсегда.
                 if k.phase == 1 && !snap.port_up {
                     log::warn!("печать отменена: связь с весовым модулем потеряна");
                     k.phase = 0;
                     k.selected = None;
                     k.pending = None;
                 }
-                // Запуск печати: фаза 2 и печать ещё не запущена.
                 if k.phase == 2 && k.print_weight_g.is_none() {
-                    // Знаковый вес: после «0» под тарой снятие тары даёт минус —
-                    // печатать нечего, товар «снят» (см. комментарий ниже).
                     let weight_g = (snap.mass_kg * 1000.0).round() as i64;
-                    // Печатаем только на стабильном весе: между нажатием
-                    // «ПЕЧАТЬ» и этим тиком товар могли сдвинуть, нестабильное
-                    // значение на этикетку попасть не должно.
                     if weight_g <= 0 || ws != 2 {
-                        // Товар сняли/сдвинули в момент подтверждения: снова
-                        // ждём вес (фаза 1). Иначе сентинел-гонка: каждый
-                        // тик спавнил бы новый поток печати «0.000 кг».
                         k.phase = 1;
                     } else {
                         let weight_g = weight_g as u32;
@@ -224,21 +174,16 @@ pub fn start(
                         });
                     }
                 }
-                // Зависание фазы 2: демон не ответил (порт, партия, снятие
-                // этикетки затянулось) — ошибка печати с авто-возвратом,
-                // покупатель не ждёт вечно.
                 const PRINT_TIMEOUT: Duration = Duration::from_secs(30);
                 if k.phase == 2 && k.print_weight_g.is_some()
                     && k.print_at.is_some_and(|t| t.elapsed() > PRINT_TIMEOUT)
                 {
                     log::warn!("печать не завершилась за {PRINT_TIMEOUT:?} — ошибка печати");
                     k.print_at = None;
-                    // Инвалидируем операцию: поздний результат не принят.
                     k.print_op += 1;
                     k.phase = 4;
                     k.error_at = Some(Instant::now());
                 }
-                // Возвраты по таймаутам.
                 if k.phase == 3 && k.done_at.is_some_and(|t| t.elapsed() > DONE_TIMEOUT) {
                     k.phase = 0;
                     k.selected = None;
@@ -247,8 +192,6 @@ pub fn start(
                     k.phase = 0;
                     k.selected = None;
                 }
-                // Простой без активной операции → сброс на главный экран
-                // (независимо от того, стоит ли что-то на весах).
                 let idle_timeout = Duration::from_secs(idle_secs.get().max(10));
                 if k.phase < 2 {
                     if k.idle_since.is_none() {
@@ -258,8 +201,6 @@ pub fn start(
                         k.pending = None;
                         k.dept_page = 0;
                         k.item_page = 0;
-                        // Иначе таймер будет пересоздавать модель отделов
-                        // каждые 100 мс и «глотать» первый тап.
                         k.idle_since = None;
                         k.reset_admin_taps();
                         go_root();
@@ -267,14 +208,6 @@ pub fn start(
                 } else {
                     k.idle_since = None;
                 }
-                // Одно окно: меню настроек — экраны главного окна (оверлей
-                // в main.slint). Маппинг stage -> screen: 1 (PIN) -> 5,
-                // 2 (меню) -> 6, 3 (отделы) -> 4, 4 (диагностика) -> 7,
-                // 5 (сеть) -> 8, 6 (оборудование) -> 9, 7/8/9 (смена
-                // пароля) -> 10, 11 (хаб настроек) -> 12, 12 (товары и
-                // экран) -> 13, 13 (правила) -> 14, 14 (обслуживание)
-                // -> 15, 15 (импорт) -> 16, 16 (отчёты) -> 17,
-                // 17 (принтер) -> 18.
                 if k.admin_open {
                     let screen = match k.admin_stage {
                         1 => 5,
@@ -291,7 +224,6 @@ pub fn start(
                         15 => 16,
                         16 => 17,
                         17 => 18,
-                        // Мастер настройки/чек-лист и его PIN-этапы.
                         20 => 19,
                         30..=35 => 5,
                         _ => 7,
@@ -309,7 +241,6 @@ pub fn start(
                             ui.set_pin_prompt(prompt.into());
                         }
                     }
-                    // Подсказки PIN-этапов мастера.
                     if (30..=34).contains(&k.admin_stage) {
                         let prompt = match k.admin_stage {
                             30 => "Новый PIN администратора — затем повтор",
@@ -322,19 +253,12 @@ pub fn start(
                             ui.set_pin_prompt(prompt.into());
                         }
                     }
-                    // Мастер (экран 19): живые данные шага 4 и активность
-                    // кнопки чек-листа. Без блокирующих вызовов: вес — из
-                    // уже прочитанного снимка, маска — из свойства UI.
                     if k.admin_stage == 20 {
-                        // Чек-лист: маска из БД (раз в 10 с) + живые
-                        // принтер/весы; галки обновляются в фоне.
                         if ui.get_setup_mode() == 0 {
                             let (ticks, goods, layout_mask) = {
                                 let mut cc = checklist_cache.borrow_mut();
                                 cc.1 += 1;
                                 if cc.0 < 0 || cc.1 % 100 == 0 {
-                                    // Кэш-соединение тика (lock_db): без
-                                    // переоткрытия БД каждые 10 с.
                                     let read = {
                                         let mut db = lock_db.lock().expect("lock_db");
                                         if db.is_none() {
@@ -418,18 +342,14 @@ pub fn start(
                         ui.set_lock_left(0);
                     }
                 } else if ui.get_screen() >= 4 {
-                    // Меню закрыто: возврат к каталогу (страница 0, попап закрыт).
                     k.reset_admin_taps();
                     k.dept_page = 0;
                     k.item_page = 0;
                     go_root();
                 }
                 if k.phase != 2 {
-                    k.print_weight_g = None; // сброс для следующей операции
+                    k.print_weight_g = None; 
                 }
-
-                // Уведомления — только верхняя строка, нейтральные тексты:
-                // покупатель вправе перекладывать товар и листать каталог.
                 let (text, level): (String, i32) = match k.phase {                    1 => (
                         format!(
                             "{}: взвешиваем…",
@@ -459,7 +379,6 @@ pub fn start(
                     },
                     3 => ("Заберите этикетку".into(), 0),
                     4 => ("Ошибка печати. Позовите сотрудника".into(), 2),
-                    // Покой: подсказка только когда вес ещё не устаканился.
                     _ => match ws {
                         1 => ("Вес нестабилен…".into(), 1),
                         _ => (String::new(), 0),

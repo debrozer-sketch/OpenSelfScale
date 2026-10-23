@@ -1,18 +1,8 @@
 #!/bin/bash
-# Установка даты/времени на весах ScaleFW. Вызывается киоском через sudo
-# (см. scale-settime.sudoers) — единственная root-команда, доступная
-# пользователю сервиса, поэтому валидация аргумента жёсткая.
-#
-# Режимы:
-#   scale-settime "ДД.ММ.ГГГГ ЧЧ:ММ"  — ручная установка времени
-#   scale-settime ntp-on|ntp-off      — переключение синхронизации NTP
 set -euo pipefail
-
 usage() { echo "usage: scale-settime \"ДД.ММ.ГГГГ ЧЧ:ММ\" | scale-settime ntp-on|ntp-off" >&2; exit 1; }
-
-if [ $# -ne 1 ]; then usage; fi
+if [ $
 arg="$1"
-
 if [ "$arg" = "ntp-on" ]; then
     timedatectl set-ntp true
     systemctl restart systemd-timesyncd
@@ -22,11 +12,9 @@ if [ "$arg" = "ntp-off" ]; then
     timedatectl set-ntp false
     exit 0
 fi
-
-# Свой NTP-сервер (сеть магазина без интернета): drop-in для timesyncd.
 if [ "$arg" = "ntp-server" ]; then
     server="${2:-}"
-    if [ $# -ne 2 ] || [[ ! "$server" =~ ^[A-Za-z0-9][A-Za-z0-9.\-]*$ ]]; then
+    if [ $
         echo "ntp-server <host>" >&2; exit 1
     fi
     mkdir -p /etc/systemd/timesyncd.conf.d
@@ -34,22 +22,16 @@ if [ "$arg" = "ntp-server" ]; then
     systemctl restart systemd-timesyncd
     exit 0
 fi
-
-# Формат строго "ДД.ММ.ГГГГ ЧЧ:ММ" — 16 символов, точный скелет.
 if [[ ! "$arg" =~ ^[0-9]{2}\.[0-9]{2}\.[0-9]{4}\ [0-9]{2}:[0-9]{2}$ ]]; then
     echo "формат: ДД.ММ.ГГГГ ЧЧ:ММ" >&2; exit 1
 fi
-
 dd="${arg:0:2}"; mm="${arg:3:2}"; yy="${arg:6:4}"; hh="${arg:11:2}"; mi="${arg:14:2}"
 if [ "$dd" -lt 1 ] || [ "$dd" -gt 31 ] || [ "$mm" -lt 1 ] || [ "$mm" -gt 12 ] \
    || [ "$hh" -gt 23 ] || [ "$mi" -gt 59 ]; then
     echo "значение вне диапазона" >&2; exit 1
 fi
-
-# Реальность даты (високосные, длины месяцев) — сам GNU date.
 if ! date -d "${yy}-${mm}-${dd} ${hh}:${mi}:00" +%s >/dev/null 2>&1; then
     echo "несуществующая дата" >&2; exit 1
 fi
-
 timedatectl set-ntp false
 timedatectl set-time "${yy}-${mm}-${dd} ${hh}:${mi}:00"

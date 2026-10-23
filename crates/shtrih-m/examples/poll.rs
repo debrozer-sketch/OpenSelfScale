@@ -1,11 +1,7 @@
-//! Пример: разовый опрос весов и разбор ответа.
-//!
-//! Запуск: cargo run -p shtrih-m --example poll -- /dev/scales
+
 use std::io::{Read, Write};
 use std::time::Duration;
-
 fn main() -> anyhow_free_result::Result<()> {
-    // Упрощённый вход без anyhow: своя Err-конверсия.
     let path = std::env::args().nth(1).unwrap_or_else(|| "/dev/scales".into());
     let port = serialport::new(&path, 115_200)
         .timeout(Duration::from_millis(1000))
@@ -25,18 +21,12 @@ fn main() -> anyhow_free_result::Result<()> {
     }
     Ok(())
 }
-
-/// Обёртка над serialport-портом: на unix blanket-impl PortPoll требует
-/// AsRawFd, которого у Box<dyn SerialPort> нет — даём дедлайн-чтение
-/// (таймаут держит сам serialport).
 struct Port(Box<dyn serialport::SerialPort>);
-
 impl Read for Port {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.0.read(buf)
     }
 }
-
 impl Write for Port {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.0.write(buf)
@@ -45,7 +35,6 @@ impl Write for Port {
         self.0.flush()
     }
 }
-
 #[cfg(unix)]
 impl shtrih_m::PortPoll for Port {
     fn read_timeout(&mut self, buf: &mut [u8], timeout: Duration) -> std::io::Result<usize> {
@@ -67,7 +56,6 @@ impl shtrih_m::PortPoll for Port {
         Ok(total)
     }
 }
-
 mod anyhow_free_result {
     pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 }

@@ -1,13 +1,3 @@
-//! Точка входа киоска: сборка модулей, машина состояний экрана.
-//!
-//! Модули: cli (аргументы), context (общий UI-контекст), flow (поток
-//! покупателя), settings (меню настроек), tick (тик UI), config, weight
-//! (поток опроса весов), print, diag, calib, net, admin, sync, tiles.
-//! UI в ui/main.slint по прототипу var2.md: зоны A/B1/B2/C, печать
-//! касанием по товару, состояния S0–S6/E1 из var2.md §3.
-//!
-//! CLI: `kiosk [--config <путь>] [--diag | --weight | --calibrate |
-//! --import <plu.xml> | --version]`.
 
 mod admin;
 mod calib;
@@ -28,16 +18,12 @@ mod tick;
 mod tiles;
 mod watchdog;
 mod weight;
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
 use cli::{Mode, parse_cli};
 use context::AppContext;
 use session::Kiosk;
 slint::include_modules!();
-
-/// Логгер: файл из конфига + stderr. Сбой файла логов не критичен.
 fn init_logger(cfg: &config::Config) {
     use simplelog::*;
     let mut loggers: Vec<Box<dyn SharedLogger>> =
@@ -56,20 +42,16 @@ fn init_logger(cfg: &config::Config) {
     }
     let _ = CombinedLogger::init(loggers);
 }
-
 fn main() {
     let cli = parse_cli();
     let cfg = match config::Config::load(&cli.config_path) {
         Ok(c) => c,
         Err(e) => {
-            // В терминальных режимах молчаливый дефолт опасен — печатаем и падаем.
             eprintln!("конфиг: {e}");
             std::process::exit(1);
         }
     };
     init_logger(&cfg);
-    // Паники любого потока — в kiosk.log: без хука падение процесса видно
-    // только по перезапуску в логе, без места и причины.
     std::panic::set_hook(Box::new(|info| {
         log::error!("ПАНИКА: {info}");
         if let Some(loc) = info.location() {
@@ -80,7 +62,6 @@ fn main() {
     for w in &cfg.warnings {
         log::warn!("конфиг: {w}");
     }
-
     match cli.mode {
         Mode::Diag => {
             println!("{}", diag::collect(&cfg));
@@ -95,8 +76,6 @@ fn main() {
             }
         }
         Mode::Weight => {
-            // Разовое чтение: ждём стабильный вес до 15 секунд, потом отдаём
-            // последнее значение с пометкой. Для проверки обмена по железу.
             let src = weight::WeightSource::spawn(&cfg.scales);
             let deadline = Instant::now() + Duration::from_secs(15);
             let snap = loop {
@@ -122,7 +101,6 @@ fn main() {
             }
         }
         Mode::Sync => {
-            // drop-режим: один проход приёмника (ручной триггер для проверки).
             let res = if cfg.center.is_drop() {
                 sync::run_drop(&cfg).map(|o| o.unwrap_or_else(|| "выгрузки нет".into()))
             } else {
@@ -193,13 +171,9 @@ fn main() {
         Mode::Kiosk => run_kiosk(cfg),
     }
 }
-
 fn run_kiosk(cfg: config::Config) {
     let app_state = Arc::new(weight::WeightSource::spawn(&cfg.scales));
     let cfg = Arc::new(cfg);
-
-    // Вход персонала: пользователей создаёт мастер первичной настройки.
-    // Пустая таблица = незапрограммированные весы (заводского PIN нет).
     match datastore::open(&cfg.db_path) {
         Ok(conn) => match datastore::auth::user_exists(&conn) {
             Ok(true) => log::info!("вход: пользователи есть"),
@@ -208,28 +182,16 @@ fn run_kiosk(cfg: config::Config) {
         },
         Err(e) => log::error!("вход: база недоступна: {e}"),
     }
-
     let ui = MainWindow::new().expect("UI init");
-    // Экран из конфига: панель другого размера настраивается без правки кода.
     ui.set_screen_w(cfg.ui.screen_width as f32);
     ui.set_screen_h(cfg.ui.screen_height as f32);
-    // Размер — физическими пикселями, явным вызовом: разметочный width/height
-    // winit на X без оконного менеджера может не применить (окно схлопывается
-    // в дефолт ~600×600 после пересоздания X-сессии).
     ui.window().set_size(slint::WindowSize::Physical(slint::PhysicalSize::new(
         cfg.ui.screen_width,
         cfg.ui.screen_height,
     )));
     if cfg.ui.fullscreen {
-        // Боевой режим: на весь физический экран, без рамок окна.
-        // Размер уже задан явно — fullscreen только убирает декорации.
         ui.window().set_fullscreen(true);
     }
-
-    // Каталог + привязки групп по отделам. Состав отдела — из БД-карты
-    // group_dept (правится CLI/центром); dept_of (сид) не используется
-    // в фильтрах, чтобы меню и вход в отдел не расходились. Отделы,
-    // геометрия и привязки целиком собирает relayout.
     let group_dept: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>> =
         std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new()));
     let catalog: Vec<datastore::PluEntry> = match datastore::open(&cfg.db_path) {
@@ -248,12 +210,8 @@ fn run_kiosk(cfg: config::Config) {
             Vec::new()
         }
     };
-    // Каталог в RefCell: авто-синхронизация перечитывает его из БД
-    // без перезапуска киоска.
     let catalog: std::rc::Rc<std::cell::RefCell<Vec<datastore::PluEntry>>> =
         std::rc::Rc::new(std::cell::RefCell::new(catalog));
-    // Верхнерегистровые имена с индексами: поиск фильтрует по нему без
-    // to_uppercase на каждую позицию при каждом тапе клавиатуры.
     let catalog_up: std::rc::Rc<std::cell::RefCell<Vec<(String, usize)>>> =
         std::rc::Rc::new(std::cell::RefCell::new(
             catalog
@@ -263,14 +221,9 @@ fn run_kiosk(cfg: config::Config) {
                 .map(|(i, p)| (p.name.to_uppercase(), i))
                 .collect(),
         ));
-
-    // Отделы, геометрия колонок и шрифт собираются в relayout (flow.rs):
-    // раскладка пересчитывается и при смене настроек без перезапуска.
     let img_dir = cfg.ui.img_dir.clone();
     let depts_all: std::rc::Rc<std::cell::RefCell<Vec<DeptDef>>> =
         std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-    // Логотип компании: <img_dir>/logo.png, показывается справа от веса.
-    // Нет файла — зона остаётся пустой.
     match slint::Image::load_from_path(&img_dir.join("logo.png")) {
         Ok(img) => {
             ui.set_logo_img(img);
@@ -279,15 +232,9 @@ fn run_kiosk(cfg: config::Config) {
         }
         Err(_) => log::info!("логотип: файла нет, зона пустая"),
     }
-
-    // Состояние операции живёт в потоке UI (таймер + колбэки).
     let kiosk = std::rc::Rc::new(std::cell::RefCell::new(Kiosk::new()));
-    // Список карточек отдела живёт в общем Rc: пейджер перерисовывает срез.
     let items_all: std::rc::Rc<std::cell::RefCell<Vec<PluTile>>> =
         std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-
-    // Эффективный таймаут простоя: из БД (меню «Простой до сброса»),
-    // записи нет — из конфига ([kiosk] idle_timeout_secs, дефолт 60).
     let cal_value = |conn: &rusqlite::Connection, key: &str| {
         datastore::get_calibration(conn, key).ok().flatten()
     };
@@ -300,9 +247,6 @@ fn run_kiosk(cfg: config::Config) {
                 .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 60)),
         ),
     );
-    // Живые настройки «Товары и экран» и «Торговые правила»: из БД,
-    // записи нет — значения по умолчанию (2 колонки, алфавит, без
-    // округления, минимум 10 г).
     let trade = {
         let db = datastore::open(&cfg.db_path).ok();
         let cal = |key: &str| db.as_ref().and_then(|c| cal_value(c, key));
@@ -323,9 +267,6 @@ fn run_kiosk(cfg: config::Config) {
             )),
         }
     };
-
-    // Палитра плиток: из конфига ([kiosk] dept_palette, "RRGGBB:RRGGBB"),
-    // пусто — встроенная пастель. Невалидные записи — предупреждение.
     let mut palette_warn = Vec::new();
     let mut pairs = cfg.kiosk.palette_pairs(&mut palette_warn);
     let palette_custom = !pairs.is_empty();
@@ -342,7 +283,6 @@ fn run_kiosk(cfg: config::Config) {
     }
     let palette = std::rc::Rc::new(pairs);
     let palette_names = std::rc::Rc::new(palette_names);
-
     let ctx = AppContext {
         ui: ui.as_weak(),
         cfg: cfg.clone(),
@@ -359,19 +299,10 @@ fn run_kiosk(cfg: config::Config) {
         palette,
         palette_names,
     };
-
-    // Поток покупателя и меню настроек регистрируют свои колбэки на UI.
     let flow_handles = flow::install(&ctx);
     settings::install(&ctx, &flow_handles);
-    // Незапрограммированные весы: пользователей нет — мастер открывается
-    // сразу. Мастер, прерванный после создания PIN-ов, защищён входом
-    // администратора (спека §2): доступ к сети/времени/сбросу PIN —
-    // только по PIN админа.
     match datastore::open(&cfg.db_path) {
         Ok(conn) => {
-            // Раскладка по умолчанию — зашитая боевая LIVE_LAYOUT. Ключ
-            // нужен чек-листу («раскладка задана»); веб-конструктор позже
-            // начнёт записывать сюда выбранный макет.
             if datastore::get_setting(&conn, "label_layout_name")
                 .ok()
                 .flatten()
@@ -386,7 +317,6 @@ fn run_kiosk(cfg: config::Config) {
                     k.admin_open = true;
                     k.setup_active = true;
                     if has_users {
-                        // Вход по PIN админа, дальше — в мастер.
                         k.admin_stage = 1;
                         k.admin_pin_buf.clear();
                         log::info!("настройка: мастер прерван — требуется вход администратора");
@@ -403,11 +333,6 @@ fn run_kiosk(cfg: config::Config) {
                     settings::startup_setup_render(&ui.as_weak(), &ctx.kiosk, &cfg);
                 }
             } else {
-                // Мастер пройден, но весы ещё не введены в эксплуатацию:
-                // чек-лист открыт сразу, чтобы было видно, чего не хватает
-                // (этикетка, товары, калибровки). Пункт «Мастер настройки»
-                // в меню — только при первой установке (мастер не завершён);
-                // в рабочей весы его нет.
                 if !crate::setup::entered(&conn) {
                     {
                         let mut k = ctx.kiosk.borrow_mut();
@@ -421,22 +346,13 @@ fn run_kiosk(cfg: config::Config) {
         }
         Err(e) => log::error!("настройка: база: {e}"),
     }
-    // Первичная раскладка: отделы из БД, геометрия по колонкам из БД.
     (flow_handles.relayout)();
     if ctx.depts_all.borrow().len() == 1 {
         (flow_handles.go_root)();
     }
-
-    // Авто-синхронизация: фоновый поток по расписанию [center]. Результат —
-    // в очередь тику UI на обновление данных.
     let sync_rx = sync::spawn_auto_sync(&cfg);
-    // Демон принтера: единственный владелец порта. Печать/подача/тест —
-    // через канал запросов, на простое — фоновый опрос статуса с детектом
-    // заправки бумаги. Здоровье читается тиком через print::health().
     print::spawn_daemon(&cfg);
-    // Тик состояния: 100 мс — обновление веса, переходы, тексты статуса.
     let timer = tick::start(&ctx, flow_handles.go_root, flow_handles.refresh_data, sync_rx);
-
     ui.run().expect("UI loop failed");
     drop(timer);
 }

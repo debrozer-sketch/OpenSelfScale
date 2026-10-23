@@ -1,46 +1,30 @@
-//! Разбор CLI-аргументов kiosk.
 
 use std::path::PathBuf;
-
 pub enum Mode {
     Kiosk,
     Diag,
     Calibrate,
     Weight,
     Import(PathBuf, Option<PathBuf>),
-    /// Синхронизация с центром: plu.xml + layout.xml + картинки по [center].
     Sync,
-    /// Список отделов и привязок групп.
     DeptList,
-    /// Добавить отдел: имя [файл] [цвет-фон] [цвет-текст].
     DeptAdd(String, Option<String>, Option<String>, Option<String>),
-    /// Стиль отдела: `имя [файл|-|none] [фон|-|none] [текст|-|none]`.
     DeptStyle(String, Option<String>, Option<String>, Option<String>),
-    /// Убрать отдел (привязки групп снимаются).
     DeptRemove(String),
-    /// Позиция отдела: `имя N` (0 = первый) или `имя alpha` — в алфавит.
     DeptMove(String, Option<i64>),
-    /// Привязать группу к отделу: `группа отдел`.
     GroupAssign(String, String),
-    /// Спайк датчика зазора: измерение длины этикетки шаговой подачей.
     LabelProbe,
 }
-
 pub struct Cli {
     pub mode: Mode,
     pub config_path: PathBuf,
 }
-
-/// Аргумент CLI без значения — не паника: печатное сообщение и код 2.
 fn req_arg<I: Iterator<Item = String>>(args: &mut I, what: &str) -> String {
     args.next().unwrap_or_else(|| {
         eprintln!("kiosk: {what}: не указан аргумент (см. использование — kiosk без параметров)");
         std::process::exit(2);
     })
 }
-
-/// Опциональный позиционный аргумент: следующий, если он не флаг.
-/// «--import x --config y» не должен глотать --config как позиционный.
 fn opt_arg<I: Iterator<Item = String>>(args: &mut std::iter::Peekable<I>) -> Option<String> {
     match args.peek() {
         Some(a) if a.starts_with("--") => None,
@@ -48,7 +32,6 @@ fn opt_arg<I: Iterator<Item = String>>(args: &mut std::iter::Peekable<I>) -> Opt
         None => None,
     }
 }
-
 pub fn parse_cli() -> Cli {
     let mut cli =
         Cli { mode: Mode::Kiosk, config_path: PathBuf::from("/etc/scalefw/config.toml") };
@@ -60,7 +43,6 @@ pub fn parse_cli() -> Cli {
             "--weight" => cli.mode = Mode::Weight,
             "--import" => {
                 let p = PathBuf::from(req_arg(&mut args, "--import"));
-                // Необязательный --layout layout.xml: группировка старого ПО.
                 let layout = if args.peek().map(|s| s.as_str()) == Some("--layout") {
                     args.next();
                     Some(PathBuf::from(req_arg(&mut args, "--layout")))

@@ -1,8 +1,5 @@
-//! Пример: собрать этикетку и показать hexdump (или записать в файл).
-//!
-//! Запуск: cargo run -p escpos --example print_label -- out.bin
-use escpos::{FieldStyle, LabelJob};
 
+use escpos::{FieldStyle, LabelJob};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut job = LabelJob::begin((448, 232));
     job.field(0, 0, FieldStyle::Normal, "ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ")?

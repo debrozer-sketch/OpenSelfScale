@@ -1,17 +1,9 @@
-//! База PLU и импорт из XML старого формата.
-//!
-//! Форматplu.xml унаследован от SelfServiceScales (см. audit/AUDIT.md): цены
-//! в копейках, даты в формате DD/MM/YYYY HH:MM:SS. Импорт идемпотентный:
-//! INSERT OR REPLACE по первичному ключу plu, ошибки — в отчёт, а не в лог.
 
 use std::path::Path;
 use std::sync::Mutex;
-
 use rusqlite::Connection;
 use thiserror::Error;
-
 pub mod auth;
-
 #[derive(Debug, Error)]
 pub enum StoreError {
     #[error("sqlite: {0}")]
@@ -23,14 +15,10 @@ pub enum StoreError {
     #[error("нет отдела: {0}")]
     UnknownDept(String),
 }
-
-/// Товар из plu.xml.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluItem {
     pub plu: String,
-    /// Цена в копейках (44999 = 449.99).
     pub price: i64,
-    /// Скидочная цена (по карте) в копейках; None = второй цены нет.
     pub card_price: Option<i64>,
     pub itemcode: String,
     pub namefirst: String,
@@ -38,19 +26,10 @@ pub struct PluItem {
     pub groupcode: String,
     pub shelflife: String,
 }
-
-/// Схема: без шифрования, без пересозданий — миграции идемпотентны.
-/// Миграции и сидирование выполняются один раз на файл БД за время жизни
-/// процесса (киоск и CLI открывают одну и ту же базу десятки раз за сессию,
-/// в том числе в тике интерфейса) — повторное открытие пропускает их.
 pub fn open(path: &Path) -> Result<Connection, StoreError> {
     let conn = Connection::open(path)?;
-    // Явное ожидание занятой БД: киоск пишет журнал/калибровки, синхронизация
-    // — каталог; без таймаута SQLite вернул бы SQLITE_BUSY сразу, с ним —
-    // обе стороны переживают короткую блокировку без ошибок.
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     let key = path.to_string_lossy().into_owned();
-    // БД в памяти живёт ровно одно соединение — миграции всегда нужны.
     let already = key != ":memory:"
         && migrated_paths()
             .lock()
@@ -93,8 +72,6 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
          );
          CREATE INDEX IF NOT EXISTS idx_print_log_ts ON print_log (ts);",
     )?;
-    // Миграция: скидочная цена (по карте). NULL = второй цены нет, показываем
-    // только обычную. Появилась позже выгрузки старого ПО — колонка добавляется.
     let has_card: bool = conn
         .prepare("PRAGMA table_info(plucodes)")?
         .query_map([], |r| r.get::<_, String>(1))
@@ -102,9 +79,6 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
     if !has_card {
         conn.execute_batch("ALTER TABLE plucodes ADD COLUMN card_price INTEGER;")?;
     }
-    // Миграция: товарная группа для навигации киоска (var2.md). У старого
-    // справочника один groupcode на весь магазин, поэтому группа своя:
-    // initially — первое слово названия, центр перезапишет.
     let has_group: bool = conn
         .prepare("PRAGMA table_info(plucodes)")?
         .query_map([], |r| r.get::<_, String>(1))
@@ -115,10 +89,6 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              UPDATE plucodes SET \"group\" = UPPER(substr(namefirst, 1, instr(namefirst || ' ', ' ') - 1));",
         )?;
     }
-    // Миграция: отделы главного экрана и привязки групп. Ручной порядок —
-    // ord NOT NULL (меньше = левее), NULL = по алфавиту после пронумерованных.
-    // bg/fg — цвета плитки (hex RGB), NULL = авто-палитра по порядку.
-    // Состав и порядок правятся без кода: центр/CLI/SQL.
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS depts (
              name TEXT PRIMARY KEY NOT NULL,
@@ -132,7 +102,6 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              dept TEXT NOT NULL
          );",
     )?;
-    // Для базовых, созданных до появления цветов: добавить колонки.
     let has_bg: bool = conn
         .prepare("PRAGMA table_info(depts)")?
         .query_map([], |r| r.get::<_, String>(1))
@@ -143,7 +112,6 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              ALTER TABLE depts ADD COLUMN fg TEXT;",
         )?;
     }
-    // Сидирование при первом запуске: базовые отделы + текущие привязки.
     let dept_count: i64 =
         conn.query_row("SELECT COUNT(*) FROM depts", [], |r| r.get(0))?;
     if dept_count == 0 {
@@ -163,35 +131,25 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
     migrated_paths().lock().unwrap().insert(key);
     Ok(conn)
 }
-
-/// Файлы БД, миграции для которых уже применены этим процессом.
 fn migrated_paths() -> &'static Mutex<std::collections::HashSet<String>> {
     static M: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> =
         std::sync::OnceLock::new();
     M.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
 }
-
-/// Экранная запись товара для плитки.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluEntry {
     pub plu: String,
     pub name: String,
     pub price: i64,
-    /// Скидочная цена; None — обычная цена единственная.
     pub card_price: Option<i64>,
     pub group: String,
 }
-
 fn display_name(first: &str, second: &str) -> String {
     if second.is_empty() { first.into() } else { format!("{first} {second}") }
 }
-
-/// Число товаров (чек-лист ввода в эксплуатацию).
 pub fn plu_count(conn: &Connection) -> Result<i64, StoreError> {
     Ok(conn.query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))?)
 }
-
-/// Все товары с экранной группой.
 pub fn load_all(conn: &Connection) -> Result<Vec<PluEntry>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT plu, COALESCE(namefirst, ''), COALESCE(namesecond, ''), price, card_price, COALESCE(\"group\", '') FROM plucodes ORDER BY namefirst",
@@ -207,8 +165,6 @@ pub fn load_all(conn: &Connection) -> Result<Vec<PluEntry>, StoreError> {
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
-
-/// Товар по PLU целиком (печать, диалог товара).
 pub fn get_item(conn: &Connection, plu: &str) -> Result<Option<PluItem>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT plu, price, card_price, COALESCE(itemcode, ''), COALESCE(groupcode, ''),
@@ -231,8 +187,6 @@ pub fn get_item(conn: &Connection, plu: &str) -> Result<Option<PluItem>, StoreEr
         })
         .transpose()
 }
-
-/// Все группы по алфавиту (экран «Ещё» — визуальный поиск по алфавиту).
 pub fn groups_alpha(conn: &Connection) -> Result<Vec<(String, i64)>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT COALESCE(NULLIF(\"group\", ''), 'ПРОЧЕЕ') AS g, COUNT(*) AS n
@@ -241,8 +195,6 @@ pub fn groups_alpha(conn: &Connection) -> Result<Vec<(String, i64)>, StoreError>
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
-
-/// Базовые отделы (сид в БД при первом запуске): имя + файл картинки.
 const SEED_DEPTS: &[(&str, &str)] = &[
     ("ОВОЩИ", "ovoshi.png"),
     ("ФРУКТЫ", "frukty.png"),
@@ -251,51 +203,35 @@ const SEED_DEPTS: &[(&str, &str)] = &[
     ("ЗЕЛЕНЬ", "zelen.png"),
     ("ОРЕХИ", "orehi.png"),
 ];
-
-/// Начальные привязки групп к отделам (сид; дальше — таблица group_dept).
 const SEED_GROUP_DEPT: &[(&str, &str)] = &[
-    // ОВОЩИ
     ("БАКЛАЖАНЫ", "ОВОЩИ"), ("ГРИБЫ", "ОВОЩИ"), ("ИМБИРЬ", "ОВОЩИ"),
     ("КАБАЧКИ", "ОВОЩИ"), ("КАПУСТА", "ОВОЩИ"), ("КАРТОФЕЛЬ", "ОВОЩИ"),
     ("КУКУРУЗА", "ОВОЩИ"), ("ЛУК", "ОВОЩИ"), ("МОРКОВЬ", "ОВОЩИ"),
     ("ОГУРЦЫ", "ОВОЩИ"), ("ПЕРЕЦ", "ОВОЩИ"), ("РЕДИС", "ОВОЩИ"), ("СВЕКЛА", "ОВОЩИ"),
     ("ТОМАТЫ", "ОВОЩИ"), ("ЧЕСНОК", "ОВОЩИ"),
-    // ФРУКТЫ
     ("АВОКАДО", "ФРУКТЫ"), ("АПЕЛЬСИНЫ", "ФРУКТЫ"), ("АРБУЗЫ", "ФРУКТЫ"),
     ("БАНАНЫ", "ФРУКТЫ"), ("ВИНОГРАД", "ФРУКТЫ"), ("ГРАНАТ", "ФРУКТЫ"),
     ("ГРЕЙПФРУТЫ", "ФРУКТЫ"), ("ГРУША", "ФРУКТЫ"), ("ДЫНЯ", "ФРУКТЫ"),
     ("КИВИ", "ФРУКТЫ"), ("ЛИМОНЫ", "ФРУКТЫ"), ("МАНГО", "ФРУКТЫ"),
     ("МАНДАРИНЫ", "ФРУКТЫ"), ("НЕКТАРИН", "ФРУКТЫ"), ("ПЕРСИКИ", "ФРУКТЫ"),
     ("ПОМЕЛО", "ФРУКТЫ"), ("СЛИВА", "ФРУКТЫ"), ("ЯБЛОКИ", "ФРУКТЫ"),
-    // КОНФЕТЫ
     ("БАТОНЧИКИ", "КОНФЕТЫ"), ("ДЕСЕРТ", "КОНФЕТЫ"), ("КАРАМЕЛЬ", "КОНФЕТЫ"),
     ("КОНФЕТЫ", "КОНФЕТЫ"), ("НАБОР", "КОНФЕТЫ"),
-    // РЫБА
     ("ГОРБУША", "РЫБА"), ("КАМБАЛА", "РЫБА"), ("КЕТА", "РЫБА"),
     ("КРЕВЕТКИ", "РЫБА"), ("МИНТАЙ", "РЫБА"), ("ОКУНЬ", "РЫБА"),
     ("СКУМБРИЯ", "РЫБА"), ("ТЕРПУГ", "РЫБА"), ("ФОРЕЛЬ", "РЫБА"),
-    // ЗЕЛЕНЬ
     ("ЗЕЛЕНЬ", "ЗЕЛЕНЬ"),
-    // ОРЕХИ
     ("АРАХИС", "ОРЕХИ"), ("ГРЕЦКИЙ", "ОРЕХИ"), ("КАШТАН", "ОРЕХИ"),
     ("МИНДАЛЬ", "ОРЕХИ"), ("ОРЕХИ", "ОРЕХИ"), ("ФИСТАШКИ", "ОРЕХИ"),
 ];
-
-/// Отдел главного экрана: строка плитки (порядок, картинка, цвета).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeptRow {
     pub name: String,
-    /// Ручная позиция; NULL = раздел по алфавиту после пронумерованных.
     pub ord: Option<i64>,
-    /// Имя файла картинки в каталоге картинок; NULL — заглушка.
     pub img: Option<String>,
-    /// Цвет фона плитки (hex RGB); NULL — авто-палитра.
     pub bg: Option<String>,
-    /// Цвет текста подписи (hex RGB); NULL — авто-палитра.
     pub fg: Option<String>,
 }
-
-/// Отделы в экранным порядке: с ручным порядком по ord, остальные по алфавиту.
 pub fn depts_list(conn: &Connection) -> Result<Vec<DeptRow>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT name, ord, img, bg, fg FROM depts
@@ -312,15 +248,11 @@ pub fn depts_list(conn: &Connection) -> Result<Vec<DeptRow>, StoreError> {
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
-
-/// Привязка «группа → отдел» из БД (только явные; группа без записи — None).
 pub fn group_depts(conn: &Connection) -> Result<Vec<(String, String)>, StoreError> {
     let mut stmt = conn.prepare("SELECT grp, dept FROM group_dept ORDER BY grp")?;
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
-
-/// Добавить отдел: в конец «алфавитной» секции; картинка и цвета — по желанию.
 pub fn dept_add(
     conn: &Connection,
     name: &str,
@@ -334,9 +266,6 @@ pub fn dept_add(
     )?;
     Ok(())
 }
-
-/// Стиль существующего отдела: картинка/цвета. None-аргумент оставляет поле
-/// без изменений, Some(None) — очистить (вернуть авто-палитру/заглушку).
 pub fn dept_style(
     conn: &Connection,
     name: &str,
@@ -361,21 +290,13 @@ pub fn dept_style(
     }
     Ok(())
 }
-
-/// Убрать отдел вместе с привязками его групп (группы не удаляются —
-/// становятся непривязанными и в меню не видны, как до назначения).
 pub fn dept_remove(conn: &Connection, name: &str) -> Result<(), StoreError> {
     conn.execute("DELETE FROM group_dept WHERE dept = ?1", [name])?;
     conn.execute("DELETE FROM depts WHERE name = ?1", [name])?;
     Ok(())
 }
-
-/// Ручная позиция отдела (0 = первый). Остальные вручную упорядоченные
-/// сдвигаются на +1, коллизий позиций нет. NULL — вернуть в алфавитную секцию.
 pub fn dept_move(conn: &Connection, name: &str, ord: Option<i64>) -> Result<(), StoreError> {
     let tx = conn.unchecked_transaction()?;
-    // Существование отдела — до сдвига: иначе UPDATE сдвигает ord всех
-    // ручных позиций, а отдел-то не найден.
     let exists: i64 = tx
         .query_row("SELECT COUNT(*) FROM depts WHERE name = ?1", [name], |r| r.get(0))?;
     if exists == 0 {
@@ -388,12 +309,7 @@ pub fn dept_move(conn: &Connection, name: &str, ord: Option<i64>) -> Result<(), 
     tx.commit()?;
     Ok(())
 }
-
-/// Переписать экранный порядок отделов целиком: ord = индекс в списке.
-/// Используется меню настроек (шаг вверх/вниз = своп соседей + перезапись).
 pub fn dept_reorder(conn: &Connection, names: &[String]) -> Result<(), StoreError> {
-    // Полный список проверяется до записи: ошибка на середине оставила бы
-    // часть отделов с ord, остальные — в алфавитной секции.
     for name in names {
         let exists: i64 = conn
             .query_row("SELECT COUNT(*) FROM depts WHERE name = ?1", [name], |r| r.get(0))?;
@@ -412,8 +328,6 @@ pub fn dept_reorder(conn: &Connection, names: &[String]) -> Result<(), StoreErro
     tx.commit()?;
     Ok(())
 }
-
-/// Назначить группу отделу.
 pub fn group_assign(conn: &Connection, group: &str, dept: &str) -> Result<(), StoreError> {
     conn.execute(
         "INSERT OR REPLACE INTO group_dept (grp, dept) VALUES (?1, ?2)",
@@ -421,24 +335,17 @@ pub fn group_assign(conn: &Connection, group: &str, dept: &str) -> Result<(), St
     )?;
     Ok(())
 }
-
-/// Отдел товарной группы. Список групп конечен (48 на 2026-10), каждая
-/// отнесена явно; новая группа без маппинга = None и в меню не попадает.
 pub fn dept_of(group: &str) -> Option<&'static str> {
     SEED_GROUP_DEPT
         .iter()
         .find(|(g, _)| *g == group)
         .map(|(_, d)| *d)
 }
-
-/// Значение калибровки (подача, зазоры). Хранится в БД после измерения —
-/// никаких магических чисел в конфиге (PROBLEMS.md А1/А3).
 pub fn get_calibration(conn: &Connection, key: &str) -> Result<Option<i64>, StoreError> {
     let mut stmt = conn.prepare("SELECT value FROM calibration WHERE key = ?1")?;
     let mut rows = stmt.query([key])?;
     Ok(rows.next()?.map(|r| r.get(0)).transpose()?)
 }
-
 pub fn set_calibration(conn: &Connection, key: &str, value: i64) -> Result<(), StoreError> {
     conn.execute(
         "INSERT OR REPLACE INTO calibration (key, value) VALUES (?1, ?2)",
@@ -446,15 +353,11 @@ pub fn set_calibration(conn: &Connection, key: &str, value: i64) -> Result<(), S
     )?;
     Ok(())
 }
-
-/// Текстовая настройка (имя загруженной раскладки и т.п.). calibration
-/// хранит только INTEGER, для строк отдельная таблица.
 pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>, StoreError> {
     let mut stmt = conn.prepare("SELECT value FROM app_settings WHERE key = ?1")?;
     let mut rows = stmt.query([key])?;
     Ok(rows.next()?.map(|r| r.get(0)).transpose()?)
 }
-
 pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), StoreError> {
     conn.execute(
         "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
@@ -462,8 +365,6 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), Stor
     )?;
     Ok(())
 }
-
-/// Строка журнала печатей: время unix, товар, вес, сумма, успех.
 #[derive(Clone, Debug)]
 pub struct PrintLogRow {
     pub ts: i64,
@@ -473,9 +374,6 @@ pub struct PrintLogRow {
     pub sum_kop: Option<i64>,
     pub ok: bool,
 }
-
-/// Запись в журнал печатей. Ошибки журналирования не роняют печать —
-/// журнал вторичен по отношению к самой операции.
 pub fn print_log_add(conn: &Connection, row: &PrintLogRow) {
     let _ = conn.execute(
         "INSERT INTO print_log (ts, plu, name, weight_g, sum_kop, ok)
@@ -483,9 +381,6 @@ pub fn print_log_add(conn: &Connection, row: &PrintLogRow) {
         rusqlite::params![row.ts, row.plu, row.name, row.weight_g, row.sum_kop, row.ok as i64],
     );
 }
-
-/// Число успешных печатей с начала unix-суток ts (локальное время хоста
-/// уже учтено вызывающей стороной: передают границу суток).
 pub fn print_log_count_since(conn: &Connection, ts: i64) -> Result<i64, StoreError> {
     conn.query_row(
         "SELECT COUNT(*) FROM print_log WHERE ok = 1 AND ts >= ?1",
@@ -494,10 +389,6 @@ pub fn print_log_count_since(conn: &Connection, ts: i64) -> Result<i64, StoreErr
     )
     .map_err(StoreError::from)
 }
-
-/// Число операций с теми же фильтрами, что у print_log_filtered: граница
-/// времени (None — всё время) и статус (None — все, Some(true) — успешные,
-/// Some(false) — ошибки). Отчёт показывает реальное число, не LIMIT.
 pub fn print_log_count_filtered(
     conn: &Connection,
     since_ts: Option<i64>,
@@ -511,9 +402,6 @@ pub fn print_log_count_filtered(
     )
     .map_err(StoreError::from)
 }
-
-/// Чистка журнала печатей: записи старше 90 дней удаляются. Вызывается
-/// периодически вызывающей стороной (не на каждой вставке).
 pub fn print_log_prune(conn: &Connection, now_ts: i64) -> Result<usize, StoreError> {
     const RETENTION_SECS: i64 = 90 * 86_400;
     conn.execute(
@@ -522,14 +410,10 @@ pub fn print_log_prune(conn: &Connection, now_ts: i64) -> Result<usize, StoreErr
     )
     .map_err(StoreError::from)
 }
-
-/// Общее число успешных печатей за всё время.
 pub fn print_log_count_all(conn: &Connection) -> Result<i64, StoreError> {
     conn.query_row("SELECT COUNT(*) FROM print_log WHERE ok = 1", [], |r| r.get(0))
         .map_err(StoreError::from)
 }
-
-/// Последние операции журнала (успешные и нет), свежие сверху.
 pub fn print_log_recent(conn: &Connection, limit: usize) -> Result<Vec<PrintLogRow>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT ts, plu, name, weight_g, sum_kop, ok
@@ -549,10 +433,6 @@ pub fn print_log_recent(conn: &Connection, limit: usize) -> Result<Vec<PrintLogR
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
-
-/// Журнал с фильтрами: граница времени (None — без ограничения по
-/// времени) и статус (None — все, Some(true) — только успешные,
-/// Some(false) — только ошибки). Свежие сверху.
 pub fn print_log_filtered(
     conn: &Connection,
     since_ts: Option<i64>,
@@ -582,10 +462,6 @@ pub fn print_log_filtered(
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
-
-/// Импорт пачки товаров: один батч, возвращает применённое число.
-/// Скидочная цена: выгрузка — полное зеркало каталога центра, поэтому
-/// нет атрибута или cardprice="0" — скидки нет (NULL); иначе — значение.
 pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
     let tx = conn.unchecked_transaction()?;
     let mut stmt = tx.prepare(
@@ -622,15 +498,8 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
     tx.commit()?;
     Ok(n)
 }
-
-/// Удаление товаров, отсутствующих в новой выгрузке: plu.xml — полное
-/// зеркало ассортимента центра, снятые товары не должны оставаться на
-/// весах. Вызывается синхронизацией после import_plu; CLI --import
-/// (ручной, возможно частичный файл) удаление не делает.
 pub fn remove_absent(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
     let tx = conn.unchecked_transaction()?;
-    // Защита от обрезанной выгрузки: файл, оборванный на границе записи,
-    // разбирается без ошибок, и без проверки снял бы с учёта весь остаток.
     let existing: i64 = tx.query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))?;
     if existing >= 20 && (items.len() as i64) * 2 < existing {
         return Err(StoreError::Xml(format!(
@@ -640,7 +509,6 @@ pub fn remove_absent(conn: &Connection, items: &[PluItem]) -> Result<usize, Stor
     }
     tx.execute_batch("CREATE TEMP TABLE incoming_plu (plu TEXT PRIMARY KEY)")?;
     {
-        // OR IGNORE: повтор PLU в выгрузке не должен ронять всю синхронизацию.
         let mut stmt = tx.prepare("INSERT OR IGNORE INTO incoming_plu (plu) VALUES (?1)")?;
         for it in items {
             stmt.execute([&it.plu])?;
@@ -654,20 +522,9 @@ pub fn remove_absent(conn: &Connection, items: &[PluItem]) -> Result<usize, Stor
     tx.commit()?;
     Ok(n)
 }
-
-/// Разбор plu.xml старого формата:
-/// `<item plunumber="012112" price="44999" itemcode="02367" namefirst="АВОКАДО КГ"
-///       namesecond="" groupcode="21" shelflife="22/11/2026 15:25:36" />`
 pub fn parse_plu_xml(data: &str) -> Result<Vec<PluItem>, StoreError> {
     parse_plu_xml_counted(data).map(|(items, _)| items)
 }
-
-/// Разбор выгрузки с подсчётом пропущенных записей. Одна битая запись
-/// (цена с запятой, пустой plunumber) не должна останавливать обновление цен
-/// на всех весах: она пропускается и считается. Файл отвергается целиком,
-/// если пропущено больше десятой части записей или не осталось ни одной, а
-/// также если XML оборван (не закрыт корневой тег): обрезанная выгрузка
-/// иначе разбирается «успешно» и снимает с учёта остаток каталога.
 pub fn parse_plu_xml_counted(data: &str) -> Result<(Vec<PluItem>, usize), StoreError> {
     use quick_xml::events::Event;
     let mut reader = quick_xml::Reader::from_str(data);
@@ -745,13 +602,7 @@ pub fn parse_plu_xml_counted(data: &str) -> Result<(Vec<PluItem>, usize), StoreE
     }
     Ok((items, skipped))
 }
-
-/// Отдел для групп, которым отдел не назначен: иначе их товары не видны
-/// покупателю нигде, кроме поиска. Возвращает названия таких групп (пусто —
-/// ничего не менялось). Отдел создаётся при необходимости, привязка живёт
-/// только в переданной карте (в БД не пишется: оператор назначит отдел сам).
 pub const FALLBACK_DEPT: &str = "ПРОЧЕЕ";
-
 pub fn route_unmapped_groups(
     conn: &Connection,
     group_dept: &mut std::collections::HashMap<String, String>,
@@ -770,9 +621,6 @@ pub fn route_unmapped_groups(
     }
     Ok(unmapped)
 }
-
-/// Раскладка старого ПО (layout.xml): `<group name="..."><button PLU="..."/>`.
-/// Реальная выгрузка пишет во всех item один groupcode, группы живут тут.
 pub fn parse_layout_xml(data: &str) -> Result<Vec<(String, Vec<String>)>, StoreError> {
     let mut reader = quick_xml::Reader::from_str(data);
     reader.config_mut().trim_text(true);
@@ -796,7 +644,6 @@ pub fn parse_layout_xml(data: &str) -> Result<Vec<(String, Vec<String>)>, StoreE
                         if name.is_empty() {
                             return Err(StoreError::Xml("group без name".into()));
                         }
-                        // Start/Empty тег группы (кнопок может не быть): фиксируем.
                         groups.push((name, Vec::new()));
                     }
                     b"button" => {
@@ -829,16 +676,10 @@ pub fn parse_layout_xml(data: &str) -> Result<Vec<(String, Vec<String>)>, StoreE
     }
     Ok(groups)
 }
-
-/// Применить раскладку: groupcode каждого PLU = имя группы из layout.xml.
-/// Товары, которых в раскладке нет, остаются без группы (не видны нигде) —
-/// удаление не делаем: выгрузка могла быть частичной.
 pub fn apply_layout(
     conn: &Connection,
     groups: &[(String, Vec<String>)],
 ) -> Result<(usize, usize), StoreError> {
-    // Пустая раскладка — не «всё скрыть», а признак битого/недокачанного
-    // layout.xml: глобальный сброс групп оставил бы киоск с пустым экраном.
     if groups.is_empty() {
         return Ok((0, 0));
     }
@@ -862,16 +703,13 @@ pub fn apply_layout(
     tx.commit()?;
     Ok((regrouped, orphans as usize))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     const SAMPLE: &str = r#"<body>
 <item plunumber="012112" price="44999" itemcode="02367" namefirst="АВОКАДО КГ" namesecond="" groupcode="21" shelflife="22/11/2026 15:25:36" />
 <item plunumber="2502192" price="19999" cardprice="17999" itemcode="02136" namefirst="ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ" namesecond="" groupcode="21" shelflife="20/09/2026 18:25:45" />
 </body>"#;
-
     const LAYOUT_SAMPLE: &str = r#"<body>
 <group name="Фрукты">
 <button name="АВОКАДО КГ" PLU="012112" img="012112.jpg"/>
@@ -881,7 +719,6 @@ mod tests {
 <button name="ГРЕЦКИЙ" PLU="000111" img="000111.jpg"/>
 </group>
 </body>"#;
-
     #[test]
     fn parse_layout_real_format() {
         let groups = parse_layout_xml(LAYOUT_SAMPLE).unwrap();
@@ -891,7 +728,6 @@ mod tests {
         assert_eq!(groups[1].0, "Орехи и Сухофрукты");
         assert_eq!(groups[1].1, vec!["000111"]);
     }
-
     #[test]
     fn apply_layout_regroups_and_hides_stale() {
         let conn = open(":memory:".as_ref()).unwrap();
@@ -920,7 +756,6 @@ mod tests {
             .unwrap();
         assert_eq!(g, "");
     }
-
     #[test]
     fn parse_real_format() {
         let items = parse_plu_xml(SAMPLE).unwrap();
@@ -931,7 +766,6 @@ mod tests {
         assert_eq!(items[1].namefirst, "ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ");
         assert_eq!(items[1].card_price, Some(17999));
     }
-
     #[test]
     fn import_is_idempotent_and_reports_count() {
         let conn = open(":memory:".as_ref()).unwrap();
@@ -947,7 +781,6 @@ mod tests {
             .unwrap();
         assert_eq!(price, 19999);
     }
-
     #[test]
     fn card_price_follows_center_mirror() {
         let conn = open(":memory:".as_ref()).unwrap();
@@ -978,7 +811,6 @@ mod tests {
             .unwrap();
         assert_eq!(card, None);
     }
-
     #[test]
     fn remove_absent_drops_items_missing_from_upload() {
         let conn = open(":memory:".as_ref()).unwrap();
@@ -995,7 +827,6 @@ mod tests {
         // Повторный вызов с тем же набором — идемпотентен.
         assert_eq!(remove_absent(&conn, &kept).unwrap(), 0);
     }
-
     #[test]
     fn remove_absent_rejects_suspiciously_small_upload() {
         // Обрезанный на границе записи plu.xml разбирается без ошибок,
@@ -1021,7 +852,6 @@ mod tests {
         let all: Vec<PluItem> = parse_plu_xml(&xml).unwrap();
         assert_eq!(remove_absent(&conn, &all).unwrap(), 0);
     }
-
     #[test]
     fn remove_absent_tolerates_duplicate_plu_in_upload() {
         // Повтор PLU в выгрузке раньше падал по UNIQUE-констрейнту
@@ -1036,13 +866,11 @@ mod tests {
             .unwrap();
         assert_eq!(n, 1);
     }
-
     #[test]
     fn missing_plunumber_is_an_error_not_silence() {
         let bad = r#"<body><item price="100" /></body>"#;
         assert!(parse_plu_xml(bad).is_err());
     }
-
     #[test]
     fn calibration_roundtrip_and_missing_is_none() {
         let conn = open(":memory:".as_ref()).unwrap();
@@ -1052,7 +880,6 @@ mod tests {
         set_calibration(&conn, "backward_space", 107).unwrap(); // перезапись
         assert_eq!(get_calibration(&conn, "backward_space").unwrap(), Some(107));
     }
-
     #[test]
     fn settings_roundtrip_and_missing_is_none() {
         let conn = open(":memory:".as_ref()).unwrap();
@@ -1068,7 +895,6 @@ mod tests {
             Some("58x30".to_string())
         );
     }
-
     #[test]
     fn group_migration_derives_from_first_word() {
         let conn = open(":memory:".as_ref()).unwrap();
@@ -1081,7 +907,6 @@ mod tests {
             vec![("АВОКАДО".to_string(), 1), ("ВИНОГРАД".to_string(), 1)]
         );
     }
-
     #[test]
     fn dept_mapping_covers_known_groups() {
         // Все текущие 48 групп отнесены к отделам; примеры соответствия.
@@ -1094,7 +919,6 @@ mod tests {
         assert_eq!(dept_of("ФИСТАШКИ"), Some("ОРЕХИ"));
         assert_eq!(dept_of("НЕТ-ТАКОЙ-ГРУППЫ"), None);
     }
-
     #[test]
     fn depts_seed_and_manage() {
         let conn = open(Path::new(":memory:")).unwrap();
@@ -1137,13 +961,11 @@ mod tests {
         dept_remove(&conn, "ЯГОДЫ").unwrap();
         assert!(group_depts(&conn).unwrap().iter().all(|(_, d)| d != "ЯГОДЫ"));
     }
-
     #[test]
     fn truncated_xml_is_rejected() {
         let cut = r#"<root><item plunumber="1" price="100"/><item plunumber="2" price="200"/>"#;
         assert!(parse_plu_xml(cut).is_err(), "корневой тег не закрыт");
     }
-
     #[test]
     fn single_bad_item_is_skipped_not_fatal() {
         let mut xml = String::from("<root>");
@@ -1154,13 +976,11 @@ mod tests {
         let (items, skipped) = parse_plu_xml_counted(&xml).unwrap();
         assert_eq!((items.len(), skipped), (30, 1));
     }
-
     #[test]
     fn too_many_bad_items_reject_the_file() {
         let xml = r#"<root><item plunumber="1" price="1"/><item plunumber="2" price="x"/><item plunumber="3" price="y"/></root>"#;
         assert!(parse_plu_xml(xml).is_err());
     }
-
     #[test]
     fn unmapped_groups_go_to_fallback_dept() {
         let conn = open(std::path::Path::new(":memory:")).unwrap();
@@ -1173,7 +993,6 @@ mod tests {
         assert!(!gd.contains_key("ПУСТО"), "пустая группа не маршрутизируется");
         assert!(depts_list(&conn).unwrap().iter().any(|d| d.name == FALLBACK_DEPT));
     }
-
     #[test]
     fn rows_with_null_names_are_not_dropped() {
         let conn = open(std::path::Path::new(":memory:")).unwrap();

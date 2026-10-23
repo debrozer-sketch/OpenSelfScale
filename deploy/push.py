@@ -1,33 +1,24 @@
 """Загрузка файлов на весы по SFTP (paramiko, креды из .env).
-
 Использование:
     python deploy/push.py <локальный файл>[:<удалённый путь>] ...
-
 Удалённый путь по умолчанию: <домашний каталог SSH-пользователя>/install
 (SFTP работает без root; установка в систему — потом через scale_ssh.py --sudo).
 """
-
 import sys
 from pathlib import Path
-
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import scale_ssh  # noqa: E402  (переиспользует .env и подключение)
-
-
+import scale_ssh
 def main(argv: list[str]) -> int:
     if not argv:
         print("нет файлов для загрузки", file=sys.stderr)
         return 2
     client = scale_ssh.connect()
     sftp = client.open_sftp()
-    # Пишем в домашний каталог пользователя (SFTP работает без root),
-    # root-операции потом через scale_ssh.py --sudo.
     remote_dir = sftp.normalize(".") + "/install"
     try:
         try:
@@ -52,7 +43,5 @@ def main(argv: list[str]) -> int:
         sftp.close()
         client.close()
     return 0
-
-
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

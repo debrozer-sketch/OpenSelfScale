@@ -1,6 +1,4 @@
-//! Пример: импорт plu.xml в SQLite-базу.
-//!
-//! Запуск: cargo run -p datastore --example import_plu -- plu.xml out.db
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let src = std::env::args().nth(1).expect("путь к plu.xml");
     let dst = std::env::args().nth(2).unwrap_or_else(|| "plu.db".into());

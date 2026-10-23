@@ -1,18 +1,10 @@
-//! Драйвер этикетного принтера ESC/POS.
-//!
-//! Последовательности сняты живым дампом с работающих весов
-//! (см. audit/PROTOCOL.md, раздел 2). Рендер: page mode, абсолютное
-//! позиционирование поля = пара (ESC $ X, GS $ Y) + данные в CP866.
 
 use std::io::{Read, Write};
-
 use thiserror::Error;
-
 pub const ESC: u8 = 0x1B;
 pub const GS: u8 = 0x1D;
 pub const FF: u8 = 0x0C;
 pub const CAN: u8 = 0x18;
-
 #[derive(Debug, Error)]
 pub enum EscPosError {
     #[error("port I/O error: {0}")]
@@ -24,20 +16,12 @@ pub enum EscPosError {
     #[error("invalid raster payload: длина данных не кратна ширине в байтах")]
     RasterSize,
 }
-
-/// Стиль текстового поля — снят с живого дампа (scales_io.trace, ttyS3):
-/// - Normal:  ESC ! 0x00 + GS ! 0x00 — наименование;
-/// - FontB:   ESC ! 0x01 + GS ! 0x00 — дата/время/PLU/вес/цена (шрифт B);
-/// - DoubleH: ESC ! 0x00 + GS ! 0x01 — только «Итого» (высота ×2, ширина 1).
-///
-/// GS ! 0x11 (2×2) в дампе не встречается.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldStyle {
     Normal,
     FontB,
     DoubleH,
 }
-
 impl FieldStyle {
     fn bytes(self) -> [u8; 2] {
         match self {
@@ -47,12 +31,6 @@ impl FieldStyle {
         }
     }
 }
-
-/// Кодовая страница 17 = CP866. Подтверждено байтами дампа: «В» = 0x82
-/// (в CP1251 было бы 0xC2) — см. scales_io.trace, write(13).
-/// Текст в CP866. Неизвестные символы (не покрытые таблицей) заменяются
-/// на '?': печать этикетки должна состояться всегда, один экзотический
-/// символ из центра не имеет права блокировать кассовую смену.
 pub fn to_cp866(text: &str) -> Result<Vec<u8>, EscPosError> {
     text.chars()
         .map(|c| {
@@ -60,64 +38,52 @@ pub fn to_cp866(text: &str) -> Result<Vec<u8>, EscPosError> {
             if code < 0x80 {
                 Ok(code as u8)
             } else if (0x410..=0x42F).contains(&code) {
-                Ok((code - 0x410 + 0x80) as u8) // А..Я → 0x80..0xAF
+                Ok((code - 0x410 + 0x80) as u8) 
             } else if (0x430..=0x43F).contains(&code) {
-                Ok((code - 0x430 + 0xA0) as u8) // а..п → 0xA0..0xAF
+                Ok((code - 0x430 + 0xA0) as u8) 
             } else if (0x440..=0x44F).contains(&code) {
-                Ok((code - 0x440 + 0xE0) as u8) // р..я → 0xE0..0xEF
+                Ok((code - 0x440 + 0xE0) as u8) 
             } else if code == 0x401 {
-                Ok(0xF0) // Ё
+                Ok(0xF0) 
             } else if code == 0x451 {
-                Ok(0xF1) // ё
+                Ok(0xF1) 
             } else if (0x2591..=0x2593).contains(&code) {
-                Ok((code - 0x2591 + 0xB0) as u8) // ░▒▓ → 0xB0..0xB2
+                Ok((code - 0x2591 + 0xB0) as u8) 
             } else if code == 0x2580 {
-                Ok(0xDE) // ▀ верхний полублок
+                Ok(0xDE) 
             } else if code == 0x2584 {
-                Ok(0xDF) // ▄ нижний полублок
+                Ok(0xDF) 
             } else if code == 0x2588 {
-                Ok(0xDB) // █ сплошной блок
+                Ok(0xDB) 
             } else {
                 Ok(b'?')
             }
         })
         .collect()
 }
-
-/// Номер (little-endian, 2 байта) для команд позиционирования.
 fn le16(v: u16) -> [u8; 2] {
     [(v & 0xFF) as u8, (v >> 8) as u8]
 }
-
-/// Сборщик кадра этикетки в page mode.
 pub struct LabelJob {
     buf: Vec<u8>,
 }
-
 impl LabelJob {
-    /// Инициализация на этикетку: снято с живого дампа старого ПО
-    /// (scales_io.trace: все команды page mode — через ESC, не FS).
-    /// `area`: печатная область (dx, dy) для ESC W.
     pub fn begin(area: (u16, u16)) -> Self {
         let mut b = Vec::with_capacity(64);
-        b.extend_from_slice(&[ESC, b't', 0x11]); // кодовая страница 17 = CP866
+        b.extend_from_slice(&[ESC, b't', 0x11]); 
         b.extend_from_slice(&[ESC, b'c', b'0', 0x01]);
-        b.extend_from_slice(&[ESC, b'{', 0x01]); // разворот 180° выкл
-        b.extend_from_slice(&[ESC, b'L']); // вход в page mode
-        b.extend_from_slice(&[ESC, b'T', 0x02]); // направление печати 2
+        b.extend_from_slice(&[ESC, b'{', 0x01]); 
+        b.extend_from_slice(&[ESC, b'L']); 
+        b.extend_from_slice(&[ESC, b'T', 0x02]); 
         let (dx, dy) = area;
         b.extend_from_slice(&[ESC, b'W', 0, 0, 0, 0]);
         b.extend_from_slice(&le16(dx));
         b.extend_from_slice(&le16(dy));
-        b.push(CAN); // отмена старых данных страницы
-        b.extend_from_slice(&[ESC, b'3', 0x00]); // межстрочный интервал 0
-        b.extend_from_slice(&[ESC, b' ', 0x00]); // межсимвольный интервал 0
+        b.push(CAN); 
+        b.extend_from_slice(&[ESC, b'3', 0x00]); 
+        b.extend_from_slice(&[ESC, b' ', 0x00]); 
         Self { buf: b }
     }
-
-    /// Текстовое поле: позиция (ESC $ / GS $) + стиль + CP866-текст.
-    /// Кодирование текста — ДО записи байтов позиционирования: при ошибке
-    /// буфер не замусоривается частичным кадром.
     pub fn field(
         &mut self,
         x: u16,
@@ -136,9 +102,6 @@ impl LabelJob {
         self.buf.extend_from_slice(&encoded);
         Ok(self)
     }
-
-    /// Штрихкод EAN-13 (12 цифр + NUL), снято с дампа: перед `GS k` старое
-    /// ПО задаёт высоту (`GS h 48`) и положение HRI (`GS H 2`, снизу).
     pub fn barcode_ean13(&mut self, x: u16, y: u16, digits: &str) -> Result<&mut Self, EscPosError> {
         if digits.len() != 12 || !digits.bytes().all(|b| b.is_ascii_digit()) {
             return Err(EscPosError::InvalidBarcode(digits.into()));
@@ -147,18 +110,13 @@ impl LabelJob {
         self.buf.extend_from_slice(&[ESC, b'$', xl, xh]);
         let [yl, yh] = le16(y);
         self.buf.extend_from_slice(&[GS, b'$', yl, yh]);
-        self.buf.extend_from_slice(&[GS, b'h', 0x30]); // высота 48 точек
-        self.buf.extend_from_slice(&[GS, b'H', 0x02]); // HRI под штрихкодом
+        self.buf.extend_from_slice(&[GS, b'h', 0x30]); 
+        self.buf.extend_from_slice(&[GS, b'H', 0x02]); 
         self.buf.extend_from_slice(&[GS, b'k', 0x02]);
         self.buf.extend_from_slice(digits.as_bytes());
         self.buf.push(0x00);
         Ok(self)
     }
-
-    /// Растровый блок в page mode (`GS *` + `GS /`): монохромное изображение,
-    /// 1 бит на точку. `width_bytes` — ширина в байтах (8 точек на байт,
-    /// MSB = верхняя точка байта); `data` — строки растра подряд, высота
-    /// кратна 8 точкам. Позиция (x, y) — левый верхний угол блока.
     pub fn raster(
         &mut self,
         x: u16,
@@ -166,8 +124,6 @@ impl LabelJob {
         width_bytes: u16,
         data: &[u8],
     ) -> Result<&mut Self, EscPosError> {
-        // GS * кодирует ширину одним байтом: u16 больше 255 — тихое искажение
-        // команды, ловим его на границе.
         if width_bytes == 0 || width_bytes > 255 {
             return Err(EscPosError::RasterSize);
         }
@@ -187,8 +143,6 @@ impl LabelJob {
         self.buf.extend_from_slice(&[GS, b'/', 0x00]);
         Ok(self)
     }
-
-    /// Завершение: печать страницы и выдача этикетки (FF), сброс размеров.
     pub fn finish(mut self) -> Vec<u8> {
         self.buf.extend_from_slice(&[ESC, b'!', 0x00]);
         self.buf.extend_from_slice(&[GS, b'!', 0x00]);
@@ -196,71 +150,35 @@ impl LabelJob {
         self.buf
     }
 }
-
-/// Статусы принтера (real-time status transmission). Старое ПО их отключало
-/// (disableStatusCheck=1) и платило двойной подачей и недопечатками.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrinterStatus {
     pub drawer_open: bool,
     pub printer_offline: bool,
     pub paper_end: bool,
     pub paper_near_end: bool,
-    /// Сырой ответ DLE EOT: биты расходника у Штрих-СлиМ не совпадают
-    /// со спецификацией Epson — калибровка датчика идёт по дампу.
     pub raw_byte: u8,
 }
-
-/// Запрос статуса: DLE EOT n, n=1..4 (см. ESC/POS).
 pub fn build_status_query(level: u8) -> [u8; 3] {
     [0x10, 0x04, level]
 }
-
-/// Восстановление после ошибки (заправка бумаги/снятая ошибка): DLE ENQ n.
-/// Старое ПО звало realTimeRequestToPrinter(1) после смены рулона, иначе
-/// принтер оставался в error и не печатал до перезапуска.
 pub fn build_recover(level: u8) -> [u8; 3] {
     [0x10, 0x05, level]
 }
-
-/// Признак настоящего ответа на DLE EOT n. По спецификации ESC/POS в байте
-/// ответа bit0 = 0, bit1 = 1, bit4 = 1, bit7 = 0 (маска 0x93 == 0x12). Все
-/// наблюдавшиеся значения L4 (0x7E, 0x1E, 0x72) этому удовлетворяют, а
-/// посторонние байты в потоке (0x00, 0xFF, 0x03 от GS r, 0x10/0x0F от ASB)
-/// нет. Фильтр по признаку надёжнее списка «известных плохих» байтов.
 pub fn is_valid_l4(byte: u8) -> bool {
     byte & 0x93 == 0x12
 }
-
-/// Авария по L4: bit2 снят (0x72 против покоя 0x7E/0x1E). Осмысленно только
-/// для валидного ответа (`is_valid_l4`).
 pub fn l4_fault(byte: u8) -> bool {
     byte & 0x04 == 0
 }
-
-/// Уровень 4 (Custom/Штрих-СлиМ): биты 5-6 = датчик выходного лотка.
-/// Этикетка в выходе: биты сняты (0x1E); лоток пуст: биты стоят (0x7E) —
-/// эмпирика 2026-10-16 (этикетка наполовину вытащена при старте весов).
-/// Старое имя `label_awaiting_removal` возвращало обратное значение
-/// (true при ПУСТОМ лотке), из-за чего ожидание снятия этикетки работало
-/// наоборот.
 pub fn label_in_tray(level4_byte: u8) -> bool {
     level4_byte & 0x60 == 0
 }
-
-/// Запрос идентификационной строки GS I n (1D 49 n): 65 — прошивка,
-/// 66 — производитель, 67 — модель, 68 — серийный номер. Ответ — ASCII
-/// строка с NUL-терминатором (проверено live на HPRT PT561).
 pub fn build_printer_info(n: u8) -> [u8; 3] {
     [GS, b'I', n]
 }
-
-/// Расшифровка L1 (DLE EOT 1) по мануалу HPRT (fw 1.03.17): bit3 = offline.
 pub fn decode_l1(byte: u8) -> String {
     if byte & 0x08 != 0 { "offline".into() } else { "онлайн".into() }
 }
-
-/// L2 (DLE EOT 2): bit2 = крышка открыта, bit5 = стоп по концу бумаги,
-/// bit6 = авария. Фиксированные биты 0x12.
 pub fn decode_l2(byte: u8) -> String {
     let mut parts: Vec<String> = Vec::new();
     if byte & 0x04 != 0 { parts.push("крышка открыта".into()); }
@@ -268,9 +186,6 @@ pub fn decode_l2(byte: u8) -> String {
     if byte & 0x40 != 0 { parts.push("ошибка".into()); }
     if parts.is_empty() { "норма".into() } else { parts.join(", ") }
 }
-
-/// L3 (DLE EOT 3): bit3 = ошибка каттера, bit5 = невосстановимая
-/// (питание), bit6 = перегрев головки (сам восстанавливается).
 pub fn decode_l3(byte: u8) -> String {
     let mut parts: Vec<String> = Vec::new();
     if byte & 0x08 != 0 { parts.push("каттер".into()); }
@@ -278,9 +193,6 @@ pub fn decode_l3(byte: u8) -> String {
     if byte & 0x40 != 0 { parts.push("перегрев головки".into()); }
     if parts.is_empty() { "норма".into() } else { parts.join(", ") }
 }
-
-/// L4 (DLE EOT 4): bits2-3 = рулон near-end, bits5-6 = бумаги нет.
-/// Трактовка лотка — эмпирика стенда (см. label_in_tray).
 pub fn decode_l4(byte: u8) -> String {
     let mut parts: Vec<String> = Vec::new();
     if byte & 0x0C != 0 { parts.push("рулон near-end".into()); }
@@ -288,21 +200,9 @@ pub fn decode_l4(byte: u8) -> String {
     parts.push(if label_in_tray(byte) { "этикетка в лотке" } else { "лоток пуст" }.into());
     parts.join(", ")
 }
-
-/// ESC @ — инициализация принтера (сброс режима, буфера страницы).
 pub fn build_init() -> [u8; 2] {
     [ESC, b'@']
 }
-
-/// Разбор ответа DLE EOT (1 байт на уровень). Бит-карта — мануал Custom
-/// VKP80II + эмпирика Штрих-СлиМ 2026-10-16 (сняты покой с лентой, покой
-/// без ленты, авария «подача без ленты»):
-///   L1: норма 0x00, авария 0x48 — bit3 (0x08) = offline;
-///   L2: норма 0x12, авария 0x52 — bit6 (0x40) = Error;
-///   L4: норма 0x7E (ленты нет/до датчика) и 0x1E (этикетка в выходе),
-///       авария 0x72 — bit2 (0x04) снят; датчик рулона в машине
-///       не подключён (опция по мануалу), поэтому paper_end синтезируем
-///       из bit2, а «этикетка в выходе» — bits 5,6 (см. label_in_tray).
 pub fn parse_status(level: u8, byte: u8) -> PrinterStatus {
     match level {
         1 => PrinterStatus {
@@ -321,14 +221,11 @@ pub fn parse_status(level: u8, byte: u8) -> PrinterStatus {
         },
         3 => PrinterStatus {
             drawer_open: false,
-            // Уровень 3 в норме и в аварии даёт 0x12 — биты не живые.
             printer_offline: false,
             paper_end: false,
             paper_near_end: false,
             raw_byte: byte,
         },
-        // Датчик рулона в Штрих-СлиМ не подключён: 0x7E в любом состоянии
-        // ленты. Авария (offline/error) отмечается снятием bit2 (0x72).
         4 => PrinterStatus {
             drawer_open: false,
             printer_offline: byte & 0x04 == 0,
@@ -345,56 +242,40 @@ pub fn parse_status(level: u8, byte: u8) -> PrinterStatus {
         },
     }
 }
-
-/// Базовая обёртка над портом принтера: печать + опрос статуса.
 pub struct EscPosPrinter<P: Read + Write> {
     port: P,
 }
-
 impl<P: Read + Write> EscPosPrinter<P> {
     pub fn new(port: P) -> Self {
         Self { port }
     }
-
-    /// Прямой доступ к порту: сырые байты вне LabelJob (recovery, подача).
     pub fn port_mut(&mut self) -> &mut P {
         &mut self.port
     }
-
     pub fn print(&mut self, job: LabelJob) -> Result<(), EscPosError> {
         self.port.write_all(&job.finish())?;
         self.port.flush()?;
         Ok(())
     }
-
-    /// DLE ENQ n — восстановление после ошибки. Ответ (1 байт статуса)
-    /// прочитывается и отбрасывается: важен сам сигнал, не содержимое.
     pub fn recover(&mut self, level: u8) -> Result<(), EscPosError> {
         self.port.write_all(&build_recover(level))?;
         self.port.flush()?;
         let mut b = [0u8; 1];
         match self.port.read_exact(&mut b) {
             Ok(()) => Ok(()),
-            // Принтер мог не ответить — восстановление уже доставлено.
             Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => Ok(()),
             Err(e) => Err(e.into()),
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn init_sequence_matches_live_dump() {
         let job = LabelJob::begin((448, 232));
         let out = job.finish();
-        let head = &out[..out.len() - 3]; // без финального сброса и FF
-        // Сверка с дампом scales_io.trace старого ПО: \x1bt\x11 \x1bc0\x01
-        // \x1b{\x01 \x1bL \x1bT\x02 \x1bW\0\0\0\0\xC0\x01\xE8\0 \x18 \x1b3\0
-        // \x1b \0 — все команды page mode через ESC (\33 в восьмеричном
-        // repr дампа), не через FS.
+        let head = &out[..out.len() - 3]; 
         assert_eq!(
             &head[..28],
             &[
@@ -403,82 +284,63 @@ mod tests {
             ][..]
         );
     }
-
     #[test]
     fn cp866_matches_dump_text() {
-        // «ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ» — байты из живого дампа (write(13)).
         let bytes = to_cp866("ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ").unwrap();
         assert_eq!(
             bytes,
             b"\x82\x88\x8d\x8e\x83\x90\x80\x84 \x8a\x88\x98\x8c\x88\x98 \x97\x85\x90\x8d\x9b\x89 \x8a\x83"
         );
     }
-
     #[test]
     fn barcode_matches_dump() {
         let mut job = LabelJob::begin((448, 232));
         job.barcode_ean13(0, 0, "210213601350").unwrap();
         let out = job.finish();
-        // Дамп: перед GS k идут GS h 48 (высота) и GS H 2 (HRI снизу).
         let probe = window(
             &out,
             &[GS, b'h', 0x30, GS, b'H', 0x02, GS, b'k', 0x02, b'2', b'1', b'0', b'2', b'1', b'3', b'6', b'0', b'1', b'3', b'5', b'0', 0x00],
         );
         assert!(probe.is_some());
     }
-
     #[test]
     fn barcode_rejects_bad_input() {
         let mut job = LabelJob::begin((448, 232));
         assert!(job.barcode_ean13(0, 0, "123").is_err());
         assert!(job.barcode_ean13(0, 0, "21021360135a").is_err());
     }
-
     #[test]
     fn cp866_unknown_char_becomes_question() {
-        // Печать не должна блокироваться экзотикой из центра: украинская
-        // «Ї» и эмодзи → '?', покрываемые таблицей символы не искажаются
-        // (ж→0xA6, а→0xA0, к→0xAA, г→0xA3).
         let bytes = to_cp866("Їжак 😀кг").unwrap();
         assert_eq!(bytes, b"?\xA6\xA0\xAA ?\xAA\xA3");
     }
-
     #[test]
     fn recover_frame_is_dle_enq() {
         assert_eq!(build_recover(1), [0x10, 0x05, 1]);
     }
-
     #[test]
     fn label_tray_bits_match_live_printer() {
-        // Эмпирика 2026-10-16: 0x7E — лоток пуст (покой), 0x1E — этикетка
-        // в выходе, 0x72 — авария (bit2 снят).
         assert!(!label_in_tray(0x7E));
         assert!(label_in_tray(0x1E));
         assert!(!label_in_tray(0x72));
     }
-
     #[test]
     fn l4_validity_filters_stray_bytes() {
         for ok in [0x7Eu8, 0x1E, 0x72] {
             assert!(is_valid_l4(ok), "{ok:#04x}");
         }
-        // 0x03 — ответ GS r 1; 0x00/0xFF — тишина/шум; 0x10, 0x0F — кадр ASB.
         for bad in [0x00u8, 0xFF, 0x03, 0x10, 0x0F] {
             assert!(!is_valid_l4(bad), "{bad:#04x}");
         }
     }
-
     #[test]
     fn l4_fault_only_on_bit2() {
         assert!(!l4_fault(0x7E));
         assert!(!l4_fault(0x1E));
         assert!(l4_fault(0x72));
     }
-
     #[test]
     fn decode_matches_hprt_manual() {
-        // Наблюдённые на стенде 19.10 (HPRT PT561, fw 1.03.17):
-        // норма: 0x00/0x12/0x12/0x1E (рулон near-end, этикетка в лотке).
         assert_eq!(decode_l1(0x00), "онлайн");
         assert_eq!(decode_l1(0x08), "offline");
         assert_eq!(decode_l2(0x12), "норма");
@@ -493,17 +355,14 @@ mod tests {
         assert!(d.contains("бумаги нет"), "{d}");
         assert!(d.contains("лоток пуст"), "{d}");
     }
-
     #[test]
     fn printer_info_frame_is_gs_i() {
         assert_eq!(build_printer_info(65), [0x1D, b'I', 65]);
     }
-
     #[test]
     fn init_frame_is_esc_at() {
         assert_eq!(build_init(), [0x1B, 0x40]);
     }
-
     fn window<'a>(hay: &'a [u8], needle: &[u8]) -> Option<&'a [u8]> {
         hay.windows(needle.len()).find(|w| *w == needle)
     }
