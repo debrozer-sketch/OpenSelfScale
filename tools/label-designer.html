@@ -132,9 +132,11 @@ function toast(message){document.querySelector('.toast')?.remove();const t=el('d
 function showErrors(errors,title='Ошибки валидации'){const body=el('div');body.append(el('p',null,'Проверьте раскладку перед сохранением.'));const ul=el('ul');errors.forEach(msg=>ul.append(el('li',null,msg)));body.append(ul);modal(title,body,[{text:'Понятно',primary:true}])}
 function newDialog(){
   const body=el('div'),p=el('p',null,'Выберите размер этикетки в миллиметрах. Текущая раскладка останется в истории отмены только до открытия другой.');body.append(p);
+  const presets=el('div','form-row'),mk=(label,w,h)=>{const b=el('button',null,label);b.onclick=()=>{wInput.value=w;hInput.value=h};presets.append(b)};
+  mk('Узкая 58×20',58,20);mk('Средняя 58×30',58,30);mk('Квадрат 40×40',40,40);mk('Длинная 58×40',58,40);
   const row=el('div','form-row'),make=(label,value)=>{const wrap=el('label',null,label),input=el('input');input.type='number';input.step='0.5';input.value=value;wrap.append(input);row.append(wrap);return input};
-  const w=make('Ширина · 20–80',58),h=make('Высота · 20–200',40),err=el('div','error');body.append(row,err);
-  modal('Новая раскладка',body,[{text:'Отмена'},{text:'Создать',primary:true,action:()=>{const a=+w.value,b=+h.value;if(!(a>=20&&a<=80&&b>=20&&b<=200&&isHalf(a)&&isHalf(b))){err.textContent='Укажите размер в допустимых пределах с шагом 0,5 мм';return false}newLayout(a,b)}}]);
+  const wInput=make('Ширина · 20–80',58),hInput=make('Высота · 20–200',40),err=el('div','error');body.append(presets,row,err);
+  modal('Новая раскладка',body,[{text:'Отмена'},{text:'Создать',primary:true,action:()=>{const a=+wInput.value,b=+hInput.value;if(!(a>=20&&a<=80&&b>=20&&b<=200&&isHalf(a)&&isHalf(b))){err.textContent='Укажите размер в допустимых пределах с шагом 0,5 мм';return false}newLayout(a,b)}}]);
 }
 function parseLayout(data){
   if(!data||typeof data!=='object'||Array.isArray(data)||!Array.isArray(data.fields))throw Error('нет массива fields');
@@ -153,7 +155,7 @@ function parseLayout(data){
   return{format:data.format,name:data.name==null?'':String(data.name),width_mm:numeric(data.width_mm,'Ширина'),height_mm:numeric(data.height_mm,'Высота'),fields};
 }
 function loadLayout(data){const layout=parseLayout(data);S.layout=layout;S.sel=-1;S.autoName=layout.name===layout.width_mm+'x'+layout.height_mm;S.history=[];$('emptyScreen').hidden=true;renderAll();saveDraft();const errors=validate();if(errors.length)showErrors(errors,'Файл открыт с ошибками');else toast('Раскладка открыта')}
-function exportObject(){const L=S.layout;return{format:1,name:L.name,width_mm:L.width_mm,height_mm:L.height_mm,fields:L.fields.map(f=>{const out={kind:f.kind};if(f.kind==='text')out.text=f.text;out.x=f.x;out.y=f.y;out.font=f.font;out.size=f.size;if(f.w!==undefined)out.w=f.w;if(f.h!==undefined)out.h=f.h;return out})}}
+function exportObject(){const L=S.layout;return{format:1,name:L.name,width_mm:L.width_mm,height_mm:L.height_mm,fields:L.fields.map(f=>{const out={kind:f.kind};if(f.kind==='text')out.text=f.text;out.x=f.x;out.y=f.y;out.font=f.font;out.size=f.size;return out})}}
 function jsonText(){const errors=validate();if(errors.length){showErrors(errors);return null}return JSON.stringify(exportObject(),null,2)}
 function download(name=S.layout.name){const text=jsonText();if(!text)return;const output=exportObject();output.name=name;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(output,null,2)],{type:'application/json'}));a.download='label-'+name.replace(/[\\/:*?"<>|\s]+/g,'_')+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function copyDialog(){const body=el('div');body.append(el('p',null,'Копия получит своё имя; текущая раскладка не изменится.'));const row=el('div','form-row'),label=el('label',null,'Имя копии'),input=el('input'),error=el('div','error');input.value=S.layout.name+'-copy';label.append(input);row.append(label);body.append(row,error);modal('Сохранить как копию',body,[{text:'Отмена'},{text:'Скачать копию',primary:true,action:()=>{const name=input.value.trim();if(!name){error.textContent='Введите имя копии';return false}download(name)}}]);input.select()}
