@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-usage() { echo "usage: scale-settime \"ДД.ММ.ГГГГ ЧЧ:ММ\" | scale-settime ntp-on|ntp-off" >&2; exit 1; }
+usage() { echo "usage: openscale-settime \"ДД.ММ.ГГГГ ЧЧ:ММ\" | openscale-settime ntp-on|ntp-off" >&2; exit 1; }
 if [ $
 arg="$1"
 if [ "$arg" = "ntp-on" ]; then
@@ -18,7 +18,7 @@ if [ "$arg" = "ntp-server" ]; then
         echo "ntp-server <host>" >&2; exit 1
     fi
     mkdir -p /etc/systemd/timesyncd.conf.d
-    printf '[Time]\nNTP=%s\n' "$server" > /etc/systemd/timesyncd.conf.d/scalefw.conf
+    printf '[Time]\nNTP=%s\n' "$server" > /etc/systemd/timesyncd.conf.d/openscale.conf
     systemctl restart systemd-timesyncd
     exit 0
 fi

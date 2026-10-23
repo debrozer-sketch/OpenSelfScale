@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Применение сетевых настроек главного адреса весов.
-Вызывается киоском через sudo (см. /etc/sudoers.d/scale-kiosk):
-  scale-net-apply <IP> <PREFIX> <GATEWAY> <DNS>   — ручной (статический)
-  scale-net-apply dhcp                            — DHCP (dhcpcd)
-  scale-net-apply rollback                        — вернуть состояние до применения
+Вызывается киоском через sudo (см. /etc/sudoers.d/openscale-kiosk):
+  openscale-net-apply <IP> <PREFIX> <GATEWAY> <DNS>   — ручной (статический)
+  openscale-net-apply dhcp                            — DHCP (dhcpcd)
+  openscale-net-apply rollback                        — вернуть состояние до применения
 Применяет настройки живо (адрес, default route, resolv.conf) и перезаписывает
 /etc/network/interfaces для сохранности после перезагрузки.
 Откат: перед изменением состояние сохраняется в /run (скрипт восстановления
@@ -11,7 +11,7 @@
 пингом; недоступен (неверный шлюз, неверная маска) — настройки возвращаются
 и применение завершается ошибкой. Не ловится опечатка в IP внутри правильной
 подсети: шлюз продолжает отвечать, но оператор у экрана может применить
-настройки заново, а прежнее состояние вернуть `scale-net-apply rollback`.
+настройки заново, а прежнее состояние вернуть `openscale-net-apply rollback`.
 """
 import ipaddress
 import pathlib
@@ -132,7 +132,7 @@ def main() -> None:
         print("ok")
         return
     if len(sys.argv) != 5:
-        fail("использование: scale-net-apply <IP> <PREFIX> <GATEWAY> <DNS> | dhcp | rollback")
+        fail("использование: openscale-net-apply <IP> <PREFIX> <GATEWAY> <DNS> | dhcp | rollback")
     ip_s, pre_s, gw_s, dns_s = sys.argv[1:5]
     ip = parse_addr(ip_s, "IP")
     try:

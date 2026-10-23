@@ -68,8 +68,8 @@
 - [ ] Удалённое восстановление, уровни 0–2 (см. docs/RECOVERY.md):
       deploy по SSH / kexec-reinstall / PXE-самолечение при мёртвой ОС
 - [ ] Золотой образ: clonezilla/dd + раскатка по парку по SSH
-- [x] systemd-юниты (scale-kiosk, x11vnc), ротация логов
-      (/etc/logrotate.d/scalefw), NTP — по месту
+- [x] systemd-юниты (openscale-kiosk, x11vnc), ротация логов
+      (/etc/logrotate.d/openscale), NTP — по месту
 
 ## 4. Приёмка
 - [ ] Прогон полного цикла на тестовой весы: синк → выбор товара → печать

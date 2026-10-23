@@ -1,12 +1,12 @@
 [package]
-name = "kiosk"
+name = "openscale"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Бинарник киоска весов: UI, весовой поток, печать, диагностика"
 
 [[bin]]
-name = "kiosk"
+name = "openscale"
 path = "src/main.rs"
 
 [dependencies]

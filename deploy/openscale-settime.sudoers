@@ -1,0 +1,3 @@
+# Единственная root-команда пользователя сервиса openscale-kiosk:
+# установка времени и переключение NTP из мастера настройки.
+@KIOSK_USER@ ALL=(root) NOPASSWD: /usr/local/bin/openscale-settime

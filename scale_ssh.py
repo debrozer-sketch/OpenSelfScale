@@ -7,7 +7,7 @@
 Логин/пароль читаются из .env рядом со скриптом и никогда не печатаются.
 
 Jump-хост (если весы не видны напрямую): SCALE_JUMP в .env. Авторизация
-на jump — ключом SCALE_JUMP_KEY (по умолчанию ~/.ssh/scalefw_bastion),
+на jump — ключом SCALE_JUMP_KEY (по умолчанию ~/.ssh/openscale_bastion),
 иначе паролем SCALE_JUMP_PASSWORD, иначе SCALE_PASSWORD. Переменные
 окружения SCALE_* перекрывают значения из .env.
 
@@ -76,7 +76,7 @@ def _connect_jump(cfg: dict) -> paramiko.SSHClient:
         look_for_keys=False,
     )
     key_path = cfg.get("SCALE_JUMP_KEY") or str(
-        Path.home() / ".ssh" / "scalefw_bastion"
+        Path.home() / ".ssh" / "openscale_bastion"
     )
     if Path(key_path).exists():
         kwargs["pkey"] = paramiko.Ed25519Key.from_private_key_file(key_path)

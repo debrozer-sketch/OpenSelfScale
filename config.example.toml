@@ -1,5 +1,5 @@
-# Пример config.toml устройства ScaleFW.
-# Путь по умолчанию: /etc/scalefw/config.toml.
+# Пример config.toml устройства OpenScale.
+# Путь по умолчанию: /etc/openscale/config.toml.
 # Все поля необязательны: пропуск = значение по умолчанию (эталонная весы).
 
 # Ключи БЕЗ секции — только до первого [заголовка], иначе TOML отнесёт их
@@ -7,7 +7,7 @@
 # Приём данных и хранилище:
 incoming_dir = "/var/ftp/scale"
 db_path = "/home/scales/plu.db"
-log_file = "/var/log/scalefw/kiosk.log"
+log_file = "/var/log/openscale/kiosk.log"
 
 [scales]
 kind = "shtrih-slim"        # имя драйвера из фабрики (crates/)
@@ -37,15 +37,15 @@ baud = 19200
 # привозит картинки <PLU>.jpg. Киоск следит за каталогом, после обработки
 # каталог остаётся пустым, XML архивируются в history_dir.
 # Дата и время: NTP по умолчанию; выключенному NTP соответствует
-# ручной ввод в мастере настройки (через sudo-хелпер scale-settime).
+# ручной ввод в мастере настройки (через sudo-хелпер openscale-settime).
 #[time]
 #ntp = true
 # Свой NTP-сервер для сети магазина без интернета; пусто - debian pool.
 #server = 
 #[center]
 #protocol = "drop"            # приём из incoming_dir по флагу ready.flg
-#img_local_dir = "/etc/scalefw/img"
-#history_dir = "/var/lib/scalefw/history"
+#img_local_dir = "/etc/openscale/img"
+#history_dir = "/var/lib/openscale/history"
 
 # Внешний протокол: свой файл поставщика + конвертер в канонический JSON.
 # Контракт формата — docs/CANONICAL.md; ERP менять не нужно (protocol="drop").

@@ -1,17 +1,17 @@
 [Unit]
-Description=ScaleFW kiosk on physical display (Xorg tty1)
+Description=OpenScale kiosk on physical display (Xorg tty1)
 After=systemd-user-sessions.service
 Conflicts=getty@tty1.service
 
 [Service]
 User=@KIOSK_USER@
 PAMName=login
-RuntimeDirectory=scale-kiosk
+RuntimeDirectory=openscale-kiosk
 StandardInput=tty
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
-ExecStart=/usr/local/bin/scale-kiosk-start.sh
+ExecStart=/usr/local/bin/openscale-kiosk-start.sh
 Restart=always
 RestartSec=3
 

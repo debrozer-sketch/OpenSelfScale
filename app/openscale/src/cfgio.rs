@@ -94,7 +94,7 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("каталог {}: {e}", dir.display()))?;
     let stamp = crate::print::now_stamp().0.replace('.', "");
     let stamp = format!("{stamp}-{}", crate::print::now_stamp().1.replace(':', ""));
-    let path = dir.join(format!("scalefw-cfg-{stamp}.toml"));
+    let path = dir.join(format!("openscale-cfg-{stamp}.toml"));
     let body = toml::to_string_pretty(&file).map_err(|e| format!("сериализация: {e}"))?;
     std::fs::write(&path, body).map_err(|e| format!("запись {}: {e}", path.display()))?;
     Ok(path)
@@ -313,7 +313,7 @@ mod tests {
     }
     #[test]
     fn export_does_not_leak_device_state() {
-        let dir = std::env::temp_dir().join(format!("scalefw-cfgio-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("openscale-cfgio-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut cfg = Config::default();

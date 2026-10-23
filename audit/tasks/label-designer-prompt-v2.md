@@ -1,4 +1,4 @@
-# Задача: конструктор этикеток ScaleFW — версия 2 (улучшение UX)
+# Задача: конструктор этикеток OpenScale — версия 2 (улучшение UX)
 
 ## Роль
 Ты — фронтенд-разработчик с сильным чувством UX. Работа чисто клиентская: один офлайн HTML-файл, без сборки, без сервера.
@@ -67,7 +67,7 @@
 ```html<!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Конструктор этикеток ScaleFW</title>
+<title>Конструктор этикеток OpenScale</title>
 <style>
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;font:14px system-ui,Segoe UI,Arial,sans-serif;color:#222;background:#e9ecef}
@@ -145,7 +145,7 @@ const KINDS=['name','plu','barcode','weight','price','sum','date','time','shelfl
 const REQUIRED=['name','weight','sum','barcode'];
 const SAMPLE={name:'ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ',plu:'PLU 2502192',barcode:'210213601350',weight:'1,350 кг',
   price:'199,99 ₽/кг',sum:'269,99 ₽',date:'19.10.26',time:'18:40:00',shelflife:'Годен до 20.09.2026',cardprice:'Со скидкой: 249,99 ₽'};
-const KEY='scalefw.labeldesigner.draft';
+const KEY='openscale.labeldesigner.draft';
 const $=id=>document.getElementById(id);
 const el=(tag,cls,txt)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e};
 

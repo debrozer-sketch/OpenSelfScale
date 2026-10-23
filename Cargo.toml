@@ -5,7 +5,7 @@ members = [
     "crates/shtrih-m",
     "crates/escpos",
     "crates/datastore",
-    "app/kiosk",
+    "app/openscale",
 ]
 
 [workspace.package]

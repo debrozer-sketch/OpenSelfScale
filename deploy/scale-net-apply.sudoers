@@ -1,1 +1,0 @@
-@KIOSK_USER@ ALL=(root) NOPASSWD: /usr/local/sbin/scale-net-apply

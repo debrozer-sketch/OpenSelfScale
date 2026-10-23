@@ -150,7 +150,7 @@ pub fn apply_dhcp() -> Result<(), String> {
 fn apply_helper(args: &[&str]) -> Result<(), String> {
     let out = Command::new("sudo")
         .arg("-n")
-        .arg("/usr/local/sbin/scale-net-apply")
+        .arg("/usr/local/sbin/openscale-net-apply")
         .args(args)
         .output()
         .map_err(|e| format!("sudo: {e}"))?;

@@ -84,12 +84,12 @@ unit-тестами, экранная обвязка — на стенде.
 ## 6. Дата/время (шаг 7)
 
 - Ручной ввод: клавиатурой `ДД.ММ.ГГГГ ЧЧ:ММ` → киоск вызывает
-  `/usr/local/bin/scale-settime "<значение>"`. Хелпер — root-скрипт с
+  `/usr/local/bin/openscale-settime "<значение>"`. Хелпер — root-скрипт с
   жёсткой валидацией (регэксп + диапазоны), внутри
   `timedatectl set-ntp false && timedatectl set-time ...`.
 - Sudoers: одна строка
-  `administrator ALL=(root) NOPASSWD: /usr/local/bin/scale-settime`.
-  Файлы `deploy/scale-settime` и `deploy/scale-settime.sudoers`,
+  `administrator ALL=(root) NOPASSWD: /usr/local/bin/openscale-settime`.
+  Файлы `deploy/openscale-settime` и `deploy/openscale-settime.sudoers`,
   установка описана в `deploy/README.md`. Других NOPASSWD нет.
 - NTP: переключатель «NTP: вкл/выкл» (дефолт — вкл) →
   `timedatectl set-ntp true/false`. Сервер времени — опциональная

@@ -17,7 +17,7 @@
 - Лог `SelfServiceScales.log` — 1.3 ГБ отладки (формат
   `%1[LEVEL][%3] %2`, dd.MM.yyyy hh:mm:ss.zzz) — чистится вручную
   (`sudo rm`, видно в .bash_history). Урок для нашего kiosk: ротация
-  логов обязательна (уже есть, /etc/logrotate.d/scalefw).
+  логов обязательна (уже есть, /etc/logrotate.d/openscale).
 
 ## 2. Классы и сигналы
 

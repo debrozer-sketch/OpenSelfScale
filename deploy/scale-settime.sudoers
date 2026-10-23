@@ -1,3 +1,0 @@
-# Единственная root-команда пользователя сервиса scale-kiosk:
-# установка времени и переключение NTP из мастера настройки.
-@KIOSK_USER@ ALL=(root) NOPASSWD: /usr/local/bin/scale-settime

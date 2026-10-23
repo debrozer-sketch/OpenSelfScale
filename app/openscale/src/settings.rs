@@ -1612,7 +1612,7 @@ fn wizard_step_ui(
             1,
             "Шаг 7 из 8.\n\nДата и время: введите вручную в формате\n\
              ДД.ММ.ГГГГ ЧЧ:ММ, либо переключите NTP кнопкой\n\
-             (сервер — [time] в /etc/scalefw/config.toml), затем «ДАЛЕЕ»."
+             (сервер — [time] в /etc/openscale/config.toml), затем «ДАЛЕЕ»."
                 .into(),
             "ВВЕСТИ ВРЕМЯ".into(),
             true,
@@ -1746,7 +1746,7 @@ fn spawn_settime(
         let (tx, rx) = std::sync::mpsc::channel::<Result<bool, String>>();
         std::thread::spawn(move || {
             let res = std::process::Command::new("sudo")
-                .arg("/usr/local/bin/scale-settime")
+                .arg("/usr/local/bin/openscale-settime")
                 .args(&args)
                 .stdin(std::process::Stdio::null())
                 .output();

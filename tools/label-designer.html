@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ScaleFW - конструктор этикеток</title>
+<title>OpenScale - конструктор этикеток</title>
 <style>
 :root{--ink:#172326;--muted:#657377;--line:#dce2df;--paper:#fff;--ground:#e9eeea;--accent:#157567;--accent-dark:#0b5b50;--soft:#e7f3ef;--danger:#bb4b3a}
 [hidden]{display:none!important}
@@ -35,7 +35,7 @@ const LABELS={name:'Название товара',plu:'Код PLU',barcode:'Ш�
 const ICONS={name:'Aa',plu:'#',barcode:'|||',weight:'кг',price:'₽',sum:'Σ',date:'01',time:':',shelflife:'→',cardprice:'₽',text:'T'};
 const REQUIRED=['name','weight','sum','barcode'];
 const SAMPLE={name:'ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ',plu:'PLU 2502192',barcode:'210213601350',weight:'1,350 кг',price:'199,99 ₽/кг',sum:'269,99 ₽',date:'19.10.26',time:'18:40:00',shelflife:'Годен до 20.09.2026',cardprice:'Со скидкой: 249,99 ₽'};
-const KEY='scalefw.labeldesigner.draft';
+const KEY='openscale.labeldesigner.draft';
 const $=id=>document.getElementById(id);
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
 const S={layout:null,sel:-1,zoom:'auto',autoName:true,history:[],interaction:null,reorder:null,editFocus:null};

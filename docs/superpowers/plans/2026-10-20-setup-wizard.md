@@ -18,7 +18,7 @@
 - UI-поток не блокируется: всё тяжёлое — фоновые потоки с ACK-таймаутами.
 - Существующие дедлайны калибровок (150/180 с) не менять.
 - Тесты: `cargo test --workspace --target x86_64-pc-windows-msvc`, все зелёные перед коммитом.
-- Сборка linux: `cargo zigbuild --release -p kiosk --bin kiosk --target x86_64-unknown-linux-gnu.2.41`.
+- Сборка linux: `cargo zigbuild --release -p openscale --bin kiosk --target x86_64-unknown-linux-gnu.2.41`.
 - Комментарии в коде — только для нетривиального (правила AGENTS.md).
 
 ## Review Focus
@@ -26,7 +26,7 @@
 - Пустой `admin_user` при старте → мастер открывается без PIN. Проверка: unit-тест `user_exists` (Task 1) + стенд (Task 6).
 - Двойной ввод PIN с несовпадением → ошибка, шаг не двигается. Тест в Task 2 (повтор ввода — логика обработчика, стенд).
 - Мусорная длина калибровки <15 мм → не сохраняется (уже реализовано, тест регрессии не нужен — покрыто логикой обработчика, стенд).
-- Впрыск аргумента в `scale-settime` → регэксп+диапазоны в хелпере, ручная проверка на стенде (Task 4).
+- Впрыск аргумента в `openscale-settime` → регэксп+диапазоны в хелпере, ручная проверка на стенде (Task 4).
 - Сбой питания между шагами → мастер продолжается с `setup_stage`; запись stage ДО выполнения шага. Тест в Task 2.
 
 ---
@@ -74,7 +74,7 @@
   - `pub fn all_green(mask: u32) -> bool` — mask == 0b1111.
 
 - [ ] **Step 1:** Тесты: advance последовательность 1→8; Back из 1 → 1; SkipCashier со 2 → 3, с другого — без изменения; evaluate всех комбинаций (5 кейсов: 0, по одному биту, все); all_green только на 0b1111; stage() на битом значении → 1; roundtrip set/ wizard_done/entered.
-- [ ] **Step 2:** `cargo test -p kiosk --target x86_64-pc-windows-msvc` → FAIL.
+- [ ] **Step 2:** `cargo test -p openscale --target x86_64-pc-windows-msvc` → FAIL.
 - [ ] **Step 3:** Реализовать (тупые обёртки get_setting — parse/запись строкой "0"/"1").
 - [ ] **Step 4:** PASS. Коммит `setup: чистая логика мастера и чек-листа`.
 
@@ -91,18 +91,18 @@
 ### Task 4: Дата/время — хелпер, sudoers, конфиг
 
 **Files:**
-- Create: `deploy/scale-settime` (bash, root)
-- Create: `deploy/scale-settime.sudoers`
+- Create: `deploy/openscale-settime` (bash, root)
+- Create: `deploy/openscale-settime.sudoers`
 - Modify: `deploy/README.md` (раздел установки: файлы + строка sudoers)
-- Modify: `deploy/scale.config.toml` (секция `[time]` с комментариями)
+- Modify: `deploy/openscale.config.toml` (секция `[time]` с комментариями)
 - Modify: `app/kiosk/src/config.rs` (struct + default: `time_ntp: bool = true`, `time_server: String = ""`)
 
-**Interfaces:** Produces (для Task 6): киоск вызывает `std::process::Command::new("/usr/local/bin/scale-settime").arg("<ДД.ММ.ГГГГ ЧЧ:ММ>")` c ожиданием ≤5 с (stdin/stdout — null).
+**Interfaces:** Produces (для Task 6): киоск вызывает `std::process::Command::new("/usr/local/bin/openscale-settime").arg("<ДД.ММ.ГГГГ ЧЧ:ММ>")` c ожиданием ≤5 с (stdin/stdout — null).
 
-- [ ] **Step 1:** `scale-settime`: аргумент строго `^[0-9]{2}\.[0-9]{2}\.[0-9]{4} [0-9]{2}:[0-9]{2}$` (регэекс + диапазоны дд 01-31/мм 01-12/ч 00-23/м 00-59), `date -d` валидация реальности даты, затем `timedatectl set-ntp false && timedatectl set-time "YYYY-MM-DD HH:MM:00"`. Иной ввод → exit 1, ничего не менять.
-- [ ] **Step 2:** `scale-settime.sudoers`: `administrator ALL=(root) NOPASSWD: /usr/local/bin/scale-settime`.
-- [ ] **Step 3:** config.rs: поля `time_ntp`/`time_server` + парсинг `[time]`; scale.config.toml — секция с комментарием «NTP-сервер своей сети; пусто — debian pool».
-- [ ] **Step 4:** cargo test (config парсинг) + ручная проверка хелпера на стенде в Task 6. Коммит `deploy: хелпер времени scale-settime + sudoers + [time] в конфиге`.
+- [ ] **Step 1:** `openscale-settime`: аргумент строго `^[0-9]{2}\.[0-9]{2}\.[0-9]{4} [0-9]{2}:[0-9]{2}$` (регэекс + диапазоны дд 01-31/мм 01-12/ч 00-23/м 00-59), `date -d` валидация реальности даты, затем `timedatectl set-ntp false && timedatectl set-time "YYYY-MM-DD HH:MM:00"`. Иной ввод → exit 1, ничего не менять.
+- [ ] **Step 2:** `openscale-settime.sudoers`: `administrator ALL=(root) NOPASSWD: /usr/local/bin/openscale-settime`.
+- [ ] **Step 3:** config.rs: поля `time_ntp`/`time_server` + парсинг `[time]`; openscale.config.toml — секция с комментарием «NTP-сервер своей сети; пусто — debian pool».
+- [ ] **Step 4:** cargo test (config парсинг) + ручная проверка хелпера на стенде в Task 6. Коммит `deploy: хелпер времени openscale-settime + sudoers + [time] в конфиге`.
 
 ### Task 5: Экран 19 — каркас и чек-лист
 
@@ -161,7 +161,7 @@
 - Modify: `deploy/README.md` — сверка раздела установки (sudoers/хелпер)
 - Modify: `audit/PROTOCOL.md` — пункт «состояния setup».
 
-- [ ] **Step 1:** Зафиксировать результаты стенда, собрать архив `audit/src-bundle/scalefw-audit.zip`. Коммит `docs: стенд-результаты мастера настройки`.
+- [ ] **Step 1:** Зафиксировать результаты стенда, собрать архив `audit/src-bundle/openscale-audit.zip`. Коммит `docs: стенд-результаты мастера настройки`.
 
 ## Self-review
 

@@ -1,11 +1,11 @@
 # Конфигурация киоска весов (эталон для Штрих-М Слим)
-# Разворачивается в /etc/scalefw/config.toml
+# Разворачивается в /etc/openscale/config.toml
 # Ключи БЕЗ секции — только до первого [заголовка], иначе TOML отнесёт их
 # к предыдущей таблице и киоск молча возьмёт дефолт.
 
 incoming_dir = "/var/ftp/scale"
 db_path = "/home/scales/plu.db"
-log_file = "/var/log/scalefw/kiosk.log"
+log_file = "/var/log/openscale/kiosk.log"
 
 [scales]
 kind = "shtrih-slim"
@@ -22,11 +22,11 @@ baud = 19200
 # /var/ftp), lftp-зеркало привозит картинки. Киоск следит за каталогом.
 #[center]
 #protocol = "drop"            # приём из incoming_dir по флагу ready.flg
-#img_local_dir = "/etc/scalefw/img"
-#history_dir = "/var/lib/scalefw/history"
+#img_local_dir = "/etc/openscale/img"
+#history_dir = "/var/lib/openscale/history"
 
 # Дата и время: NTP по умолчанию; выключенному NTP соответствует
-# ручной ввод в мастере настройки (через sudo-хелпер scale-settime).
+# ручной ввод в мастере настройки (через sudo-хелпер openscale-settime).
 #[time]
 #ntp = true
 # Свой NTP-сервер для сети магазина без интернета; пусто - debian pool.

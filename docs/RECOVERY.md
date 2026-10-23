@@ -8,12 +8,12 @@
 Штатный случай: ОС грузится, приложение сломано или нужна новая версия.
 
 - По SSH (или через SFTP-скрипт `deploy/push.py`) заливается бинарник
-  киоска, сервис `scale-kiosk` перезапускается, идёт self-test
+  киоска, сервис `openscale-kiosk` перезапускается, идёт self-test
   (`kiosk --diag`).
 - Откат: предыдущий бинарник хранится на центральной машине (или в git —
   сборка воспроизводится из коммита), заливается обратно той же командой.
 - Средство: `python deploy/push.py <binary>` + `python scale_ssh.py --sudo
-  "install -m755 ... && systemctl restart scale-kiosk"` (см. STATUS.md).
+  "install -m755 ... && systemctl restart openscale-kiosk"` (см. STATUS.md).
 
 ## Уровень 1. Переустановка ОС по SSH (система грузится, но убита)
 

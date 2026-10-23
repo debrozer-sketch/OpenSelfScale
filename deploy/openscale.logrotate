@@ -1,6 +1,6 @@
 # Ротация журнала киоска: без неё ночи без весов/принтера раздувают файл.
-# Ставится на весы: install -m 644 scalefw.logrotate /etc/logrotate.d/scalefw
-/var/log/scalefw/kiosk.log {
+# Ставится на весы: install -m 644 openscale.logrotate /etc/logrotate.d/openscale
+/var/log/openscale/kiosk.log {
     daily
     rotate 14
     compress

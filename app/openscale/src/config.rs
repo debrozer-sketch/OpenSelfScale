@@ -17,7 +17,7 @@ impl Default for UiProfile {
             screen_width: 1024,
             screen_height: 768,
             fullscreen: false,
-            img_dir: PathBuf::from("/etc/scalefw/img"),
+            img_dir: PathBuf::from("/etc/openscale/img"),
             max_cols: 5,
         }
     }
@@ -51,8 +51,8 @@ impl Default for CenterProfile {
             plu_path: String::new(),
             layout_path: String::new(),
             img_dir: String::new(),
-            img_local_dir: PathBuf::from("/etc/scalefw/img"),
-            history_dir: PathBuf::from("/var/lib/scalefw/history"),
+            img_local_dir: PathBuf::from("/etc/openscale/img"),
+            history_dir: PathBuf::from("/var/lib/openscale/history"),
             interval_secs: 1800,
             timeout_secs: 30,
             external_cmd: String::new(),
@@ -170,7 +170,7 @@ impl Default for Config {
             time: TimeProfile::default(),
             incoming_dir: PathBuf::from("/var/ftp/scale"),
             db_path: PathBuf::from("/home/scales/plu.db"),
-            log_file: PathBuf::from("/var/log/scalefw/kiosk.log"),
+            log_file: PathBuf::from("/var/log/openscale/kiosk.log"),
             warnings: Vec::new(),
         }
     }
@@ -298,7 +298,7 @@ kind = "escpos"
 port = "COM8"
 baud = 115200
 "#;
-        let dir = std::env::temp_dir().join("scalefw-cfg-test");
+        let dir = std::env::temp_dir().join("openscale-cfg-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
         std::fs::write(&path, toml_text).unwrap();
@@ -332,7 +332,7 @@ baud = 115200
         c.time = crate::config::TimeProfile { ntp: true, server: String::new() };
         assert!(c.time.ntp);
         // Разбор секции из текста.
-        let dir = std::env::temp_dir().join(format!("scalefw-time-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("openscale-time-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");

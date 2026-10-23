@@ -58,7 +58,7 @@ fn main() {
             log::error!("  место: {}:{}:{}", loc.file(), loc.line(), loc.column());
         }
     }));
-    log::info!("ScaleFW старт: cfg={:?}", cfg.summary());
+    log::info!("OpenScale старт: cfg={:?}", cfg.summary());
     for w in &cfg.warnings {
         log::warn!("конфиг: {w}");
     }
@@ -109,7 +109,7 @@ fn main() {
             match res {
                 Ok(report) => {
                     println!("{report}");
-                    println!("для показа на весах перезапустите: systemctl restart scale-kiosk");
+                    println!("для показа на весах перезапустите: systemctl restart openscale-kiosk");
                 }
                 Err(e) => {
                     eprintln!("синхронизация: {e}");

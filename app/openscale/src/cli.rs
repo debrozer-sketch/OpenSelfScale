@@ -34,7 +34,7 @@ fn opt_arg<I: Iterator<Item = String>>(args: &mut std::iter::Peekable<I>) -> Opt
 }
 pub fn parse_cli() -> Cli {
     let mut cli =
-        Cli { mode: Mode::Kiosk, config_path: PathBuf::from("/etc/scalefw/config.toml") };
+        Cli { mode: Mode::Kiosk, config_path: PathBuf::from("/etc/openscale/config.toml") };
     let mut args = std::env::args().skip(1).peekable();
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -91,14 +91,14 @@ pub fn parse_cli() -> Cli {
             }
             "--label-probe" => cli.mode = Mode::LabelProbe,
             "--version" => {
-                println!("ScaleFW kiosk {}", env!("CARGO_PKG_VERSION"));
+                println!("OpenScale kiosk {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             "--config" => {
                 cli.config_path = PathBuf::from(req_arg(&mut args, "--config"));
             }
             _ => {
-                eprintln!("ScaleFW kiosk. Использование:");
+                eprintln!("OpenScale kiosk. Использование:");
                 eprintln!(
                     "  kiosk [--config <файл>] [--diag | --weight | --calibrate | --import <plu.xml> | --version]"
                 );

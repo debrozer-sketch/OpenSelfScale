@@ -68,7 +68,7 @@ Debian-машине или python-скрипт). Перед переустано
 
 ## VNC-порт (5900)
 
-`scale-vnc.service` слушает 5900 без `-localhost`: экран киоска нужен
+`openscale-vnc.service` слушает 5900 без `-localhost`: экран киоска нужен
 удалённо (торговый зал без монитора за стеклом). Порт не наружу —
 только внутри доверенного сегмента 172.18.x.x за jump-хостом. Держать
 порт открытым наружу или в сегменте с посторонними машинами нельзя;
@@ -79,12 +79,12 @@ Debian-машине или python-скрипт). Перед переустано
 Киоск задаёт время через единственный root-хелпер. Установка на весах:
 
 `
-install -m 755 deploy/scale-settime /usr/local/bin/scale-settime
-install -m 440 deploy/scale-settime.sudoers /etc/sudoers.d/scale-settime
+install -m 755 deploy/openscale-settime /usr/local/bin/openscale-settime
+install -m 440 deploy/openscale-settime.sudoers /etc/sudoers.d/openscale-settime
 `
 
-Режимы: scale-settime "ДД.ММ.ГГГГ ЧЧ:ММ" (ручная установка),
-scale-settime ntp-on|ntp-off (вкл/выкл systemd-timesyncd). Аргумент
+Режимы: openscale-settime "ДД.ММ.ГГГГ ЧЧ:ММ" (ручная установка),
+openscale-settime ntp-on|ntp-off (вкл/выкл systemd-timesyncd). Аргумент
 валидуется скриптом (скелет + диапазоны + реальность даты через GNU date),
 ввод извне в shell не попадает. NTP-сервер своей сети — [time] server
-в /etc/scalefw/config.toml.
+в /etc/openscale/config.toml.

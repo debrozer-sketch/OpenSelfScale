@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
-CONF=/etc/scalefw/imgsync.conf
-LOCK=/run/scale-imgsync.lock
+CONF=/etc/openscale/imgsync.conf
+LOCK=/run/openscale-imgsync.lock
 [ -r "$CONF" ] || { echo "imgsync: нет $CONF" >&2; exit 1; }
 . "$CONF"
 : "${host:?}" "${user:?}" "${password:?}" "${remote_path:?}" "${local_dir:?}"
@@ -11,5 +11,5 @@ flock -n 9 || exit 0
 lftp -u "$user","$password" "$host" \
     -e "set net:timeout 30; set net:max-retries 2; \
         mirror --only-newer --no-perms $remote_path $local_dir; bye" \
-    2>&1 | logger -t scale-imgsync
+    2>&1 | logger -t openscale-imgsync
 exit ${PIPESTATUS[0]}

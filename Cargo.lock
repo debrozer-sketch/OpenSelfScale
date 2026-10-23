@@ -2183,28 +2183,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
-name = "kiosk"
-version = "0.1.0"
-dependencies = [
- "datastore",
- "drivers-api",
- "escpos",
- "libc",
- "log",
- "rusqlite",
- "serde",
- "serde_json",
- "serialport",
- "shtrih-m",
- "simplelog",
- "slint",
- "slint-build",
- "suppaftp",
- "thiserror 2.0.21",
- "toml",
-]
-
-[[package]]
 name = "kurbo"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2904,6 +2882,28 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 dependencies = [
  "critical-section",
  "portable-atomic",
+]
+
+[[package]]
+name = "openscale"
+version = "0.1.0"
+dependencies = [
+ "datastore",
+ "drivers-api",
+ "escpos",
+ "libc",
+ "log",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serialport",
+ "shtrih-m",
+ "simplelog",
+ "slint",
+ "slint-build",
+ "suppaftp",
+ "thiserror 2.0.21",
+ "toml",
 ]
 
 [[package]]

@@ -65,7 +65,7 @@ fn run_external(cmd: &str, input: &Path) -> Result<String, String> {
     }
     let dir = input.parent().unwrap_or_else(|| Path::new("."));
     let out_path = dir.join(format!(
-        "scalefw-canonical-{}-{}.json",
+        "openscale-canonical-{}-{}.json",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -411,5 +411,5 @@ ERROR_BAD_CHANNEL(_NUMBER), ERROR_NOT_REPLY_FROM_CP.
 - Кассиру доступно: протяжка этикетки, перезагрузка. Остальное — админ.
 - Чек-лист (после мастера): товары, раскладка, принтер, весы; всё зелёное
   → «Ввести в эксплуатацию». Список остаётся в «Оборудовании».
-- Дата/время: sudo-хелпер `/usr/local/bin/scale-settime` (единственный
-  NOPASSWD: см. deploy/scale-settime.sudoers), дедлайн ответа 5 с.
+- Дата/время: sudo-хелпер `/usr/local/bin/openscale-settime` (единственный
+  NOPASSWD: см. deploy/openscale-settime.sudoers), дедлайн ответа 5 с.

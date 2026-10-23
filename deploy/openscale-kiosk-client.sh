@@ -11,7 +11,7 @@ while [ "$i" -lt 50 ]; do
     sleep 0.5
 done
 if [ "$i" -ge 50 ]; then
-    echo "scale-kiosk-client: fb 2048x768 не поднялся, работаем на 1024x768" >&2
+    echo "openscale-kiosk-client: fb 2048x768 не поднялся, работаем на 1024x768" >&2
 fi
 xinput list --name-only | grep -a "CoolTouch" | while IFS= read -r D; do
     case "$D" in
@@ -22,12 +22,12 @@ done
 fails=0
 while true; do
     t0=$(date +%s)
-    /usr/local/bin/kiosk
+    /usr/local/bin/openscale
     dt=$(( $(date +%s) - t0 ))
     if [ "$dt" -lt 2 ]; then
         fails=$((fails + 1))
         if [ "$fails" -ge 5 ]; then
-            echo "scale-kiosk-client: kiosk падает при старте, перезапускаю X" >&2
+            echo "openscale-kiosk-client: kiosk падает при старте, перезапускаю X" >&2
             exit 1
         fi
     else
