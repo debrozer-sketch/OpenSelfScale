@@ -13,7 +13,7 @@
 <body>
 <div class="app">
   <header class="topbar">
-    <div class="brandline"><div class="logo">Scale<span>FW</span></div><div class="subtitle">Конструктор этикеток</div><div class="top-actions"><button id="newBtn" class="quiet">Новая</button><button id="openBtn">Открыть JSON</button><button id="copyBtn" title="Скопировать JSON раскладки (Ctrl+C)">Копировать</button><button id="pasteBtn" title="Вставить JSON раскладки (Ctrl+V)">Вставить</button><button id="copySaveBtn" title="Скачать под новым именем">Как копию</button><button id="saveBtn" class="primary">Скачать JSON</button></div></div>
+    <div class="brandline"><div class="logo">Open<span>Scale</span></div><div class="subtitle">Конструктор этикеток</div><div class="top-actions"><button id="newBtn" class="quiet">Новая</button><button id="openBtn">Открыть JSON</button><button id="copyBtn" title="Скопировать JSON раскладки (Ctrl+C)">Копировать</button><button id="pasteBtn" title="Вставить JSON раскладки (Ctrl+V)">Вставить</button><button id="copySaveBtn" title="Скачать под новым именем">Как копию</button><button id="saveBtn" class="primary">Скачать JSON</button></div></div>
     <div class="toolbar"><label class="control name">ИМЯ РАСКЛАДКИ<input id="layoutName" aria-label="Имя раскладки"></label><div class="size-group"><label class="control dimension">ШИРИНА, ММ<input id="layoutWidth" type="number" step="0.5" min="20" max="80"></label><span class="size-separator">×</span><label class="control dimension">ВЫСОТА, ММ<input id="layoutHeight" type="number" step="0.5" min="20" max="200"></label></div><label class="control zoom">МАСШТАБ<select id="zoom"><option value="auto">Авто</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label><span class="toolbar-note">203 dpi · шаг 0,5 мм</span></div>
   </header>
   <div class="workspace">
@@ -25,7 +25,7 @@
         <button id="deleteBtn" class="quiet" style="color:var(--danger);padding-left:0">Удалить поле</button>
       </div></div>
     </aside>
-    <main class="stage" id="stage"><div class="stage-top"><strong>ПРЕДПРОСМОТР</strong><span>Перетащите поле или его маркеры</span></div><div class="paper-wrap"><div class="ruler-label" id="paperLabel"></div><div id="canvas" class="canvas"></div></div><div id="coordTip" class="coord-tip" hidden></div><div id="emptyScreen" class="empty-screen" hidden><div class="empty-inner"><div class="empty-mark">Scale<span>FW</span></div><h1>Этикетка начинается здесь</h1><p>Создайте стандартную раскладку или откройте сохранённый JSON-файл.</p><div class="empty-actions"><button id="startBtn" class="primary">Новая раскладка 58 × 40</button><button id="emptyOpenBtn">Открыть JSON</button></div></div></div></main>
+    <main class="stage" id="stage"><div class="stage-top"><strong>ПРЕДПРОСМОТР</strong><span>Перетащите поле или его маркеры</span></div><div class="paper-wrap"><div class="ruler-label" id="paperLabel"></div><div id="canvas" class="canvas"></div></div><div id="coordTip" class="coord-tip" hidden></div><div id="emptyScreen" class="empty-screen" hidden><div class="empty-inner"><div class="empty-mark">Open<span>Scale</span></div><h1>Этикетка начинается здесь</h1><p>Создайте стандартную раскладку или откройте сохранённый JSON-файл.</p><div class="empty-actions"><button id="startBtn" class="primary">Новая раскладка 58 × 40</button><button id="emptyOpenBtn">Открыть JSON</button></div></div></div></main>
   </div>
 </div>
 <input id="fileInput" type="file" accept=".json,application/json" hidden><script>
