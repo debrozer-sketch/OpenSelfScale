@@ -4,7 +4,7 @@ After=systemd-user-sessions.service
 Conflicts=getty@tty1.service
 
 [Service]
-User=administrator
+User=@KIOSK_USER@
 PAMName=login
 RuntimeDirectory=scale-kiosk
 StandardInput=tty
