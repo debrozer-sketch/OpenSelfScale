@@ -166,23 +166,20 @@ component PluCard inherits Rectangle {
     border-radius: 12px;
     background: !root.active ? #EDEFF2 : ta.pressed ? #E4E8ED : #FFFFFF;
 
-    // Квадратная зона картинки: без названия — выше, до строки цены.
-    // Нет файла — светлая плашка (картинки придут из центра позже).
+    // Зона картинки квадратная (источник 378×378/118×118), contain —
+    // без обрезки. Без подписи блок центрируется по высоте до строки цены.
     Rectangle {
         x: 2px;
-        y: 2px;
+        y: root.card-show-name ? 2px : 21px;
         width: 104px;
-        height: root.card-show-name ? 104px : 140px;
+        height: 104px;
         border-radius: 10px;
         clip: true;
         background: #F0F2F5;
         if root.p.has-img : Image {
-            // Без подписи картинка на 20% меньше зоны — поля вокруг.
-            width: parent.width * (root.card-show-name ? 1.0 : 0.8);
-            height: parent.height * (root.card-show-name ? 1.0 : 0.8);
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            image-fit: cover;
+            width: 100%;
+            height: 100%;
+            image-fit: contain;
             source: root.p.img;
         }
     }
@@ -1016,21 +1013,20 @@ export component MainWindow inherits Window {
             // Панель глушит клики (закрытие — только мимо панели/«ОТМЕНА»).
             popup-panel-ta := TouchArea { }
 
-            // Картинка крупно. Без названия — на всю ширину панели.
+            // Картинка: зона 280×280 (источник квадратный, contain — без
+            // обрезки). Без названия — по центру панели.
             Rectangle {
-                x: 24px; y: 24px;
-                width: root.card-show-name ? 280px : 672px;
+                x: root.card-show-name ? 24px : 220px;
+                y: 24px;
+                width: 280px;
                 height: 280px;
                 border-radius: 16px;
                 clip: true;
                 background: #F0F2F5;
                 if root.popup-plu.has-img : Image {
-                    // Без названия картинка на 20% меньше зоны — поля вокруг.
-                    width: parent.width * (root.card-show-name ? 1.0 : 0.8);
-                    height: parent.height * (root.card-show-name ? 1.0 : 0.8);
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    image-fit: cover;
+                    width: 100%;
+                    height: 100%;
+                    image-fit: contain;
                     source: root.popup-plu.img;
                 }
             }
