@@ -177,8 +177,11 @@ component PluCard inherits Rectangle {
         clip: true;
         background: #F0F2F5;
         if root.p.has-img : Image {
-            width: 100%;
-            height: 100%;
+            // Без подписи картинка на 20% меньше зоны — поля вокруг.
+            width: root.card-show-name ? 100% : 80%;
+            height: root.card-show-name ? 100% : 80%;
+            x: root.card-show-name ? 0px : 10%;
+            y: root.card-show-name ? 0px : 10%;
             image-fit: cover;
             source: root.p.img;
         }
@@ -1022,8 +1025,11 @@ export component MainWindow inherits Window {
                 clip: true;
                 background: #F0F2F5;
                 if root.popup-plu.has-img : Image {
-                    width: 100%;
-                    height: 100%;
+                    // Без названия картинка на 20% меньше зоны — поля вокруг.
+                    width: root.card-show-name ? 100% : 80%;
+                    height: root.card-show-name ? 100% : 80%;
+                    x: root.card-show-name ? 0px : 10%;
+                    y: root.card-show-name ? 0px : 10%;
                     image-fit: cover;
                     source: root.popup-plu.img;
                 }
