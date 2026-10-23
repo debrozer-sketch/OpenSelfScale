@@ -178,10 +178,10 @@ component PluCard inherits Rectangle {
         background: #F0F2F5;
         if root.p.has-img : Image {
             // Без подписи картинка на 20% меньше зоны — поля вокруг.
-            width: root.card-show-name ? 100% : 80%;
-            height: root.card-show-name ? 100% : 80%;
-            x: root.card-show-name ? 0px : 10%;
-            y: root.card-show-name ? 0px : 10%;
+            width: parent.width * (root.card-show-name ? 1.0 : 0.8);
+            height: parent.height * (root.card-show-name ? 1.0 : 0.8);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
             image-fit: cover;
             source: root.p.img;
         }
@@ -1026,10 +1026,10 @@ export component MainWindow inherits Window {
                 background: #F0F2F5;
                 if root.popup-plu.has-img : Image {
                     // Без названия картинка на 20% меньше зоны — поля вокруг.
-                    width: root.card-show-name ? 100% : 80%;
-                    height: root.card-show-name ? 100% : 80%;
-                    x: root.card-show-name ? 0px : 10%;
-                    y: root.card-show-name ? 0px : 10%;
+                    width: parent.width * (root.card-show-name ? 1.0 : 0.8);
+                    height: parent.height * (root.card-show-name ? 1.0 : 0.8);
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
                     image-fit: cover;
                     source: root.popup-plu.img;
                 }
