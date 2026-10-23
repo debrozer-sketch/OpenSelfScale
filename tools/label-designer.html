@@ -45,7 +45,7 @@ const fl2=n=>Math.floor(n*2+1e-9)/2;
 const current=()=>S.layout&&S.layout.fields[S.sel];
 const isHalf=n=>Number.isFinite(n)&&Math.abs(n*2-Math.round(n*2))<1e-8;
 function starter(){return[{kind:'name',x:2,y:1,font:'B',size:1},{kind:'barcode',x:2,y:5,font:'A',size:1},{kind:'weight',x:2,y:21,font:'A',size:1},{kind:'price',x:2,y:26,font:'A',size:1},{kind:'sum',x:2,y:31,font:'A',size:1}]}
-function newLayout(w,h,persist=true){S.layout={format:1,name:w+'x'+h,width_mm:w,height_mm:h,fields:starter()};S.autoName=true;S.sel=-1;S.history=[];$('emptyScreen').hidden=true;renderAll();if(persist)saveDraft()}
+function newLayout(w,h,persist=true){S.layout={format:1,name:w+'x'+h,width_mm:w,height_mm:h,fields:starter()};S.autoName=true;S.sel=-1;S.history=[];renderAll();if(persist)saveDraft()}
 function geom(f){
   const m=f.size===2?2:1,cw=f.font==='B'?2:3,ch=f.font==='B'?3:4,bc=f.kind==='barcode';
   let nw,nh,txt,cwm=0;
@@ -154,7 +154,7 @@ function parseLayout(data){
   });
   return{format:data.format,name:data.name==null?'':String(data.name),width_mm:numeric(data.width_mm,'Ширина'),height_mm:numeric(data.height_mm,'Высота'),fields};
 }
-function loadLayout(data){const layout=parseLayout(data);S.layout=layout;S.sel=-1;S.autoName=layout.name===layout.width_mm+'x'+layout.height_mm;S.history=[];$('emptyScreen').hidden=true;renderAll();saveDraft();const errors=validate();if(errors.length)showErrors(errors,'Файл открыт с ошибками');else toast('Раскладка открыта')}
+function loadLayout(data){const layout=parseLayout(data);S.layout=layout;S.sel=-1;S.autoName=layout.name===layout.width_mm+'x'+layout.height_mm;S.history=[];renderAll();saveDraft();const errors=validate();if(errors.length)showErrors(errors,'Файл открыт с ошибками');else toast('Раскладка открыта')}
 function exportObject(){const L=S.layout;return{format:1,name:L.name,width_mm:L.width_mm,height_mm:L.height_mm,fields:L.fields.map(f=>{const out={kind:f.kind};if(f.kind==='text')out.text=f.text;out.x=f.x;out.y=f.y;out.font=f.font;out.size=f.size;return out})}}
 function jsonText(){const errors=validate();if(errors.length){showErrors(errors);return null}return JSON.stringify(exportObject(),null,2)}
 function download(name=S.layout.name){const text=jsonText();if(!text)return;const output=exportObject();output.name=name;const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(output,null,2)],{type:'application/json'}));a.download='label-'+name.replace(/[\\/:*?"<>|\s]+/g,'_')+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
@@ -166,7 +166,7 @@ function startReorder(e,index){if(e.button!==0&&e.pointerType==='mouse')return;e
 function moveReorder(e){if(!S.reorder||e.pointerId!==S.reorder.pointerId)return;document.querySelectorAll('.drop-target').forEach(row=>row.classList.remove('drop-target'));const row=document.elementFromPoint(e.clientX,e.clientY)?.closest('.field-row');if(row&&$('fieldList').contains(row)){S.reorder.target=+row.dataset.index;row.classList.add('drop-target')}}
 function endReorder(e){window.removeEventListener('pointermove',moveReorder);document.querySelectorAll('.drop-target').forEach(row=>row.classList.remove('drop-target'));const move=S.reorder;S.reorder=null;if(!move||e.pointerId!==move.pointerId||move.target===move.index)return;checkpoint();const [field]=S.layout.fields.splice(move.index,1);S.layout.fields.splice(move.target,0,field);S.sel=move.target;changed()}
 KINDS.forEach(kind=>{const option=el('option',null,LABELS[kind]);option.value=kind;$('kindSelect').append(option)});
-$('newBtn').onclick=newDialog;$('startBtn').onclick=()=>newLayout(58,40);$('openBtn').onclick=$('emptyOpenBtn').onclick=()=>$('fileInput').click();$('saveBtn').onclick=()=>download();$('copySaveBtn').onclick=()=>{const errors=validate();if(errors.length)showErrors(errors);else copyDialog()};
+$('newBtn').onclick=newDialog;void 0;$('saveBtn').onclick=()=>download();$('copySaveBtn').onclick=()=>{const errors=validate();if(errors.length)showErrors(errors);else copyDialog()};
 $('fileInput').onchange=e=>{const file=e.target.files[0];e.target.value='';if(!file)return;const reader=new FileReader();reader.onload=()=>{try{loadLayout(JSON.parse(reader.result))}catch(err){showErrors(['Не удалось открыть файл: '+err.message],'Ошибка открытия')}};reader.onerror=()=>showErrors(['Не удалось прочитать файл'],'Ошибка открытия');reader.readAsText(file)};
 $('copyBtn').onclick=async()=>{const text=jsonText();if(!text)return;try{await navigator.clipboard.writeText(text);toast('JSON скопирован')}catch(_){const body=el('div');const area=el('textarea');area.value=text;Object.assign(area.style,{width:'100%',height:'170px'});body.append(el('p',null,'Выделите JSON и скопируйте вручную.'),area);modal('Копировать JSON',body,[{text:'Закрыть',primary:true}]);area.select()}};
 $('pasteBtn').onclick=pasteDialog;
@@ -232,7 +232,7 @@ window.addEventListener('keydown',e=>{
   const dx={ArrowLeft:-1,ArrowRight:1}[e.key]||0,dy={ArrowUp:-1,ArrowDown:1}[e.key]||0;if(!dx&&!dy)return;e.preventDefault();checkpoint();
   const step=e.shiftKey?2:.5,f=current(),g=geom(f),L=S.layout;f.x=clamp(snap(f.x+dx*step),0,fl2(L.width_mm-g.w));f.y=clamp(snap(f.y+dy*step),0,fl2(L.height_mm-g.h));changed();
 });
-const draft=loadDraft();if(draft){newLayout(58,40,false);modal('Найден черновик',el('p',null,'Продолжить работу с последней сохранённой раскладкой?'),[{text:'Начать заново',action:()=>newLayout(58,40)},{text:'Продолжить',primary:true,action:()=>{try{loadLayout(draft)}catch(err){newLayout(58,40);showErrors(['Черновик повреждён: '+err.message])}}}],true)}else{newLayout(58,40,false);$('emptyScreen').hidden=false}
+const draft=loadDraft();if(draft){newLayout(58,40,false);modal('Найден черновик',el('p',null,'Продолжить работу с последней сохранённой раскладкой?'),[{text:'Начать заново',action:()=>newLayout(58,40)},{text:'Продолжить',primary:true,action:()=>{try{loadLayout(draft)}catch(err){newLayout(58,40);showErrors(['Черновик повреждён: '+err.message])}}}],true)}else{newLayout(58,40,false)}
 </script>
 </body>
 </html>
