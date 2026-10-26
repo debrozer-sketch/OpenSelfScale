@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-pub const MM_TO_DOTS: i32 = 8;
+pub const MM_TO_DOTS: i32 = 12;
 const REQUIRED: [LabelKind; 4] = [LabelKind::Name, LabelKind::Weight, LabelKind::Sum, LabelKind::Barcode];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
