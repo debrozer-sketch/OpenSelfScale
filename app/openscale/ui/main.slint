@@ -1686,8 +1686,9 @@ export component MainWindow inherits Window {
             property <[MenuRow]> rows: [
                 { label: "Диагностика", id: "diag", admin: false },
                 { label: "Принтер", id: "printerdiag", admin: false },
-                { label: "Протяжка ленты", id: "feed", admin: false },
+                { label: "Протяжка этикетки", id: "feed", admin: false },
                 { label: "Тестовая печать", id: "testprint", admin: false },
+                { label: "Этикетки", id: "labels", admin: false },
             ];
             for r[i] in rows : Rectangle {
                 x: 8px;
