@@ -133,8 +133,8 @@ pub fn build_label_from_spec(
         } else {
             FieldStyle::FontB
         };
-        let x = (f.x_mm * MM_TO_DOTS) as u16;
-        let y = (f.y_mm * MM_TO_DOTS) as u16;
+        let x = (f.x_mm * MM_TO_DOTS as f64).round() as u16;
+        let y = (f.y_mm * MM_TO_DOTS as f64).round() as u16;
         match f.kind {
             LabelKind::Name => {
                 job.field(x, y, style, &item.namefirst)?;

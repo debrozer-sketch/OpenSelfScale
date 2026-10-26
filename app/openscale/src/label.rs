@@ -55,8 +55,8 @@ impl LabelKind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LabelField {
     pub kind: LabelKind,
-    pub x_mm: i32,
-    pub y_mm: i32,
+    pub x_mm: f64,
+    pub y_mm: f64,
     pub font_a: bool,
     pub size2: bool,
     pub text: String,
@@ -70,11 +70,15 @@ pub struct LabelSpec {
     pub fields: Vec<LabelField>,
 }
 
-fn i32_field(v: &Value, key: &str) -> Result<i32, String> {
-    v.get(key)
-        .and_then(Value::as_i64)
-        .map(|n| n as i32)
-        .ok_or_else(|| format!("поле {key}: ожидается целое число"))
+fn coord_field(v: &Value, key: &str, index: usize) -> Result<f64, String> {
+    let n = v
+        .get(key)
+        .and_then(Value::as_f64)
+        .ok_or_else(|| format!("поле {index}: {key} — число с шагом 0,5 мм"))?;
+    if (n * 2.0).round() != n * 2.0 {
+        return Err(format!("поле {index}: {key} — число с шагом 0,5 мм"));
+    }
+    Ok(n)
 }
 
 fn parse_field(v: &Value, index: usize) -> Result<LabelField, String> {
@@ -84,8 +88,8 @@ fn parse_field(v: &Value, index: usize) -> Result<LabelField, String> {
         .ok_or_else(|| format!("поле {index}: нет kind"))?;
     let kind = LabelKind::parse(kind_str)
         .ok_or_else(|| format!("поле {index}: неизвестный kind \"{kind_str}\""))?;
-    let x_mm = i32_field(v, "x")?;
-    let y_mm = i32_field(v, "y")?;
+    let x_mm = coord_field(v, "x", index)?;
+    let y_mm = coord_field(v, "y", index)?;
     let font = v.get("font").and_then(Value::as_str).unwrap_or("A");
     if font != "A" && font != "B" {
         return Err(format!("поле {index}: font должен быть \"A\" или \"B\""));
@@ -129,8 +133,14 @@ pub fn parse(spec_json: &str) -> Result<LabelSpec, String> {
     if name.is_empty() || name.chars().count() > 64 {
         return Err("name — непустая строка до 64 символов".into());
     }
-    let width_mm = i32_field(&v, "width_mm")?;
-    let height_mm = i32_field(&v, "height_mm")?;
+    let int_field = |key: &str| -> Result<i32, String> {
+        v.get(key)
+            .and_then(Value::as_i64)
+            .map(|n| n as i32)
+            .ok_or_else(|| format!("поле {key}: ожидается целое число"))
+    };
+    let width_mm = int_field("width_mm")?;
+    let height_mm = int_field("height_mm")?;
     if !(20..=80).contains(&width_mm) || !(20..=80).contains(&height_mm) {
         return Err("размер этикетки — от 20 до 80 мм".into());
     }
@@ -141,7 +151,7 @@ pub fn parse(spec_json: &str) -> Result<LabelSpec, String> {
     let mut fields = Vec::new();
     for (i, f) in raw_fields.iter().enumerate() {
         let field = parse_field(f, i)?;
-        if field.x_mm < 0 || field.y_mm < 0 || field.x_mm >= width_mm || field.y_mm >= height_mm {
+        if field.x_mm < 0.0 || field.y_mm < 0.0 || field.x_mm >= width_mm as f64 || field.y_mm >= height_mm as f64 {
             return Err(format!(
                 "поле {i} ({}): координаты вне границ этикетки",
                 field.kind.name()
@@ -283,6 +293,17 @@ mod tests {
         assert!(parse("{").unwrap_err().contains("не разобран"));
         let nofields = r#"{"format":1,"name":"x","width_mm":58,"height_mm":40}"#;
         assert!(parse(nofields).unwrap_err().contains("массивом"));
+    }
+
+    #[test]
+    fn parse_accepts_half_mm_step() {
+        let half = minimal().replace(r#""kind":"name","x":2,"y":1"#, r#""kind":"name","x":0.5,"y":1.5"#);
+        let spec = parse(&half).unwrap();
+        assert_eq!(spec.fields[0].x_mm, 0.5);
+        assert_eq!(spec.fields[0].y_mm, 1.5);
+        let quarter = minimal().replace(r#""kind":"name","x":2,"y":1"#, r#""kind":"name","x":2.25,"y":1"#);
+        let err = parse(&quarter).unwrap_err();
+        assert!(err.contains("0,5"), "{err}");
     }
 
     #[test]
