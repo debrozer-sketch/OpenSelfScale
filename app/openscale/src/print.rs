@@ -415,7 +415,7 @@ const STALE_JOB: Duration = Duration::from_secs(25);
 const RECOVER_COOLDOWN: Duration = Duration::from_secs(10);
 const RECOVER_MAX: u8 = 3;
 const L4_READ_TIMEOUT: Duration = Duration::from_millis(300);
-const SCAN_STEP_DOTS: u8 = 8;
+const SCAN_STEP_UNITS: u8 = 7;
 enum Fail {
     Io(String),
     Printer(String),
@@ -526,7 +526,7 @@ fn scan_phase(
         if started.elapsed() > total {
             return Err(Fail::Printer(format!("шаг-скан: дедлайн фазы «{what}»")));
         }
-        if port.write_all(&[escpos::ESC, b'J', SCAN_STEP_DOTS]).is_err() || port.flush().is_err() {
+        if port.write_all(&[escpos::ESC, b'J', SCAN_STEP_UNITS]).is_err() || port.flush().is_err() {
             return Err(Fail::Io("шаг-скан: запись в порт".into()));
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -556,7 +556,7 @@ fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, 
             if started.elapsed() > TOTAL_DEADLINE {
                 return Err(expired("счёт длины"));
             }
-            if port.write_all(&[escpos::ESC, b'J', SCAN_STEP_DOTS]).is_err() || port.flush().is_err() {
+            if port.write_all(&[escpos::ESC, b'J', SCAN_STEP_UNITS]).is_err() || port.flush().is_err() {
                 return Err(Fail::Io("шаг-скан: запись в порт".into()));
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -1226,6 +1226,23 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
         return Err(PrintError::PrinterDisabled);
     }
     let bytes = crate::calib::test_label_bytes();
+    request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
+    Ok(())
+}
+pub fn ruler_probe_bytes() -> Vec<u8> {
+    let mut job = LabelJob::begin((464, 608));
+    for mm in (4..=72).step_by(4) {
+        let y = (mm * 8) as u16;
+        let _ = job.field(0, y, FieldStyle::FontB, &format!("{mm:02}"));
+        let _ = job.field(80, y, FieldStyle::Normal, &"▓".repeat(30));
+    }
+    job.finish()
+}
+pub fn print_ruler_probe(cfg: &crate::config::Config) -> Result<(), PrintError> {
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
+    let bytes = ruler_probe_bytes();
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }

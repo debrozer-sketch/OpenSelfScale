@@ -1489,6 +1489,35 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     });
+    ui.on_labels_probe({
+        let ui_handle = ui_handle.clone();
+        let cfg = cfg.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_labels_status("Печатаю линейку: две этикетки с метками…".into());
+            }
+            let cfg = cfg.clone();
+            let ui_handle = ui_handle.clone();
+            std::thread::spawn(move || {
+                let res = crate::print::print_ruler_probe(&cfg);
+                let text = match res {
+                    Ok(()) => {
+                        log::info!("меню: этикетки: линейка напечатана");
+                        "Линейка напечатана: посмотрите, какой метки достиг разрыв".to_string()
+                    }
+                    Err(e) => {
+                        log::warn!("меню: этикетки: линейка: {e}");
+                        format!("Не напечатано:\n{e}")
+                    }
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_labels_status(text.into());
+                    }
+                });
+            });
+        }
+    });
     ui.on_labels_calibrate({
         let ui_handle = ui_handle.clone();
         let cfg = cfg.clone();

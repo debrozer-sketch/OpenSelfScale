@@ -345,6 +345,7 @@ export component MainWindow inherits Window {
     callback labels-tap(int);
     callback labels-import-tap(int);
     callback labels-calibrate();
+    callback labels-probe();
     callback labels-confirm-apply();
     callback labels-popup-close();
     in property <string> prn-diag-text: "Идёт опрос принтера…";
@@ -1986,26 +1987,47 @@ export component MainWindow inherits Window {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
+            property <length> third: (parent.width - 32px) / 3;
             Rectangle {
                 x: 8px; y: 12px;
-                width: (parent.width - 24px) / 2;
+                width: third;
                 height: 64px;
                 border-radius: 12px;
                 border-width: 2px;
                 border-color: #C9CFD7;
                 background: lbl-cal-ta.pressed ? #E4E8ED : #FFFFFF;
                 Text {
-                    text: "Проверка роликов";
-                    font-size: 24px;
+                    text: "Проверка\nроликов";
+                    font-size: 19px;
                     font-weight: 700;
                     color: #1A1E24;
+                    horizontal-alignment: center;
+                    wrap: no-wrap;
                 }
                 lbl-cal-ta := TouchArea { clicked => { root.labels-calibrate(); } }
             }
             Rectangle {
-                x: 16px + (parent.width - 24px) / 2;
+                x: 16px + third;
                 y: 12px;
-                width: (parent.width - 24px) / 2;
+                width: third;
+                height: 64px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: #C9CFD7;
+                background: lbl-probe-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    text: "Линейка";
+                    font-size: 19px;
+                    font-weight: 700;
+                    color: #1A1E24;
+                    horizontal-alignment: center;
+                }
+                lbl-probe-ta := TouchArea { clicked => { root.labels-probe(); } }
+            }
+            Rectangle {
+                x: 24px + 2 * third;
+                y: 12px;
+                width: third;
                 height: 64px;
                 border-radius: 12px;
                 border-width: 2px;
@@ -2013,9 +2035,10 @@ export component MainWindow inherits Window {
                 background: lbl-imp-ta.pressed ? #E4E8ED : #FFFFFF;
                 Text {
                     text: "Импорт JSON";
-                    font-size: 24px;
+                    font-size: 19px;
                     font-weight: 700;
                     color: #1A1E24;
+                    horizontal-alignment: center;
                 }
                 lbl-imp-ta := TouchArea { clicked => { root.labels-import-tap(-1); } }
             }
