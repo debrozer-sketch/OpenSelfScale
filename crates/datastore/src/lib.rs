@@ -267,11 +267,18 @@ pub fn label_layout_get(conn: &Connection, name: &str) -> Result<Option<LabelLay
         })
         .transpose()?)
 }
-pub fn label_layout_list(conn: &Connection) -> Result<Vec<(String, i64, i64)>, StoreError> {
+pub fn label_layout_list(conn: &Connection) -> Result<Vec<LabelLayoutRow>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT name, width_mm, height_mm FROM label_layouts ORDER BY name",
+        "SELECT name, width_mm, height_mm, json FROM label_layouts ORDER BY name",
     )?;
-    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    let rows = stmt.query_map([], |r| {
+        Ok(LabelLayoutRow {
+            name: r.get(0)?,
+            width_mm: r.get(1)?,
+            height_mm: r.get(2)?,
+            json: r.get(3)?,
+        })
+    })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 pub fn label_layout_delete(conn: &Connection, name: &str) -> Result<bool, StoreError> {
@@ -1032,10 +1039,9 @@ mod tests {
         label_layout_put(&conn, "58x40", 58, 30, json2).unwrap();
         let rows = label_layout_list(&conn).unwrap();
         assert_eq!(rows.len(), 2);
-        let upd = rows.iter().find(|r| r.0 == "58x40").unwrap();
-        assert_eq!((upd.1, upd.2), (58, 30));
-        let row = label_layout_get(&conn, "58x40").unwrap().expect("row");
-        assert_eq!(row.json, json2);
+        let upd = rows.iter().find(|r| r.name == "58x40").unwrap();
+        assert_eq!((upd.width_mm, upd.height_mm), (58, 30));
+        assert_eq!(upd.json, json2);
     }
     #[test]
     fn label_layout_delete_reports_presence() {

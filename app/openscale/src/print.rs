@@ -83,6 +83,28 @@ pub fn build_label(
 fn money(kop: i64) -> String {
     format!("{},{:02}", kop / 100, kop % 100)
 }
+pub fn pick_layout(conn: &rusqlite::Connection, measured_len_mm: Option<i32>) -> Option<crate::label::LabelSpec> {
+    let len = measured_len_mm?;
+    let rows = datastore::label_layout_list(conn).ok()?;
+    if rows.is_empty() {
+        return None;
+    }
+    let mut specs = Vec::new();
+    let mut broken = 0usize;
+    for row in &rows {
+        match crate::label::parse(&row.json) {
+            Ok(s) => specs.push(s),
+            Err(e) => {
+                broken += 1;
+                log::warn!("раскладка «{}»: {e} — пропущена", row.name);
+            }
+        }
+    }
+    if broken > 0 {
+        log::warn!("раскладок с ошибками: {broken}");
+    }
+    crate::label::choose(&specs, len)
+}
 pub fn build_label_from_spec(
     item: &PluItem,
     weight_g: u32,
@@ -1211,7 +1233,12 @@ pub fn print_for_plu(
         .unwrap_or(0)
         .clamp(0, 2);
     let (date, time) = now_stamp();
-    let bytes = build_label(&item, weight_g, LIVE_LAYOUT, &date, &time, rounding)?;
+    let measured = datastore::get_calibration(&conn, "label_length_mm")
+        .ok()
+        .flatten()
+        .map(|v| v as i32);
+    let spec = pick_layout(&conn, measured);
+    let bytes = build_label_from_spec(&item, weight_g, &date, &time, rounding, spec.as_ref())?;
     let sum_kop = crate::session::round_sum(
         crate::session::sum_kopecks(item.price, weight_g),
         rounding,
@@ -1355,5 +1382,44 @@ mod tests {
         let a = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, None).unwrap();
         let b = build_label(&sample(), 1350, LIVE_LAYOUT, "13.10.26", "18:40:00", 0).unwrap();
         assert_eq!(a, b);
+    }
+    fn registry(conn: &rusqlite::Connection, name: &str, h: i32, json: &str) {
+        datastore::label_layout_put(conn, name, 58, h as i64, json).unwrap();
+    }
+    const SPEC_40: &str = r#"{"format":1,"name":"58x40","width_mm":58,"height_mm":40,"fields":[
+        {"kind":"name","x":2,"y":1,"font":"A","size":1},{"kind":"barcode","x":2,"y":5,"font":"A","size":1},
+        {"kind":"weight","x":2,"y":21,"font":"A","size":1},{"kind":"sum","x":2,"y":31,"font":"A","size":1}]}"#;
+    const SPEC_20: &str = r#"{"format":1,"name":"58x20","width_mm":58,"height_mm":20,"fields":[
+        {"kind":"name","x":2,"y":1,"font":"A","size":1},{"kind":"barcode","x":2,"y":5,"font":"A","size":1},
+        {"kind":"weight","x":2,"y":12,"font":"A","size":1},{"kind":"sum","x":2,"y":16,"font":"A","size":1}]}"#;
+    #[test]
+    fn pick_empty_registry_is_none() {
+        let conn = datastore::open(std::path::Path::new(":memory:")).unwrap();
+        assert!(pick_layout(&conn, Some(40)).is_none());
+    }
+    #[test]
+    fn pick_without_measurement_is_none() {
+        let conn = datastore::open(std::path::Path::new(":memory:")).unwrap();
+        registry(&conn, "58x40", 40, SPEC_40);
+        assert!(pick_layout(&conn, None).is_none());
+    }
+    #[test]
+    fn pick_skips_broken_json() {
+        let conn = datastore::open(std::path::Path::new(":memory:")).unwrap();
+        registry(&conn, "битая", 40, r#"{"format":9,"fields":[]}"#);
+        registry(&conn, "58x40", 40, SPEC_40);
+        let picked = pick_layout(&conn, Some(40)).unwrap();
+        assert_eq!(picked.name, "58x40");
+    }
+    #[test]
+    fn pick_by_length_window() {
+        let conn = datastore::open(std::path::Path::new(":memory:")).unwrap();
+        registry(&conn, "58x40", 40, SPEC_40);
+        registry(&conn, "58x20", 20, SPEC_20);
+        assert_eq!(pick_layout(&conn, Some(40)).unwrap().name, "58x40");
+        assert_eq!(pick_layout(&conn, Some(21)).unwrap().name, "58x20");
+        assert_eq!(pick_layout(&conn, Some(39)).unwrap().name, "58x40");
+        assert!(pick_layout(&conn, Some(50)).is_none());
+        assert!(pick_layout(&conn, Some(10)).is_none());
     }
 }
