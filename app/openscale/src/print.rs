@@ -103,13 +103,21 @@ pub fn pick_layout(conn: &rusqlite::Connection, measured_len_mm: Option<i32>) ->
         log::warn!("раскладок с ошибками: {broken}");
     }
     let Some(len) = measured_len_mm else {
-        return if specs.len() == 1 {
-            specs.into_iter().next()
-        } else {
-            None
-        };
+        return if specs.len() == 1 { specs.into_iter().next() } else { None };
     };
-    crate::label::choose(&specs, len)
+    if let Some(spec) = crate::label::choose(&specs, len) {
+        return Some(spec);
+    }
+    if specs.len() == 1 {
+        let spec = &specs[0];
+        log::warn!(
+            "замер {len} мм не совпал с единственной раскладкой «{}» ({} мм) — печатаю по ней",
+            spec.name,
+            spec.height_mm
+        );
+        return Some(spec.clone());
+    }
+    None
 }
 pub fn build_label_from_spec(
     item: &PluItem,
@@ -1429,6 +1437,12 @@ mod tests {
         assert_eq!(pick_layout(&conn, None).unwrap().name, "58x40");
         registry(&conn, "58x20", 20, SPEC_20);
         assert!(pick_layout(&conn, None).is_none());
+    }
+    #[test]
+    fn pick_single_layout_beats_stale_measurement() {
+        let conn = datastore::open(std::path::Path::new(":memory:")).unwrap();
+        registry(&conn, "58x40", 40, SPEC_40);
+        assert_eq!(pick_layout(&conn, Some(80)).unwrap().name, "58x40");
     }
     #[test]
     fn pick_by_length_window() {
