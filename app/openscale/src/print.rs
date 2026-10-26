@@ -80,6 +80,82 @@ pub fn build_label(
         .barcode_ean13(layout.barcode.0, layout.barcode.1, &ean13_payload(item, weight_g))?;
     Ok(job.finish())
 }
+fn money(kop: i64) -> String {
+    format!("{},{:02}", kop / 100, kop % 100)
+}
+pub fn build_label_from_spec(
+    item: &PluItem,
+    weight_g: u32,
+    date: &str,
+    time: &str,
+    rounding: i64,
+    spec: Option<&crate::label::LabelSpec>,
+) -> Result<Vec<u8>, PrintError> {
+    let Some(spec) = spec else {
+        return build_label(item, weight_g, LIVE_LAYOUT, date, time, rounding);
+    };
+    use crate::label::{LabelKind, MM_TO_DOTS};
+    let sum_kop = crate::session::round_sum(
+        crate::session::sum_kopecks(item.price, weight_g),
+        rounding,
+    );
+    let mut job = LabelJob::begin((
+        (spec.width_mm * MM_TO_DOTS) as u16,
+        (spec.height_mm * MM_TO_DOTS) as u16,
+    ));
+    for f in &spec.fields {
+        let style = if f.kind == LabelKind::Sum && f.size2 {
+            FieldStyle::Dbl
+        } else if f.font_a {
+            FieldStyle::Normal
+        } else {
+            FieldStyle::FontB
+        };
+        let x = (f.x_mm * MM_TO_DOTS) as u16;
+        let y = (f.y_mm * MM_TO_DOTS) as u16;
+        match f.kind {
+            LabelKind::Name => {
+                job.field(x, y, style, &item.namefirst)?;
+            }
+            LabelKind::Plu => {
+                job.field(x, y, style, &format!("PLU {}", item.plu))?;
+            }
+            LabelKind::Weight => {
+                job.field(x, y, style, &format!("{},{:03}", weight_g / 1000, weight_g % 1000))?;
+            }
+            LabelKind::Price => {
+                job.field(x, y, style, &money(item.price))?;
+            }
+            LabelKind::Sum => {
+                job.field(x, y, style, &money(sum_kop))?;
+            }
+            LabelKind::Date => {
+                job.field(x, y, style, date)?;
+            }
+            LabelKind::Time => {
+                job.field(x, y, style, time)?;
+            }
+            LabelKind::Shelflife => {
+                let text = shelflife_label(&item.shelflife);
+                if let Some(text) = text {
+                    job.field(x, y, style, &text)?;
+                }
+            }
+            LabelKind::Cardprice => {
+                if let Some(card) = item.card_price {
+                    job.field(x, y, style, &money(card))?;
+                }
+            }
+            LabelKind::Text => {
+                job.field(x, y, style, &f.text)?;
+            }
+            LabelKind::Barcode => {
+                job.barcode_ean13(x, y, &ean13_payload(item, weight_g))?;
+            }
+        }
+    }
+    Ok(job.finish())
+}
 pub fn ean13_payload(item: &PluItem, weight_g: u32) -> String {
     let digits: String = item.itemcode.chars().filter(|c| c.is_ascii_digit()).collect();
     let code5 = if digits.len() >= 5 {
@@ -1220,5 +1296,64 @@ mod tests {
     fn port_path_from_config_is_used() {
         let cfg = crate::config::Config::default();
         assert!(cfg.printer.port.starts_with("/dev/"));
+    }
+    fn spec_58x40() -> crate::label::LabelSpec {
+        crate::label::parse(
+            r#"{"format":1,"name":"58x40","width_mm":58,"height_mm":40,"fields":[
+                {"kind":"name","x":2,"y":1,"font":"A","size":1},
+                {"kind":"plu","x":2,"y":6,"font":"B","size":1},
+                {"kind":"shelflife","x":2,"y":11,"font":"B","size":1},
+                {"kind":"cardprice","x":2,"y":16,"font":"B","size":1},
+                {"kind":"barcode","x":2,"y":5,"font":"A","size":1},
+                {"kind":"weight","x":2,"y":21,"font":"A","size":1},
+                {"kind":"price","x":2,"y":26,"font":"A","size":1},
+                {"kind":"sum","x":2,"y":31,"font":"A","size":2},
+                {"kind":"text","x":10,"y":36,"font":"B","size":1,"text":"СПАСИБО ЗА ПОКУПКУ"}]}"#,
+        )
+        .unwrap()
+    }
+    #[test]
+    fn spec_label_area_and_field_positions() {
+        let bytes = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
+        assert!(bytes.windows(10).any(|w| w == &[escpos::ESC, b'W', 0, 0, 0, 0, 0xD0, 0x01, 0x40, 0x01][..]), "ESC W 464x320");
+        assert!(bytes.windows(4).any(|w| w == &[escpos::ESC, b'$', 0x10, 0x00][..]), "ESC $ x=16");
+        assert!(bytes.windows(4).any(|w| w == &[escpos::GS, b'$', 0x08, 0x00][..]), "GS $ y=8");
+    }
+    #[test]
+    fn spec_label_renders_kinds() {
+        let bytes = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("1,350"));
+        assert!(text.contains("199,99"));
+        assert!(text.contains("269,99"));
+        assert!(text.contains("PLU 2502192"));
+        for s in ["ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ", "СПАСИБО ЗА ПОКУПКУ", "Годен до 20.09.2026"] {
+            let enc = escpos::to_cp866(s).unwrap();
+            assert!(bytes.windows(enc.len()).any(|w| w == &enc[..]), "{s}");
+        }
+        let needle = b"\x1dk\x02";
+        let pos = bytes.windows(needle.len()).position(|w| w == needle).unwrap();
+        assert_eq!(&bytes[pos + 3..pos + 15], b"210213601350");
+    }
+    #[test]
+    fn spec_label_sum_uses_dbl_when_size2() {
+        let bytes = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
+        assert!(bytes.windows(6).any(|w| w == &[escpos::ESC, b'!', 0x20, escpos::GS, b'!', 0x11][..]));
+    }
+    #[test]
+    fn spec_label_cardprice_only_when_present() {
+        let bytes = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(!text.contains("179,99"), "{text:?}");
+        let mut item = sample();
+        item.card_price = Some(17999);
+        let bytes = build_label_from_spec(&item, 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("179,99"));
+    }
+    #[test]
+    fn spec_none_falls_back_to_live_layout() {
+        let a = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, None).unwrap();
+        let b = build_label(&sample(), 1350, LIVE_LAYOUT, "13.10.26", "18:40:00", 0).unwrap();
+        assert_eq!(a, b);
     }
 }
