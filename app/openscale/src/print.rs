@@ -1234,11 +1234,11 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     Ok(())
 }
 pub fn ruler_probe_bytes() -> Vec<u8> {
+    let alphabet: String = "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯАБВГДЕЖЗИЙКЛ".chars().collect();
     let mut job = LabelJob::begin((464, 608));
     for mm in (4..=72).step_by(4) {
         let y = (mm * 8) as u16;
-        let _ = job.field(0, y, FieldStyle::FontB, &format!("{mm:02}"));
-        let _ = job.field(80, y, FieldStyle::Normal, &"▓".repeat(30));
+        let _ = job.field(0, y, FieldStyle::Normal, &alphabet);
     }
     job.finish()
 }
