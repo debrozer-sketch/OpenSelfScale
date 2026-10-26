@@ -70,6 +70,12 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              sum_kop  INTEGER,
              ok       INTEGER NOT NULL
          );
+         CREATE TABLE IF NOT EXISTS label_layouts (
+             name      TEXT PRIMARY KEY NOT NULL,
+             width_mm  INTEGER NOT NULL,
+             height_mm INTEGER NOT NULL,
+             json      TEXT NOT NULL
+         );
          CREATE INDEX IF NOT EXISTS idx_print_log_ts ON print_log (ts);",
     )?;
     let has_card: bool = conn
@@ -224,6 +230,54 @@ const SEED_GROUP_DEPT: &[(&str, &str)] = &[
     ("АРАХИС", "ОРЕХИ"), ("ГРЕЦКИЙ", "ОРЕХИ"), ("КАШТАН", "ОРЕХИ"),
     ("МИНДАЛЬ", "ОРЕХИ"), ("ОРЕХИ", "ОРЕХИ"), ("ФИСТАШКИ", "ОРЕХИ"),
 ];
+#[derive(Debug, Clone, PartialEq)]
+pub struct LabelLayoutRow {
+    pub name: String,
+    pub width_mm: i64,
+    pub height_mm: i64,
+    pub json: String,
+}
+pub fn label_layout_put(
+    conn: &Connection,
+    name: &str,
+    width_mm: i64,
+    height_mm: i64,
+    json: &str,
+) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT OR REPLACE INTO label_layouts (name, width_mm, height_mm, json) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![name, width_mm, height_mm, json],
+    )?;
+    Ok(())
+}
+pub fn label_layout_get(conn: &Connection, name: &str) -> Result<Option<LabelLayoutRow>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT name, width_mm, height_mm, json FROM label_layouts WHERE name = ?1",
+    )?;
+    let mut rows = stmt.query([name])?;
+    Ok(rows
+        .next()?
+        .map(|r| -> Result<LabelLayoutRow, rusqlite::Error> {
+            Ok(LabelLayoutRow {
+                name: r.get(0)?,
+                width_mm: r.get(1)?,
+                height_mm: r.get(2)?,
+                json: r.get(3)?,
+            })
+        })
+        .transpose()?)
+}
+pub fn label_layout_list(conn: &Connection) -> Result<Vec<(String, i64, i64)>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT name, width_mm, height_mm FROM label_layouts ORDER BY name",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+pub fn label_layout_delete(conn: &Connection, name: &str) -> Result<bool, StoreError> {
+    let n = conn.execute("DELETE FROM label_layouts WHERE name = ?1", [name])?;
+    Ok(n > 0)
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeptRow {
     pub name: String,
@@ -960,6 +1014,36 @@ mod tests {
         group_assign(&conn, "КЛЮКВА", "ЯГОДЫ").unwrap();
         dept_remove(&conn, "ЯГОДЫ").unwrap();
         assert!(group_depts(&conn).unwrap().iter().all(|(_, d)| d != "ЯГОДЫ"));
+    }
+    #[test]
+    fn label_layout_roundtrip_and_list() {
+        let conn = open(Path::new(":memory:")).unwrap();
+        assert!(label_layout_get(&conn, "58x40").unwrap().is_none());
+        let names = label_layout_list(&conn).unwrap();
+        assert!(names.is_empty());
+        let json = r#"{"format":1,"width_mm":58,"height_mm":40,"fields":[]}"#;
+        label_layout_put(&conn, "58x40", 58, 40, json).unwrap();
+        let row = label_layout_get(&conn, "58x40").unwrap().expect("row");
+        assert_eq!(row.width_mm, 58);
+        assert_eq!(row.height_mm, 40);
+        assert_eq!(row.json, json);
+        label_layout_put(&conn, "40x40", 40, 40, "{}").unwrap();
+        let json2 = r#"{"format":1,"width_mm":58,"height_mm":30,"fields":[]}"#;
+        label_layout_put(&conn, "58x40", 58, 30, json2).unwrap();
+        let rows = label_layout_list(&conn).unwrap();
+        assert_eq!(rows.len(), 2);
+        let upd = rows.iter().find(|r| r.0 == "58x40").unwrap();
+        assert_eq!((upd.1, upd.2), (58, 30));
+        let row = label_layout_get(&conn, "58x40").unwrap().expect("row");
+        assert_eq!(row.json, json2);
+    }
+    #[test]
+    fn label_layout_delete_reports_presence() {
+        let conn = open(Path::new(":memory:")).unwrap();
+        label_layout_put(&conn, "58x40", 58, 40, "{}").unwrap();
+        assert!(label_layout_delete(&conn, "58x40").unwrap());
+        assert!(label_layout_get(&conn, "58x40").unwrap().is_none());
+        assert!(!label_layout_delete(&conn, "58x40").unwrap());
     }
     #[test]
     fn truncated_xml_is_rejected() {
