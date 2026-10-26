@@ -1234,7 +1234,7 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     Ok(())
 }
 pub fn ruler_probe_bytes() -> Vec<u8> {
-    let alphabet: String = "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯАБВГДЕЖЗИЙКЛ".chars().collect();
+    let alphabet: String = "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯАБВГ".chars().collect();
     let mut job = LabelJob::begin((464, 608));
     for mm in (4..=72).step_by(4) {
         let y = (mm * 8) as u16;
