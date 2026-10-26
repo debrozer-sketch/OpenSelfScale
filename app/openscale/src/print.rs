@@ -415,7 +415,7 @@ const STALE_JOB: Duration = Duration::from_secs(25);
 const RECOVER_COOLDOWN: Duration = Duration::from_secs(10);
 const RECOVER_MAX: u8 = 3;
 const L4_READ_TIMEOUT: Duration = Duration::from_millis(300);
-const SCAN_STEP_DOTS: u8 = 12;
+const SCAN_STEP_DOTS: u8 = 8;
 enum Fail {
     Io(String),
     Printer(String),
@@ -1357,9 +1357,9 @@ mod tests {
     #[test]
     fn spec_label_area_and_field_positions() {
         let bytes = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
-        assert!(bytes.windows(10).any(|w| w == &[escpos::ESC, b'W', 0, 0, 0, 0, 0xB8, 0x02, 0xE0, 0x01][..]), "ESC W 696x480");
-        assert!(bytes.windows(4).any(|w| w == &[escpos::ESC, b'$', 0x18, 0x00][..]), "ESC $ x=24");
-        assert!(bytes.windows(4).any(|w| w == &[escpos::GS, b'$', 0x0C, 0x00][..]), "GS $ y=12");
+        assert!(bytes.windows(10).any(|w| w == &[escpos::ESC, b'W', 0, 0, 0, 0, 0xD0, 0x01, 0x40, 0x01][..]), "ESC W 464x320");
+        assert!(bytes.windows(4).any(|w| w == &[escpos::ESC, b'$', 0x10, 0x00][..]), "ESC $ x=16");
+        assert!(bytes.windows(4).any(|w| w == &[escpos::GS, b'$', 0x08, 0x00][..]), "GS $ y=8");
     }
     #[test]
     fn spec_label_renders_kinds() {
