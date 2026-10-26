@@ -39,6 +39,14 @@ export struct SetupRow {
     label: string,
     state: int,
 }
+export struct LabelPreviewRow {
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    text: string,
+    barcode: bool,
+}
 component DeptTile inherits Rectangle {
     in property <int> idx;
     in property <length> col-w;
@@ -342,12 +350,18 @@ export component MainWindow inherits Window {
     in property <bool> labels-confirm: false;
     in property <string> labels-popup-text;
     in property <bool> labels-popup-ok: true;
+    in property <bool> labels-preview-open: false;
+    in property <float> labels-preview-scale: 8.0;
+    in property <[LabelPreviewRow]> labels-preview-rows;
+    in property <string> labels-preview-name;
     callback labels-tap(int);
+    callback labels-delete-tap(int);
     callback labels-import-tap(int);
     callback labels-calibrate();
     callback labels-probe();
     callback labels-confirm-apply();
     callback labels-popup-close();
+    callback labels-preview-close();
     in property <string> prn-diag-text: "Идёт опрос принтера…";
     in property <bool> net-valid: false;
     callback net-mode(bool);
@@ -2105,10 +2119,10 @@ export component MainWindow inherits Window {
                 border-radius: 12px;
                 border-width: 2px;
                 border-color: #C9CFD7;
-                background: lbl-r-ta.pressed ? #F6DEDD : #FFFFFF;
+                background: lbl-r-ta.pressed ? #EAF2EC : #FFFFFF;
                 Text {
                     x: 24px;
-                    width: parent.width - 48px;
+                    width: parent.width - 96px;
                     height: parent.height;
                     text: row;
                     font-size: 22px;
@@ -2116,6 +2130,16 @@ export component MainWindow inherits Window {
                     color: #1A1E24;
                     vertical-alignment: center;
                     overflow: elide;
+                }
+                Rectangle {
+                    x: parent.width - 64px;
+                    y: 9px;
+                    width: 44px;
+                    height: 44px;
+                    border-radius: 10px;
+                    background: lbl-del-ta.pressed ? #F2B8B5 : #F6DEDD;
+                    Text { text: "✕"; font-size: 22px; font-weight: 700; color: #7A2E2E; }
+                    lbl-del-ta := TouchArea { clicked => { root.labels-delete-tap(i); } }
                 }
                 lbl-r-ta := TouchArea { clicked => { root.labels-tap(i); } }
             }
@@ -2429,6 +2453,69 @@ export component MainWindow inherits Window {
                         }
                     }
                 }
+            if root.labels-preview-open : Rectangle {
+                x: 0; y: 0;
+                width: parent.width;
+                height: parent.height;
+                background: #00000060;
+                Rectangle {
+                    x: (parent.width - root.labels-preview-scale * 58px) / 2;
+                    y: (parent.height - root.labels-preview-scale * 38px - 72px) / 2;
+                    width: root.labels-preview-scale * 58px;
+                    height: root.labels-preview-scale * 38px;
+                    background: #FFFFFF;
+                    border-width: 2px;
+                    border-color: #1A1E24;
+                    for r in root.labels-preview-rows : Rectangle {
+                        x: r.x * root.labels-preview-scale * 1px;
+                        y: r.y * root.labels-preview-scale * 1px;
+                        width: r.w * root.labels-preview-scale * 1px;
+                        height: r.h * root.labels-preview-scale * 1px;
+                        if r.barcode : Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            property <[length]> bars: [
+                                parent.width * 0.04, parent.width * 0.012, parent.width * 0.02, parent.width * 0.012,
+                                parent.width * 0.04, parent.width * 0.02, parent.width * 0.012, parent.width * 0.04,
+                                parent.width * 0.012, parent.width * 0.02, parent.width * 0.012, parent.width * 0.02,
+                                parent.width * 0.04, parent.width * 0.012, parent.width * 0.02, parent.width * 0.04,
+                                parent.width * 0.012, parent.width * 0.012, parent.width * 0.02, parent.width * 0.04,
+                            ];
+                            for w[j] in bars : Rectangle {
+                                x: (parent.width - parent.bars.length * parent.width * 0.05) / 2 + j * parent.width * 0.05;
+                                width: w;
+                                height: parent.height * 0.82;
+                                background: #000000;
+                            }
+                        }
+                        if !r.barcode : Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: r.text;
+                            font-size: r.h * root.labels-preview-scale * 0.92px;
+                            color: #000000;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                Rectangle {
+                    x: (parent.width - 280px) / 2;
+                    y: parent.height - 96px;
+                    width: 280px;
+                    height: 64px;
+                    border-radius: 12px;
+                    background: lbl-pv-ta.pressed ? #1E4D3A : #2E7D57;
+                    Text {
+                        text: "ЗАКРЫТЬ · " + root.labels-preview-name;
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: #FFFFFF;
+                        overflow: elide;
+                    }
+                    lbl-pv-ta := TouchArea { clicked => { root.labels-preview-close(); } }
+                }
             }
     }
+}
 }

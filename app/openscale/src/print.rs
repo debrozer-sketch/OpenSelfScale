@@ -83,6 +83,94 @@ pub fn build_label(
 fn money(kop: i64) -> String {
     format!("{},{:02}", kop / 100, kop % 100)
 }
+pub const FONT_A_CELL_MM: f64 = 1.5;
+pub const FONT_A_HEIGHT_MM: f64 = 3.0;
+pub const FONT_B_CELL_MM: f64 = 1.125;
+pub const FONT_B_HEIGHT_MM: f64 = 2.125;
+pub const BARCODE_WIDTH_MM: f64 = 24.0;
+pub const BARCODE_HEIGHT_MM: f64 = 6.0;
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewItem {
+    pub x_mm: f64,
+    pub y_mm: f64,
+    pub w_mm: f64,
+    pub h_mm: f64,
+    pub text: String,
+    pub barcode: bool,
+}
+fn spec_field_text(
+    f: &crate::label::LabelField,
+    item: &PluItem,
+    weight_g: u32,
+    sum_kop: i64,
+    date: &str,
+    time: &str,
+) -> Option<String> {
+    use crate::label::LabelKind;
+    Some(match f.kind {
+        LabelKind::Name => item.namefirst.clone(),
+        LabelKind::Plu => format!("PLU {}", item.plu),
+        LabelKind::Weight => format!("{},{:03}", weight_g / 1000, weight_g % 1000),
+        LabelKind::Price => money(item.price),
+        LabelKind::Sum => money(sum_kop),
+        LabelKind::Date => date.to_string(),
+        LabelKind::Time => time.to_string(),
+        LabelKind::Shelflife => shelflife_label(&item.shelflife)?,
+        LabelKind::Cardprice => money(item.card_price?),
+        LabelKind::Text => f.text.clone(),
+        LabelKind::Barcode => return None,
+    })
+}
+pub fn preview_items(
+    spec: &crate::label::LabelSpec,
+    item: &PluItem,
+    weight_g: u32,
+    sum_kop: i64,
+    date: &str,
+    time: &str,
+) -> Vec<PreviewItem> {
+    use crate::label::LabelKind;
+    let mut out = Vec::new();
+    for f in &spec.fields {
+        let (cell, height) = if f.font_a {
+            (FONT_A_CELL_MM, FONT_A_HEIGHT_MM)
+        } else {
+            (FONT_B_CELL_MM, FONT_B_HEIGHT_MM)
+        };
+        let (cell, height) = if f.kind == LabelKind::Sum && f.size2 {
+            (cell * 2.0, height * 2.0)
+        } else if f.size2 {
+            (cell, height * 2.0)
+        } else {
+            (cell, height)
+        };
+        if f.kind == LabelKind::Barcode {
+            out.push(PreviewItem {
+                x_mm: f.x_mm,
+                y_mm: f.y_mm,
+                w_mm: BARCODE_WIDTH_MM * if f.size2 { 2.0 } else { 1.0 },
+                h_mm: BARCODE_HEIGHT_MM * if f.size2 { 2.0 } else { 1.0 },
+                text: String::new(),
+                barcode: true,
+            });
+            continue;
+        }
+        let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time) else {
+            continue;
+        };
+        for (i, ch) in text.chars().enumerate() {
+            out.push(PreviewItem {
+                x_mm: f.x_mm + i as f64 * cell,
+                y_mm: f.y_mm,
+                w_mm: cell,
+                h_mm: height,
+                text: ch.to_string(),
+                barcode: false,
+            });
+        }
+    }
+    out
+}
 pub fn pick_layout(conn: &rusqlite::Connection, measured_len_mm: Option<i32>) -> Option<crate::label::LabelSpec> {
     let rows = datastore::label_layout_list(conn).ok()?;
     if rows.is_empty() {
@@ -1461,6 +1549,23 @@ mod tests {
         let conn = datastore::open(std::path::Path::new(":memory:")).unwrap();
         registry(&conn, "58x40", 40, SPEC_40);
         assert_eq!(pick_layout(&conn, Some(80)).unwrap().name, "58x40");
+    }
+    #[test]
+    fn preview_items_match_printer_metrics() {
+        let spec = spec_58x40();
+        let items = preview_items(&spec, &sample(), 1350, 26999, "13.10.26", "18:40:00");
+        let barcode = items.iter().find(|i| i.barcode).unwrap();
+        assert_eq!((barcode.x_mm, barcode.y_mm), (2.0, 5.0));
+        assert_eq!((barcode.w_mm, barcode.h_mm), (24.0, 6.0));
+        let name: Vec<_> = items.iter().filter(|i| !i.barcode && i.text == "В").collect();
+        assert_eq!(name.len(), 1);
+        let first = items.iter().find(|i| i.text == "В").unwrap();
+        assert_eq!((first.x_mm, first.y_mm), (2.0, 1.0));
+        assert_eq!((first.w_mm, first.h_mm), (1.5, 3.0));
+        let second = items.iter().filter(|i| !i.barcode).nth(1).unwrap();
+        assert_eq!(second.x_mm, 3.5);
+        let total_chars: usize = items.iter().filter(|i| !i.barcode).map(|i| i.text.chars().count()).sum();
+        assert_eq!(total_chars, items.iter().filter(|i| !i.barcode).count());
     }
     #[test]
     fn pick_by_length_window() {

@@ -1374,6 +1374,69 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     ui.on_labels_tap({
         let kiosk = kiosk.clone();
         let ui_handle = ui_handle.clone();
+        let cfg = cfg.clone();
+        move |i: i32| {
+            let name = {
+                let k = kiosk.borrow();
+                k.labels_rows.get(i as usize).map(|(n, _, _, _)| n.clone())
+            };
+            let Some(name) = name else { return };
+            let conn = match datastore::open(&cfg.db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    log::warn!("меню: этикетки: предпросмотр: база: {e}");
+                    return;
+                }
+            };
+            let row = match datastore::label_layout_get(&conn, &name) {
+                Ok(Some(r)) => r,
+                _ => return,
+            };
+            let Ok(spec) = crate::label::parse(&row.json) else { return };
+            let items = match datastore::load_all(&conn) {
+                Ok(list) if !list.is_empty() => list,
+                _ => return,
+            };
+            let entry = &items[0];
+            let item = match datastore::get_item(&conn, &entry.plu) {
+                Ok(Some(it)) => it,
+                _ => return,
+            };
+            let (date, time) = crate::print::now_stamp();
+            let sum_kop = crate::session::round_sum(
+                crate::session::sum_kopecks(item.price, 1000),
+                0,
+            );
+            let preview = crate::print::preview_items(&spec, &item, 1000, sum_kop, &date, &time);
+            if let Some(ui) = ui_handle.upgrade() {
+                let rows: Vec<crate::LabelPreviewRow> = preview
+                    .into_iter()
+                    .map(|p| crate::LabelPreviewRow {
+                        x: p.x_mm as f32,
+                        y: p.y_mm as f32,
+                        w: p.w_mm as f32,
+                        h: p.h_mm as f32,
+                        text: p.text.into(),
+                        barcode: p.barcode,
+                    })
+                    .collect();
+                ui.set_labels_preview_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+                ui.set_labels_preview_name(name.into());
+                ui.set_labels_preview_open(true);
+            }
+        }
+    });
+    ui.on_labels_preview_close({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_labels_preview_open(false);
+            }
+        }
+    });
+    ui.on_labels_delete_tap({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
         move |i: i32| {
             let name = {
                 let k = kiosk.borrow();
