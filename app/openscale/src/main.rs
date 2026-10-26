@@ -8,6 +8,7 @@ mod context;
 mod depts_cli;
 mod diag;
 mod flow;
+mod label;
 mod net;
 mod print;
 mod session;
