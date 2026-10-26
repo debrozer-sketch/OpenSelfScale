@@ -21,6 +21,7 @@ pub enum FieldStyle {
     Normal,
     FontB,
     DoubleH,
+    Dbl,
 }
 impl FieldStyle {
     fn bytes(self) -> [u8; 2] {
@@ -28,6 +29,7 @@ impl FieldStyle {
             FieldStyle::Normal => [0x00, 0x00],
             FieldStyle::FontB => [0x01, 0x00],
             FieldStyle::DoubleH => [0x00, 0x01],
+            FieldStyle::Dbl => [0x20, 0x11],
         }
     }
 }
@@ -271,6 +273,20 @@ impl<P: Read + Write> EscPosPrinter<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn field_dbl_uses_double_wide_and_double_high() {
+        let mut job = LabelJob::begin((448, 232));
+        job.field(10, 20, FieldStyle::Dbl, "СУММА").unwrap();
+        let out = job.finish();
+        assert!(window(&out, &[ESC, b'!', 0x20, GS, b'!', 0x11]).is_some());
+    }
+    #[test]
+    fn field_normal_keeps_plain_style_bytes() {
+        let mut job = LabelJob::begin((448, 232));
+        job.field(0, 0, FieldStyle::Normal, "X").unwrap();
+        let out = job.finish();
+        assert!(window(&out, &[ESC, b'!', 0x00, GS, b'!', 0x00]).is_some());
+    }
     #[test]
     fn init_sequence_matches_live_dump() {
         let job = LabelJob::begin((448, 232));
