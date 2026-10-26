@@ -112,6 +112,25 @@ pub fn list(cfg: &Config) -> Vec<PathBuf> {
     files.sort_by_key(|p| std::cmp::Reverse(p.metadata().and_then(|m| m.modified()).ok()));
     files
 }
+pub fn label_json_files(dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .map(|n| {
+                            let n = n.to_string_lossy();
+                            n.starts_with("label-") && n.ends_with(".json")
+                        })
+                        .unwrap_or(false)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
 pub const MAX_FILE_BYTES: u64 = 256 * 1024;
 pub fn parse(path: &Path) -> Result<ConfigFile, String> {
     let len = std::fs::metadata(path)
@@ -246,6 +265,24 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn label_json_files_only_label_json() {
+        let dir = std::env::temp_dir().join(format!("openscale-lbl-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["label-a.json", "label-b.txt", "other.json", "label-.json"] {
+            std::fs::write(dir.join(name), "{}").unwrap();
+        }
+        let mut got = label_json_files(&dir);
+        let names: Vec<String> = got
+            .drain(..)
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert!(names.contains(&"label-a.json".to_string()));
+        assert!(names.contains(&"label-.json".to_string()));
+        assert_eq!(names.len(), 2, "{names:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     #[test]
     fn roundtrip_toml() {
         let f = ConfigFile {

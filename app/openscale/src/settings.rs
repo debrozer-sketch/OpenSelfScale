@@ -920,6 +920,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     }
                     refresh_report(&cfg, &kiosk, &ui_handle);
                 }
+                "labels" => {
+                    refresh_labels(&cfg, &kiosk, &ui_handle);
+                    kiosk.borrow_mut().admin_stage = 21;
+                }
                 "report-period" | "report-kind" => {
                     const PERIODS: [&str; 5] =
                         ["Сегодня", "3 дня", "Неделя", "Месяц", "Всё время"];
@@ -1367,13 +1371,232 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     });
+    ui.on_labels_tap({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
+        move |i: i32| {
+            let name = {
+                let k = kiosk.borrow();
+                k.labels_rows.get(i as usize).map(|(n, _, _, _)| n.clone())
+            };
+            let Some(name) = name else { return };
+            kiosk.borrow_mut().labels_pending_del = Some(name.clone());
+            show_labels_popup(&ui_handle, true, true, format!("Удалить раскладку «{name}»?"));
+        }
+    });
+    ui.on_labels_confirm_apply({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
+        let cfg = cfg.clone();
+        move || {
+            let name = kiosk.borrow().labels_pending_del.clone();
+            kiosk.borrow_mut().labels_pending_del = None;
+            let Some(name) = name else { return };
+            let res = datastore::open(&cfg.db_path)
+                .map_err(|e| format!("база: {e}"))
+                .and_then(|conn| datastore::label_layout_delete(&conn, &name).map_err(|e| format!("база: {e}")))
+                .map(|deleted| {
+                    if deleted {
+                        format!("Удалено: «{name}»")
+                    } else {
+                        format!("Раскладка «{name}» не найдена")
+                    }
+                });
+            match res {
+                Ok(text) => {
+                    log::info!("меню: этикетки: {text}");
+                    refresh_labels(&cfg, &kiosk, &ui_handle);
+                    show_labels_popup(&ui_handle, true, false, text);
+                }
+                Err(e) => {
+                    log::warn!("меню: этикетки: удаление: {e}");
+                    show_labels_popup(&ui_handle, false, false, format!("Не удалено:\n{e}"));
+                }
+            }
+        }
+    });
+    ui.on_labels_popup_close({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_labels_popup_open(false);
+                ui.set_labels_confirm(false);
+            }
+        }
+    });
+    ui.on_labels_import_tap({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
+        let cfg = cfg.clone();
+        move |i: i32| {
+            if i < 0 {
+                show_labels_popup(
+                    &ui_handle,
+                    true,
+                    false,
+                    format!(
+                        "Положите label-<имя>.json в\n{}\nи нажмите на файл в списке",
+                        cfg.kiosk.cfg_export_dir.display()
+                    ),
+                );
+                return;
+            }
+            let path = {
+                let k = kiosk.borrow();
+                k.labels_files.get(i as usize).cloned()
+            };
+            let Some(path) = path else { return };
+            let raw = match std::fs::read_to_string(&path) {
+                Ok(r) => r,
+                Err(e) => {
+                    log::warn!("меню: этикетки: чтение {}: {e}", path.display());
+                    show_labels_popup(&ui_handle, false, false, format!("Файл не читается:\n{e}"));
+                    return;
+                }
+            };
+            let spec = match crate::label::parse(&raw) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("меню: этикетки: {}: {e}", path.display());
+                    show_labels_popup(&ui_handle, false, false, format!("Раскладка отвергнута:\n{e}"));
+                    return;
+                }
+            };
+            let res = datastore::open(&cfg.db_path)
+                .map_err(|e| format!("база: {e}"))
+                .and_then(|conn| {
+                    let known = datastore::label_layout_get(&conn, &spec.name).ok().flatten().is_some();
+                    if !known && conn.query_row("SELECT COUNT(*) FROM label_layouts", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as usize >= MAX_LABEL_LAYOUTS {
+                        return Err(format!("лимит {MAX_LABEL_LAYOUTS} раскладок: сначала удалите лишнюю"));
+                    }
+                    let json = serde_json::to_string(&serde_json::from_str::<serde_json::Value>(&raw).unwrap_or_default()).unwrap_or_else(|_| raw.clone());
+                    datastore::label_layout_put(&conn, &spec.name, spec.width_mm as i64, spec.height_mm as i64, &json)
+                        .map_err(|e| format!("база: {e}"))
+                });
+            match res {
+                Ok(()) => {
+                    log::info!("меню: этикетки: импорт «{}»: {}×{} мм, полей {}", spec.name, spec.width_mm, spec.height_mm, spec.fields.len());
+                    refresh_labels(&cfg, &kiosk, &ui_handle);
+                    show_labels_popup(&ui_handle, true, false, format!(
+                        "Импортировано: «{}»\n{}×{} мм, полей {}",
+                        spec.name, spec.width_mm, spec.height_mm, spec.fields.len()
+                    ));
+                }
+                Err(e) => {
+                    log::warn!("меню: этикетки: импорт: {e}");
+                    show_labels_popup(&ui_handle, false, false, format!("Не импортировано:\n{e}"));
+                }
+            }
+        }
+    });
+    ui.on_labels_calibrate({
+        let ui_handle = ui_handle.clone();
+        let cfg = cfg.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_labels_status("Идёт проверка роликов: смотрите на принтер…".into());
+            }
+            let cfg = cfg.clone();
+            let ui_handle = ui_handle.clone();
+            std::thread::spawn(move || {
+                let res = crate::print::calibrate_label(&cfg);
+                let text = match res {
+                    Ok(len) => {
+                        let conn = datastore::open(&cfg.db_path);
+                        let (fit, total) = conn
+                            .ok()
+                            .and_then(|conn| {
+                                let rows = datastore::label_layout_list(&conn).ok()?;
+                                let specs: Vec<_> = rows
+                                    .iter()
+                                    .filter_map(|r| crate::label::parse(&r.json).ok())
+                                    .collect();
+                                Some((
+                                    specs.iter().filter(|s| (s.height_mm - len as i32).abs() <= 5).count(),
+                                    specs.len(),
+                                ))
+                            })
+                            .unwrap_or((0, 0));
+                        if let Ok(conn) = datastore::open(&cfg.db_path) {
+                            let _ = datastore::set_calibration(&conn, "label_length_mm", len as i64);
+                        }
+                        log::info!("меню: этикетки: проверка роликов: длина {len} мм, подходит {fit}/{total}");
+                        format!("Длина рулона: {len} мм · подходит раскладок: {fit}/{total}")
+                    }
+                    Err(e) => {
+                        log::warn!("меню: этикетки: проверка роликов: {e}");
+                        format!("Проверка не удалась:\n{e}")
+                    }
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_labels_status(text.into());
+                    }
+                });
+            });
+        }
+    });
+}
+const MAX_LABEL_LAYOUTS: usize = 8;
+fn refresh_labels(
+    cfg: &crate::config::Config,
+    kiosk: &std::rc::Rc<std::cell::RefCell<crate::session::Kiosk>>,
+    ui_handle: &slint::Weak<MainWindow>,
+) {
+    let mut rows: Vec<(String, i64, i64, usize)> = Vec::new();
+    if let Ok(conn) = datastore::open(&cfg.db_path) {
+        if let Ok(list) = datastore::label_layout_list(&conn) {
+            for r in list {
+                let n = crate::label::parse(&r.json).map(|s| s.fields.len()).unwrap_or(0);
+                rows.push((r.name, r.width_mm, r.height_mm, n));
+            }
+        }
+    }
+    let files_list = cfgio::label_json_files(&cfg.kiosk.cfg_export_dir);
+    let files: Vec<String> = files_list
+        .iter()
+        .map(|p| {
+            p.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default()
+        })
+        .collect();
+    {
+        let mut k = kiosk.borrow_mut();
+        k.labels_rows = rows.clone();
+        k.labels_files = files_list;
+    }
+    if let Some(ui) = ui_handle.upgrade() {
+        let shown: Vec<slint::SharedString> = rows
+            .iter()
+            .map(|(n, w, h, f)| format!("{n} · {w}×{h} мм · полей {f}").into())
+            .collect();
+        ui.set_labels_rows(slint::ModelRc::new(slint::VecModel::from(shown)));
+        let fnames: Vec<slint::SharedString> = files.iter().map(|f| f.as_str().into()).collect();
+        ui.set_labels_files(slint::ModelRc::new(slint::VecModel::from(fnames)));
+    }
+}
+fn show_labels_popup(
+    ui_handle: &slint::Weak<MainWindow>,
+    ok: bool,
+    confirm: bool,
+    text: String,
+) {
+    let ui_handle = ui_handle.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(ui) = ui_handle.upgrade() {
+            ui.set_labels_popup_ok(ok);
+            ui.set_labels_confirm(confirm);
+            ui.set_labels_popup_text(text.into());
+            ui.set_labels_popup_open(true);
+        }
+    });
 }
 fn refresh_report(
     cfg: &crate::config::Config,
     kiosk: &std::rc::Rc<std::cell::RefCell<crate::session::Kiosk>>,
     ui_handle: &slint::Weak<MainWindow>,
-) {
-    let (period, kind) = {
+) {    let (period, kind) = {
         let k = kiosk.borrow();
         (k.report_period, k.report_kind)
     };
