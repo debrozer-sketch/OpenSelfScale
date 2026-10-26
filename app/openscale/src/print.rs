@@ -622,6 +622,10 @@ fn print_job(
 ) -> Result<(), Fail> {
     ensure_ready(port)?;
     drain_port_rx(port);
+    port.write_all(&[escpos::GS, escpos::FF]).map_err(Fail::io)?;
+    port.flush().map_err(Fail::io)?;
+    std::thread::sleep(Duration::from_millis(600));
+    drain_port_rx(port);
     port.write_all(bytes).map_err(Fail::io)?;
     port.flush().map_err(Fail::io)?;
     let t0 = std::time::Instant::now();
