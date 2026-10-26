@@ -84,7 +84,6 @@ fn money(kop: i64) -> String {
     format!("{},{:02}", kop / 100, kop % 100)
 }
 pub fn pick_layout(conn: &rusqlite::Connection, measured_len_mm: Option<i32>) -> Option<crate::label::LabelSpec> {
-    let len = measured_len_mm?;
     let rows = datastore::label_layout_list(conn).ok()?;
     if rows.is_empty() {
         return None;
@@ -103,6 +102,13 @@ pub fn pick_layout(conn: &rusqlite::Connection, measured_len_mm: Option<i32>) ->
     if broken > 0 {
         log::warn!("раскладок с ошибками: {broken}");
     }
+    let Some(len) = measured_len_mm else {
+        return if specs.len() == 1 {
+            specs.into_iter().next()
+        } else {
+            None
+        };
+    };
     crate::label::choose(&specs, len)
 }
 pub fn build_label_from_spec(
@@ -1398,9 +1404,14 @@ mod tests {
         assert!(pick_layout(&conn, Some(40)).is_none());
     }
     #[test]
-    fn pick_without_measurement_is_none() {
+    fn pick_without_measurement_needs_single_layout() {
         let conn = datastore::open(std::path::Path::new(":memory:")).unwrap();
+        assert!(pick_layout(&conn, None).is_none());
         registry(&conn, "58x40", 40, SPEC_40);
+        assert_eq!(pick_layout(&conn, None).unwrap().name, "58x40");
+        registry(&conn, "битая", 40, r#"{"format":9,"fields":[]}"#);
+        assert_eq!(pick_layout(&conn, None).unwrap().name, "58x40");
+        registry(&conn, "58x20", 20, SPEC_20);
         assert!(pick_layout(&conn, None).is_none());
     }
     #[test]
@@ -1410,6 +1421,14 @@ mod tests {
         registry(&conn, "58x40", 40, SPEC_40);
         let picked = pick_layout(&conn, Some(40)).unwrap();
         assert_eq!(picked.name, "58x40");
+    }
+    #[test]
+    fn pick_single_layout_without_measurement() {
+        let conn = datastore::open(std::path::Path::new(":memory:")).unwrap();
+        registry(&conn, "58x40", 40, SPEC_40);
+        assert_eq!(pick_layout(&conn, None).unwrap().name, "58x40");
+        registry(&conn, "58x20", 20, SPEC_20);
+        assert!(pick_layout(&conn, None).is_none());
     }
     #[test]
     fn pick_by_length_window() {
