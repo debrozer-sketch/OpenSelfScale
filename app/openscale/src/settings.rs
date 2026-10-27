@@ -1698,7 +1698,7 @@ fn show_preview(
             w: p.w_mm as f32,
             h: p.h_mm as f32,
             text: p.text.into(),
-            barcode: p.barcode,
+            kind: if p.barcode { 1 } else { 0 },
         })
         .collect();
     ui.set_labels_preview_rows(slint::ModelRc::new(slint::VecModel::from(rows)));

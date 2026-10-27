@@ -45,7 +45,7 @@ export struct LabelPreviewRow {
     w: float,
     h: float,
     text: string,
-    barcode: bool,
+    kind: int,
 }
 component DeptTile inherits Rectangle {
     in property <int> idx;
@@ -2474,7 +2474,7 @@ export component MainWindow inherits Window {
                         y: r.y * root.labels-preview-scale * 1px;
                         width: r.w * root.labels-preview-scale * 1px;
                         height: r.h * root.labels-preview-scale * 1px;
-                        if r.barcode : Rectangle {
+                        if r.kind == 1 : Rectangle {
                             width: parent.width;
                             height: parent.height;
                             property <[length]> bars: [
@@ -2491,15 +2491,16 @@ export component MainWindow inherits Window {
                                 background: #000000;
                             }
                         }
-                        if !r.barcode : Text {
-                            x: -parent.width * 1.5;
-                            width: parent.width * 4;
+                        if r.kind == 0 : Text {
+                            x: -parent.width * 0.3;
+                            width: parent.width * 1.6;
                             height: parent.height;
                             text: r.text;
                             font-size: r.h * root.labels-preview-scale * 0.92px;
                             color: #000000;
                             horizontal-alignment: center;
                             vertical-alignment: center;
+                            wrap: no-wrap;
                         }
                     }
                 }
