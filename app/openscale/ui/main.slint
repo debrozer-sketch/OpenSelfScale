@@ -2455,6 +2455,7 @@ export component MainWindow inherits Window {
                         }
                     }
                 }
+            }
             if root.labels-preview-open : Rectangle {
                 x: 0; y: 0;
                 width: parent.width;
@@ -2531,9 +2532,9 @@ export component MainWindow inherits Window {
                         color: #FFFFFF;
                         overflow: elide;
                     }
-                    lbl-pv-ta := TouchArea { clicked => { root.labels-preview-close(); } }
+                     lbl-pv-ta := TouchArea { clicked => { root.labels-preview-close(); } }
                 }
             }
     }
 }
-}
+
