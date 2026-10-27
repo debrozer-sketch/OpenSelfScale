@@ -1393,37 +1393,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 _ => return,
             };
             let Ok(spec) = crate::label::parse(&row.json) else { return };
-            let items = match datastore::load_all(&conn) {
-                Ok(list) if !list.is_empty() => list,
-                _ => return,
-            };
-            let entry = &items[0];
-            let item = match datastore::get_item(&conn, &entry.plu) {
-                Ok(Some(it)) => it,
-                _ => return,
-            };
-            let (date, time) = crate::print::now_stamp();
-            let sum_kop = crate::session::round_sum(
-                crate::session::sum_kopecks(item.price, 1000),
-                0,
-            );
-            let preview = crate::print::preview_items(&spec, &item, 1000, sum_kop, &date, &time);
-            if let Some(ui) = ui_handle.upgrade() {
-                let rows: Vec<crate::LabelPreviewRow> = preview
-                    .into_iter()
-                    .map(|p| crate::LabelPreviewRow {
-                        x: p.x_mm as f32,
-                        y: p.y_mm as f32,
-                        w: p.w_mm as f32,
-                        h: p.h_mm as f32,
-                        text: p.text.into(),
-                        barcode: p.barcode,
-                    })
-                    .collect();
-                ui.set_labels_preview_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
-                ui.set_labels_preview_name(name.into());
-                ui.set_labels_preview_open(true);
-            }
+            show_preview(&cfg, &kiosk, &ui_handle, &spec);
         }
     });
     ui.on_labels_preview_close({
@@ -1521,6 +1491,41 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 Ok(s) => s,
                 Err(e) => {
                     log::warn!("меню: этикетки: {}: {e}", path.display());
+                    show_labels_popup(&ui_handle, false, false, format!("Раскладка отвергнута:\n{e}"));
+                    return;
+                }
+            };
+            kiosk.borrow_mut().labels_pending_import = Some(path.clone());
+            if show_preview(&cfg, &kiosk, &ui_handle, &spec) {
+                if let Some(ui) = ui_handle.upgrade() {
+                    ui.set_labels_preview_name(path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default().into());
+                    ui.set_labels_preview_importable(true);
+                }
+            }
+        }
+    });
+    ui.on_labels_preview_import({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
+        let cfg = cfg.clone();
+        move || {
+            let path = kiosk.borrow().labels_pending_import.clone();
+            kiosk.borrow_mut().labels_pending_import = None;
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_labels_preview_open(false);
+                ui.set_labels_preview_importable(false);
+            }
+            let Some(path) = path else { return };
+            let raw = match std::fs::read_to_string(&path) {
+                Ok(r) => r,
+                Err(e) => {
+                    show_labels_popup(&ui_handle, false, false, format!("Файл не читается:\n{e}"));
+                    return;
+                }
+            };
+            let spec = match crate::label::parse(&raw) {
+                Ok(s) => s,
+                Err(e) => {
                     show_labels_popup(&ui_handle, false, false, format!("Раскладка отвергнута:\n{e}"));
                     return;
                 }
@@ -1667,6 +1672,39 @@ fn refresh_labels(
         let fnames: Vec<slint::SharedString> = files.iter().map(|f| f.as_str().into()).collect();
         ui.set_labels_files(slint::ModelRc::new(slint::VecModel::from(fnames)));
     }
+}
+fn show_preview(
+    cfg: &crate::config::Config,
+    _kiosk: &std::rc::Rc<std::cell::RefCell<crate::session::Kiosk>>,
+    ui_handle: &slint::Weak<MainWindow>,
+    spec: &crate::label::LabelSpec,
+) -> bool {
+    let Ok(conn) = datastore::open(&cfg.db_path) else { return false };
+    let items = match datastore::load_all(&conn) {
+        Ok(list) if !list.is_empty() => list,
+        _ => return false,
+    };
+    let entry = &items[0];
+    let Ok(Some(item)) = datastore::get_item(&conn, &entry.plu) else { return false };
+    let (date, time) = crate::print::now_stamp();
+    let sum_kop = crate::session::round_sum(crate::session::sum_kopecks(item.price, 1000), 0);
+    let preview = crate::print::preview_items(&spec, &item, 1000, sum_kop, &date, &time);
+    let Some(ui) = ui_handle.upgrade() else { return false };
+    let rows: Vec<crate::LabelPreviewRow> = preview
+        .into_iter()
+        .map(|p| crate::LabelPreviewRow {
+            x: p.x_mm as f32,
+            y: p.y_mm as f32,
+            w: p.w_mm as f32,
+            h: p.h_mm as f32,
+            text: p.text.into(),
+            barcode: p.barcode,
+        })
+        .collect();
+    ui.set_labels_preview_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+    ui.set_labels_preview_name(spec.name.as_str().into());
+    ui.set_labels_preview_open(true);
+    true
 }
 fn show_labels_popup(
     ui_handle: &slint::Weak<MainWindow>,

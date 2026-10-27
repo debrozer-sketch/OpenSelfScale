@@ -351,6 +351,7 @@ export component MainWindow inherits Window {
     in property <string> labels-popup-text;
     in property <bool> labels-popup-ok: true;
     in property <bool> labels-preview-open: false;
+    in property <bool> labels-preview-importable: false;
     in property <float> labels-preview-scale: 8.0;
     in property <[LabelPreviewRow]> labels-preview-rows;
     in property <string> labels-preview-name;
@@ -362,6 +363,7 @@ export component MainWindow inherits Window {
     callback labels-confirm-apply();
     callback labels-popup-close();
     callback labels-preview-close();
+    callback labels-preview-import();
     in property <string> prn-diag-text: "Идёт опрос принтера…";
     in property <bool> net-valid: false;
     callback net-mode(bool);
@@ -2131,6 +2133,7 @@ export component MainWindow inherits Window {
                     vertical-alignment: center;
                     overflow: elide;
                 }
+                lbl-r-ta := TouchArea { clicked => { root.labels-tap(i); } }
                 Rectangle {
                     x: parent.width - 64px;
                     y: 9px;
@@ -2141,7 +2144,6 @@ export component MainWindow inherits Window {
                     Text { text: "✕"; font-size: 22px; font-weight: 700; color: #7A2E2E; }
                     lbl-del-ta := TouchArea { clicked => { root.labels-delete-tap(i); } }
                 }
-                lbl-r-ta := TouchArea { clicked => { root.labels-tap(i); } }
             }
             if root.labels-rows.length == 0 && root.labels-files.length == 0 : Text {
                 x: 16px;
@@ -2489,7 +2491,8 @@ export component MainWindow inherits Window {
                             }
                         }
                         if !r.barcode : Text {
-                            width: parent.width;
+                            x: -parent.width * 1.5;
+                            width: parent.width * 4;
                             height: parent.height;
                             text: r.text;
                             font-size: r.h * root.labels-preview-scale * 0.92px;
@@ -2499,15 +2502,30 @@ export component MainWindow inherits Window {
                         }
                     }
                 }
+                if root.labels-preview-importable : Rectangle {
+                    x: (parent.width - 600px) / 2;
+                    y: parent.height - 96px;
+                    width: 280px;
+                    height: 64px;
+                    border-radius: 12px;
+                    background: lbl-imp-yes-ta.pressed ? #1E4D3A : #2E7D57;
+                    Text {
+                        text: "ИМПОРТИРОВАТЬ";
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: #FFFFFF;
+                    }
+                    lbl-imp-yes-ta := TouchArea { clicked => { root.labels-preview-import(); } }
+                }
                 Rectangle {
-                    x: (parent.width - 280px) / 2;
+                    x: root.labels-preview-importable ? (parent.width - 600px) / 2 + 320px : (parent.width - 280px) / 2;
                     y: parent.height - 96px;
                     width: 280px;
                     height: 64px;
                     border-radius: 12px;
                     background: lbl-pv-ta.pressed ? #1E4D3A : #2E7D57;
                     Text {
-                        text: "ЗАКРЫТЬ · " + root.labels-preview-name;
+                        text: root.labels-preview-importable ? "ОТМЕНА" : ("ЗАКРЫТЬ · " + root.labels-preview-name);
                         font-size: 20px;
                         font-weight: 700;
                         color: #FFFFFF;
