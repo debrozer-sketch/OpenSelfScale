@@ -154,6 +154,10 @@ impl LabelJob {
         self.buf.extend_from_slice(&[GS, b'/', 0x00]);
         Ok(self)
     }
+    pub fn raw(&mut self, data: &[u8]) -> &mut Self {
+        self.buf.extend_from_slice(data);
+        self
+    }
     pub fn finish(mut self) -> Vec<u8> {
         self.buf.extend_from_slice(&[ESC, b'!', 0x00]);
         self.buf.extend_from_slice(&[GS, b'!', 0x00]);

@@ -1409,12 +1409,34 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     Ok(())
 }
 pub fn ruler_probe_bytes() -> Vec<u8> {
-    let alphabet: String = "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯАБВГ".chars().collect();
-    let mut job = LabelJob::begin((464, 608));
-    for mm in (4..=72).step_by(4) {
-        let y = (mm * 8) as u16;
-        let _ = job.field(0, y, FieldStyle::Normal, &alphabet);
+    let mut job = LabelJob::begin((448, 640));
+    for y in (0..=50).step_by(5) {
+        for x in (0..=55).step_by(5) {
+            let _ = job.field((x * 8) as u16, (y * 8) as u16, FieldStyle::Normal, "+");
+        }
     }
+    for x in (5..=55).step_by(5) {
+        let _ = job.field((x * 8 + 2) as u16, 4, FieldStyle::FontB, &x.to_string());
+    }
+    for y in (5..=50).step_by(5) {
+        let _ = job.field(4, (y * 8 + 4) as u16, FieldStyle::FontB, &y.to_string());
+    }
+    let barcode = |job: &mut LabelJob, x_dots: u16, h_dots: u8| {
+        let y_dots: u16 = 58 * 8;
+        let mut seq = vec![escpos::ESC, b'$', x_dots as u8, (x_dots >> 8) as u8];
+        seq.extend_from_slice(&[escpos::GS, b'$', y_dots as u8, (y_dots >> 8) as u8]);
+        seq.extend_from_slice(&[escpos::GS, b'w', 0x02, escpos::GS, b'h', h_dots, escpos::GS, b'H', 0x00]);
+        seq.extend_from_slice(&[escpos::GS, b'k', 0x02]);
+        seq.extend_from_slice(b"210000000001");
+        seq.push(0x00);
+        job.raw(&seq);
+    };
+    barcode(&mut job, 16, 24);
+    barcode(&mut job, 240, 48);    job.raw(&[escpos::ESC, b'3', 0x00]);
+    let _ = job.field(16, 74 * 8, FieldStyle::Normal, "X");
+    job.raw(&[escpos::ESC, b'3', 0x18]);
+    let _ = job.field(96, 74 * 8, FieldStyle::Normal, "X");
+    job.raw(&[escpos::ESC, b'3', 0x00]);
     job.finish()
 }
 pub fn print_ruler_probe(cfg: &crate::config::Config) -> Result<(), PrintError> {
