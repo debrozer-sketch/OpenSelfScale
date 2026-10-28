@@ -77,7 +77,7 @@ pub fn build_label(
     job.field(layout.weight.0, layout.weight.1, FieldStyle::FontB, &kg)?
         .field(layout.price.0, layout.price.1, FieldStyle::FontB, &price_r)?
         .field(layout.sum.0, layout.sum.1, FieldStyle::DoubleH, &sum_r)?
-        .barcode_ean13(layout.barcode.0, layout.barcode.1, &ean13_payload(item, weight_g))?;
+        .barcode_ean13(layout.barcode.0, layout.barcode.1, &ean13_payload(item, weight_g), 2)?;
     Ok(job.finish())
 }
 fn money(kop: i64) -> String {
@@ -153,31 +153,55 @@ pub fn preview_items(
     use crate::label::LabelKind;
     let mut out = Vec::new();
     for f in &spec.fields {
-        let height = if f.font_a { FONT_A_HEIGHT_MM } else { FONT_B_HEIGHT_MM };
-        let height = if f.size2 { height * 2.0 } else { height };
+        let mut cell = if f.font_a { FONT_A_CELL_MM } else { FONT_B_CELL_MM };
+        let mut height = if f.font_a { FONT_A_HEIGHT_MM } else { FONT_B_HEIGHT_MM };
+        if f.size2 {
+            cell *= 2.0;
+            height *= 2.0;
+        }
         if f.kind == LabelKind::Barcode {
-            out.push(PreviewItem {
-                x_mm: f.x_mm,
-                y_mm: f.y_mm,
-                w_mm: BARCODE_WIDTH_MM * if f.size2 { 2.0 } else { 1.0 },
-                h_mm: (BARCODE_HEIGHT_MM + BARCODE_HRI_HEIGHT_MM) * if f.size2 { 2.0 } else { 1.0 },
-                text: String::new(),
-                barcode: true,
-            });
+            let mult = if f.size2 { 2.0 } else { 1.0 };
+            let module = 0.25 * mult;
+            let payload = ean13_payload(item, weight_g);
+            let digits = format!("{payload}{}", ean13_check_digit(&payload));
+            for (start, len) in ean13_bar_runs(&digits) {
+                out.push(PreviewItem {
+                    x_mm: f.x_mm + start as f64 * module,
+                    y_mm: f.y_mm,
+                    w_mm: len as f64 * module,
+                    h_mm: BARCODE_HEIGHT_MM * mult,
+                    text: String::new(),
+                    barcode: true,
+                });
+            }
+            let hri_w = digits.chars().count() as f64 * FONT_A_CELL_MM;
+            let hri_x = f.x_mm + (BARCODE_WIDTH_MM * mult - hri_w) / 2.0;
+            for (i, ch) in digits.chars().enumerate() {
+                out.push(PreviewItem {
+                    x_mm: hri_x + i as f64 * FONT_A_CELL_MM,
+                    y_mm: f.y_mm + BARCODE_HEIGHT_MM * mult,
+                    w_mm: FONT_A_CELL_MM,
+                    h_mm: BARCODE_HRI_HEIGHT_MM * mult,
+                    text: ch.to_string(),
+                    barcode: false,
+                });
+            }
             continue;
         }
         let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time, spec.width_mm as f64)
         else {
             continue;
         };
-        out.push(PreviewItem {
-            x_mm: f.x_mm,
-            y_mm: f.y_mm,
-            w_mm: spec.width_mm as f64 - f.x_mm,
-            h_mm: height,
-            text,
-            barcode: false,
-        });
+        for (i, ch) in text.chars().enumerate() {
+            out.push(PreviewItem {
+                x_mm: f.x_mm + i as f64 * cell,
+                y_mm: f.y_mm,
+                w_mm: cell,
+                h_mm: height,
+                text: ch.to_string(),
+                barcode: false,
+            });
+        }
     }
     out
 }
@@ -247,7 +271,7 @@ pub fn build_label_from_spec(
         let x = (f.x_mm * MM_TO_DOTS as f64).round() as u16;
         let y = (f.y_mm * MM_TO_DOTS as f64).round() as u16;
         if f.kind == LabelKind::Barcode {
-            job.barcode_ean13(x, y, &ean13_payload(item, weight_g))?;
+            job.barcode_ean13(x, y, &ean13_payload(item, weight_g), if f.size2 { 4 } else { 2 })?;
             continue;
         }
         let Some(text) = spec_field_text(
@@ -273,6 +297,58 @@ pub fn ean13_payload(item: &PluItem, weight_g: u32) -> String {
         format!("{digits:0>5}")
     };
     format!("21{code5}{:05}", weight_g.min(99_999))
+}
+const EAN13_L: [&str; 10] = [
+    "0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011",
+];
+const EAN13_G: [&str; 10] = [
+    "0100111", "0110011", "0011011", "0100001", "0011101", "0111001", "0000101", "0010001", "0001001", "0010111",
+];
+const EAN13_R: [&str; 10] = [
+    "1110010", "1100110", "1101100", "1000010", "1011100", "1001110", "1010000", "1000100", "1001000", "1110100",
+];
+const EAN13_PARITY: [&str; 10] = [
+    "000000", "001011", "001101", "001110", "010011", "011001", "011100", "010101", "010110", "011010",
+];
+pub fn ean13_check_digit(payload: &str) -> u8 {
+    let sum: u32 = payload
+        .bytes()
+        .enumerate()
+        .map(|(i, b)| (b - b'0') as u32 * if i % 2 == 0 { 1 } else { 3 })
+        .sum();
+    ((10 - sum % 10) % 10) as u8
+}
+pub fn ean13_bar_runs(digits13: &str) -> Vec<(usize, usize)> {
+    let d: Vec<usize> = digits13.bytes().map(|b| (b - b'0') as usize).collect();
+    if d.len() != 13 {
+        return Vec::new();
+    }
+    let parity = EAN13_PARITY[d[0]];
+    let mut pattern = String::with_capacity(95);
+    pattern.push_str("101");
+    for i in 0..6 {
+        let code = if parity.as_bytes()[i] == b'0' { EAN13_L } else { EAN13_G };
+        pattern.push_str(code[d[1 + i]]);
+    }
+    pattern.push_str("01010");
+    for i in 0..6 {
+        pattern.push_str(EAN13_R[d[7 + i]]);
+    }
+    pattern.push_str("101");
+    let mut runs = Vec::new();
+    let mut start: Option<usize> = None;
+    for i in 0..=pattern.len() {
+        let on = i < pattern.len() && pattern.as_bytes()[i] == b'1';
+        match (start, on) {
+            (None, true) => start = Some(i),
+            (Some(s), false) => {
+                runs.push((s, i - s));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    runs
 }
 pub fn shelflife_label(raw: &str) -> Option<String> {
     let s = raw.trim();
@@ -1539,16 +1615,38 @@ mod tests {
     fn preview_items_match_printer_metrics() {
         let spec = spec_58x40();
         let items = preview_items(&spec, &sample(), 1350, 26999, "13.10.26", "18:40:00");
-        let barcode = items.iter().find(|i| i.barcode).unwrap();
-        assert_eq!((barcode.x_mm, barcode.y_mm), (2.0, 5.0));
-        assert_eq!((barcode.w_mm, barcode.h_mm), (23.75, 9.0));
-        let fields: Vec<_> = items.iter().filter(|i| !i.barcode).collect();
-        assert!(fields.iter().any(|i| i.text.contains("ВИНОГРАД")));
-        let name = fields.iter().find(|i| i.text.contains("ВИНОГРАД")).unwrap();
-        assert_eq!((name.x_mm, name.y_mm), (2.0, 1.0));
-        assert_eq!((name.w_mm, name.h_mm), (56.0, 3.0));
-        assert!(fields.iter().any(|i| i.text.contains("1,350")));
-        assert!(fields.iter().any(|i| i.text.contains("269,99")));
+        let bars: Vec<_> = items.iter().filter(|i| i.barcode).collect();
+        assert!(!bars.is_empty());
+        let last = bars.last().unwrap();
+        let bc = spec.fields.iter().find(|f| f.kind == crate::label::LabelKind::Barcode).unwrap();
+        let end = last.x_mm + last.w_mm;
+        assert!((end - (bc.x_mm + 95.0 * 0.25)).abs() < 0.01);
+        let hri: String = items
+            .iter()
+            .filter(|i| {
+                !i.barcode
+                    && (i.y_mm - (bc.y_mm + 6.0)).abs() < 0.01
+                    && (i.h_mm - 3.0).abs() < 0.01
+                    && i.x_mm >= bc.x_mm
+                    && i.x_mm < bc.x_mm + 23.75
+            })
+            .map(|i| i.text.clone())
+            .collect();
+        assert_eq!(hri.len(), 13);
+        let first = items.iter().find(|i| i.text == "В").unwrap();
+        assert_eq!((first.x_mm, first.y_mm), (2.0, 1.0));
+        assert_eq!((first.w_mm, first.h_mm), (1.5, 3.0));
+        assert!(items.iter().any(|i| i.text == ":" && (i.y_mm - 21.0).abs() < 0.01));
+    }
+    #[test]
+    fn ean13_encoding_matches_spec() {
+        assert_eq!(ean13_check_digit("400638133393"), 1);
+        let runs = ean13_bar_runs("4006381333931");
+        assert_eq!(runs.first().copied(), Some((0, 1)));
+        let modules: usize = runs.iter().map(|(_, l)| l).sum();
+        assert_eq!(modules, 45);
+        let covered: usize = runs.iter().map(|(_, l)| l).sum();
+        assert!(covered > 0 && covered < 95);
     }
     #[test]
     fn pick_by_length_window() {

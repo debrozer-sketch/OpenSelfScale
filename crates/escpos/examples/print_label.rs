@@ -5,7 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     job.field(0, 0, FieldStyle::Normal, "ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ")?
         .field(25, 100, FieldStyle::FontB, "01.09.26 10:31:53")?
         .field(79, 180, FieldStyle::DoubleH, "199,99")?
-        .barcode_ean13(2, 160, "210213601350")?;
+        .barcode_ean13(2, 160, "210213601350", 2)?;
     let bytes = job.finish();
     match std::env::args().nth(1) {
         Some(path) => {

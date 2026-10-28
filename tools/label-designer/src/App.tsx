@@ -31,14 +31,46 @@ const initialLayout = (): Layout => ({
 function fieldSize(field: LabelField) {
   if (field.w && field.h) return { w: field.w, h: field.h };
   if (field.kind === "barcode") return { w: field.w || 23.75 * field.size, h: field.h || (6 + 3) * field.size };
-  const cw = field.font === "A" ? 1.5 : 1.125;
-  const ch = field.font === "A" ? 3 : 2.125;
   const text = field.kind === "text" ? field.text || "" : SAMPLES[field.kind];
-  const width = field.kind === "text" ? text.length * cw * field.size : text.length * cw;
-  return { w: field.w || Math.max(2, width), h: field.h || ch * field.size };
+  return { w: field.w || Math.max(2, text.length * cellWidth(field)), h: field.h || cellHeight(field) };
 }
 
 const cellWidth = (field: LabelField) => (field.font === "A" ? 1.5 : 1.125) * (field.size === 2 ? 2 : 1);
+const cellHeight = (field: LabelField) => (field.font === "A" ? 3 : 2.125) * (field.size === 2 ? 2 : 1);
+
+const EAN13_L = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011"];
+const EAN13_G = ["0100111", "0110011", "0011011", "0100001", "0011101", "0111001", "0000101", "0010001", "0001001", "0010111"];
+const EAN13_R = ["1110010", "1100110", "1101100", "1000010", "1011100", "1001110", "1010000", "1000100", "1001000", "1110100"];
+const EAN13_PARITY = ["000000", "001011", "001101", "001110", "010011", "011001", "011100", "010101", "010110", "011010"];
+
+function ean13Digits(payload12: string) {
+  const sum = payload12.split("").reduce((acc, d, i) => acc + Number(d) * (i % 2 === 0 ? 1 : 3), 0);
+  return payload12 + String((10 - (sum % 10)) % 10);
+}
+
+function ean13BarRuns(digits13: string): [number, number][] {
+  const d = digits13.split("").map(Number);
+  const parity = EAN13_PARITY[d[0]];
+  let pattern = "101";
+  for (let i = 0; i < 6; i++) pattern += (parity[i] === "0" ? EAN13_L : EAN13_G)[d[1 + i]];
+  pattern += "01010";
+  for (let i = 0; i < 6; i++) pattern += EAN13_R[d[7 + i]];
+  pattern += "101";
+  const runs: [number, number][] = [];
+  let start = -1;
+  for (let i = 0; i <= pattern.length; i++) {
+    const on = i < pattern.length && pattern[i] === "1";
+    if (on && start < 0) start = i;
+    if (!on && start >= 0) { runs.push([start, i - start]); start = -1; }
+  }
+  return runs;
+}
+
+function perChar(field: LabelField, text: string) {
+  const cw = cellWidth(field);
+  const ch = cellHeight(field);
+  return text.split("").map((c, i) => ({ c, x: i * cw, w: cw, ch }));
+}
 
 function fieldText(field: LabelField, layout: Layout) {
   const value = field.kind === "text" ? field.text || "" : SAMPLES[field.kind];
@@ -144,7 +176,7 @@ export default function App() {
           </section><footer className="panel-foot"><span>{layout.fields.length} полей</span><span>{status}</span></footer>
         </aside>
         <section className={`preview-panel ${mobilePanel === "preview" ? "mobile-visible" : ""}`} aria-label="Превью этикетки"><div className="preview-toolbar"><div className="segmented"><button aria-pressed={view === "edit"} onClick={() => setView("edit")}>Разметка и сетка</button><button aria-pressed={view === "print"} onClick={() => setView("print")}>Как на печати</button></div><div className="zoom-control"><span>Масштаб</span>{(["auto", 4, 6, 8] as const).map(z => <button key={z} aria-pressed={zoom === z} onClick={() => setZoom(z)}>{z === "auto" ? "Авто" : `${z}x`}</button>)}</div></div>
-          <div className={`stage ${view === "print" ? "print" : ""}`} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}><div className="paper-wrap"><div className="paper-label">{layout.width_mm} x {layout.height_mm} мм · {layout.name || "без имени"}</div><div className="label-canvas" style={{ width: layout.width_mm * canvasScale, height: layout.height_mm * canvasScale, backgroundSize: `${5 * canvasScale}px ${5 * canvasScale}px` }} onClick={e => { if (e.target === e.currentTarget) setSelectedId(null); }}>{layout.fields.map(f => { const size = fieldSize(f); const isSelected = selectedId === f.id; const isBad = f.x + fieldText(f, layout).length * cellWidth(f) > layout.width_mm || f.y < 0 || f.y + size.h > layout.height_mm; return <button key={f.id} className={`canvas-field ${isSelected ? "selected" : ""} ${isBad ? "bad" : ""}`} style={{ left: f.x * canvasScale, top: f.y * canvasScale, width: size.w * canvasScale, height: size.h * canvasScale }} onPointerDown={e => pointerDown(e, f)} aria-label={`${LABELS[f.kind]}, X ${f.x}, Y ${f.y}`}><span className="field-tag">{LABELS[f.kind]}</span>{f.kind === "barcode" ? <span className="barcode"><i /><small>{SAMPLES.barcode}</small></span> : <span className="field-text" style={{ fontSize: Math.max(7, size.h * canvasScale * .68), fontWeight: f.kind === "sum" ? 800 : 600 }}>{fieldText(f, layout)}</span>}{isSelected && view === "edit" && <><i className="handle nw"/><i className="handle ne"/><i className="handle sw"/><i className="handle se"/></>}</button>; })}</div></div></div>
+          <div className={`stage ${view === "print" ? "print" : ""}`} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}><div className="paper-wrap"><div className="paper-label">{layout.width_mm} x {layout.height_mm} мм · {layout.name || "без имени"}</div><div className="label-canvas" style={{ width: layout.width_mm * canvasScale, height: layout.height_mm * canvasScale, backgroundSize: `${5 * canvasScale}px ${5 * canvasScale}px` }} onClick={e => { if (e.target === e.currentTarget) setSelectedId(null); }}>{layout.fields.map(f => { const size = fieldSize(f); const isSelected = selectedId === f.id; const isBad = f.x + fieldText(f, layout).length * cellWidth(f) > layout.width_mm || f.y < 0 || f.y + size.h > layout.height_mm; return <button key={f.id} className={`canvas-field ${isSelected ? "selected" : ""} ${isBad ? "bad" : ""}`} style={{ left: f.x * canvasScale, top: f.y * canvasScale, width: size.w * canvasScale, height: size.h * canvasScale }} onPointerDown={e => pointerDown(e, f)} aria-label={`${LABELS[f.kind]}, X ${f.x}, Y ${f.y}`}><span className="field-tag">{LABELS[f.kind]}</span>{f.kind === "barcode" ? (() => { const digits = ean13Digits(SAMPLES.barcode); const mult = f.size; return <span className="barcode">{ean13BarRuns(digits).map(([s, w], i) => <i key={i} style={{ left: s * 0.25 * mult * canvasScale, width: w * 0.25 * mult * canvasScale, height: 6 * mult * canvasScale }} />)}<small style={{ top: 6 * mult * canvasScale, fontSize: Math.max(6, 3 * mult * canvasScale * 0.72), width: 23.75 * mult * canvasScale }}>{digits}</small></span>; })() : <span className="field-text" style={{ fontSize: Math.max(7, cellHeight(f) * canvasScale * 0.72), fontWeight: 600 }}>{perChar(f, fieldText(f, layout)).map((c, i) => <span key={i} className="char-cell" style={{ left: c.x * canvasScale, width: c.w * canvasScale, height: c.ch * canvasScale }}>{c.c}</span>)}</span>}{isSelected && view === "edit" && <><i className="handle nw"/><i className="handle ne"/><i className="handle sw"/><i className="handle se"/></>}</button>; })}</div></div></div>
           <footer className="stage-footer"><span>{selected ? `Выбрано: ${LABELS[selected.kind]}` : "Выберите объект на макете или в структуре"}</span><span>Перетаскивание: шаг 0,5 мм</span></footer></section>
         <aside className={`right-panel ${mobilePanel === "properties" ? "mobile-visible" : ""}`} aria-label="Свойства выбранного объекта"><div className="inspector-head"><div><span>Свойства</span><h2>{selected ? LABELS[selected.kind] : "Ничего не выбрано"}</h2></div>{selected && <span className="object-number">#{layout.fields.findIndex(f => f.id === selected.id) + 1}</span>}</div>
           {selected ? <div className="inspector-scroll">{selected.kind === "text" && <section className="property-section"><h3>Содержание</h3><label className="field-control"><span>Текст на этикетке <small>{selected.text?.length || 0} / 48</small></span><input maxLength={48} value={selected.text || ""} onChange={e => patchSelected({ text: e.target.value })} /></label></section>}

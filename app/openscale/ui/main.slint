@@ -2480,9 +2480,9 @@ export component MainWindow inherits Window {
                             width: parent.width;
                             height: parent.height;
                             text: r.text;
-                            font-size: 20px;
+                            font-size: 18px;
                             color: #000000;
-                            horizontal-alignment: left;
+                            horizontal-alignment: center;
                             vertical-alignment: center;
                             wrap: no-wrap;
                             visible: r.kind == 0;
@@ -2498,9 +2498,9 @@ export component MainWindow inherits Window {
                             width: parent.width;
                             height: parent.height;
                             text: r.text;
-                            font-size: 14px;
+                            font-size: 13px;
                             color: #000000;
-                            horizontal-alignment: left;
+                            horizontal-alignment: center;
                             vertical-alignment: center;
                             wrap: no-wrap;
                             visible: r.kind == 2;
@@ -2512,19 +2512,7 @@ export component MainWindow inherits Window {
                         width: r.w * root.labels-preview-scale * 1px;
                         height: r.h * root.labels-preview-scale * 1px;
                         visible: r.kind == 1;
-                        property <[length]> bars: [
-                            self.width * 0.04, self.width * 0.012, self.width * 0.02, self.width * 0.012,
-                            self.width * 0.04, self.width * 0.02, self.width * 0.012, self.width * 0.04,
-                            self.width * 0.012, self.width * 0.02, self.width * 0.012, self.width * 0.02,
-                            self.width * 0.04, self.width * 0.012, self.width * 0.02, self.width * 0.04,
-                            self.width * 0.012, self.width * 0.012, self.width * 0.02, self.width * 0.04,
-                        ];
-                        for w[j] in bars : Rectangle {
-                            x: (parent.width - parent.bars.length * parent.width * 0.05) / 2 + j * parent.width * 0.05;
-                            width: w;
-                            height: parent.height * 0.66;
-                            background: #000000;
-                        }
+                        background: #000000;
                     }
                 }
                 if root.labels-preview-importable : Rectangle {

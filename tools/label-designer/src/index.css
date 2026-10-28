@@ -104,10 +104,11 @@ button:disabled { cursor:default; opacity:.45; }
 .field-tag { display:none; position:absolute; left:-1px; bottom:calc(100% + 3px); max-width:170px; padding:1px 5px; overflow:hidden; text-overflow:ellipsis; border-radius:2px; background:var(--accent); color:white; font-size:9px; white-space:nowrap; }
 .canvas-field.selected .field-tag,.canvas-field.bad .field-tag { display:block; }
 .print .field-tag { display:none!important; }
-.field-text { position:absolute; inset:0; display:flex; align-items:center; overflow:hidden; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; transform-origin:top left; }
-.barcode { position:absolute; inset:0; overflow:hidden; display:flex; flex-direction:column; }
-.barcode i { flex:1; background:repeating-linear-gradient(90deg,#14181c 0 2px,transparent 2px 4px,#14181c 4px 5px,transparent 5px 8px,#14181c 8px 11px,transparent 11px 13px); }
-.barcode small { height:22%; min-height:6px; overflow:hidden; text-align:center; font:8px/1 ui-monospace,monospace; }
+.field-text { position:absolute; inset:0; overflow:visible; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; transform-origin:top left; }
+.field-text .char-cell { position:absolute; top:0; display:flex; align-items:center; justify-content:center; line-height:1; }
+.barcode { position:absolute; inset:0; overflow:visible; }
+.barcode i { position:absolute; top:0; background:#14181c; }
+.barcode small { position:absolute; overflow:hidden; text-align:center; left:0; font-family:ui-monospace,monospace; line-height:1; }
 .handle { position:absolute; width:8px; height:8px; background:white; border:2px solid var(--accent); }
 .handle.nw { left:-5px; top:-5px; }.handle.ne { right:-5px; top:-5px; }.handle.sw { left:-5px; bottom:-5px; }.handle.se { right:-5px; bottom:-5px; }
 .stage-footer { min-height:30px; padding-inline:15px; background:rgb(255 255 255 / 55%); font-size:11px; }
