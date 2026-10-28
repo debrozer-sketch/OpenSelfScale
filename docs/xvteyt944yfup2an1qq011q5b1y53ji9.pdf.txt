@@ -1,0 +1,1844 @@
+
+@@PAGE 1@@
+TP801/TP805/TP806
+Programming Manual
+Xiamen Hanin Electronic Technology Co.Ltd.
+ADD: Room 305A,Angye Building,Pioneering Park,
+Torch High-tech Zone,Xiamen,China 361009
+Tel.: +86-(0)592-5885993
+Fax: +86-(0)592-5885992
+Web: www.hprt.com
+@@PAGE 2@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 1
+REVISION RECORDS
+REV DATE DESCRIPTION Drawn Checked Approved
+1.0 2013.07.15 — — Chenweihua Linyang Renxiaowei
+1.1 2013.08.27
+1.deletecodepages(page44\page53)
+1.deletecommands(GS(KpLpH fnm(fn=50))
+Chenweihua Linyang Renxiaowei
+1.2 2013.12.06 1. modifiedcodepages(P29) Chenweihua Linyang Renxiaowei
+1.3 2013.12.11 1. modifiedcodepages(P30) Chenweihua Linyang Renxiaowei
+1.4 2014.02.21 1.modifiedcodepages(P30) Chenweihua Linyang Renxiaowei
+1.5 2014.03.31 1.Modifiedcodepages(P30) Chenweihua Linyang Renxiaowei
+1.6 2016.11.02 1.Modifiedcodepages(P41) Wuzhenrong Linyang Renxiaowei
+@@PAGE 3@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 2
+Contents
+1.Overview.........................................................................................................................................................6
+1.1Keyterms..............................................................................................................................................6
+1.2CommandNotation.............................................................................................................................6
+2.Commands......................................................................................................................................................7
+HT.................................................................................................................................................................7
+LF..................................................................................................................................................................7
+FF (Inpagemode)....................................................................................................................................7
+CR.................................................................................................................................................................7
+CAN...............................................................................................................................................................8
+DLEEOTn...................................................................................................................................................8
+DLEENQn.................................................................................................................................................10
+DLEDC4fnmt (fn =1).....................................................................................................................11
+DLEDC4fnab (fn =2)......................................................................................................................12
+DLEDC4fnd1…d7 (fn =8)...............................................................................................................13
+ESCFF........................................................................................................................................................13
+ESCSP n...................................................................................................................................................14
+ESC! n......................................................................................................................................................14
+ESC$ nL nH.........................................................................................................................................15
+ESC%n.....................................................................................................................................................15
+ESC&yc1c2[x1d1...d(y×x1)]...[xkd1...d(y×xk)]....................................................................15
+ESC ∗ mnL nHd1...dk......................................................................................................................16
+ESC− n...................................................................................................................................................17
+ESC2..........................................................................................................................................................18
+ESC3n......................................................................................................................................................18
+ESC=n......................................................................................................................................................18
+ESC?n.......................................................................................................................................................19
+ESC@........................................................................................................................................................19
+ESCDn1...nkNUL...................................................................................................................................20
+@@PAGE 4@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 3
+ESCEn......................................................................................................................................................20
+ESCGn......................................................................................................................................................20
+ESCJn.......................................................................................................................................................21
+ESCL..........................................................................................................................................................21
+ESCMn.....................................................................................................................................................21
+ESCRn......................................................................................................................................................22
+ESCS..........................................................................................................................................................23
+ESCTn......................................................................................................................................................23
+ESCVn......................................................................................................................................................24
+ESCWxL xHyL yHdxL dxHdyL dyH.....................................................................................24
+ESC\ nL nH...........................................................................................................................................25
+ESCan......................................................................................................................................................25
+ESCc3n...................................................................................................................................................26
+ESCc4n...................................................................................................................................................27
+ESCc5n...................................................................................................................................................27
+ESCdn......................................................................................................................................................28
+ESCpmt1t2............................................................................................................................................28
+ESCt n......................................................................................................................................................28
+ESC{n.......................................................................................................................................................30
+FSg1ma1a2a3a4nLnH d1...dk..................................................................................................30
+FSg2ma1a2a3a4nLnH.................................................................................................................31
+GS!n.........................................................................................................................................................32
+GS$nL nH..............................................................................................................................................32
+GS(ApL pHnm...................................................................................................................................33
+GS(DpL pHm[a1b1]...[akbk].......................................................................................................33
+GS(LpL pHmfn[parameters].........................................................................................................34
+GS8Lp1p2p3p4mfn[parameters]................................................................................................34
+<Function48> GS(L pL pHmfn (fn =0,48)........................................................................36
+<Function50> GS(LpL pHmfn (fn =2,50)...........................................................................36
+<Function51> GS(LpL pHmfn (fn =3,51)...........................................................................37
+@@PAGE 5@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 4
+<Function64> GS(LpL pHmfnd1d2 (fn =64)....................................................................37
+<Function65> GS(LpL pHmfnd1d2d3 (fn =65)..............................................................37
+<Function66> GS(LpL pHmfnkc1kc2 (fn =66).................................................................38
+<Function67>GS(LpLpHmfnakc1kc2bxL xHyLyH[cd1…dk]1…[c d1....dk]b(fn
+=67) 38
+<Function69> GS(L pL pHmfnkc1kc2xy (fn =69)........................................................40
+<Function112>GS(LpL pHmfnabxbycxL xHyL yHd1...dk (fn =112)................41
+GS(kpL pHcnfn[parameters].........................................................................................................42
+<Function065>GS(kpL pHcnfnn (cn=48, fn =65).........................................................43
+<Function066>GS(kpL pHcnfnn (cn=48, fn=66)..........................................................43
+<Function067>GS(kpL pHcnfnn (cn=48, fn=67)..........................................................44
+<Function068>GS(kpL pHcnfnn (cn=48, fn =68).........................................................45
+<Function069>GS(kpL pHcnfnmn (cn=48, fn =69)....................................................45
+<Function070>GS(kpL pHcnfnm (cn=48, fn=70).........................................................46
+<Function080>GS(kpL pHcnfnmd1…dk (cn=48, fn =80)..........................................47
+<Function081>GS(kpL pHcnfnm (cn=48, fn =81)........................................................47
+<Function082>GS(k pL pHcnfnm (cn=48, fn =82).....................................................48
+<Function165>GS(k pL pHcnfnn1n2 (cn=49, fn =65)..............................................48
+<Function167>GS(k pL pHcnfnn (cn=49, fn =67)......................................................49
+<Function169>GS(k pL pHcnfnn (cn=49, fn =69)......................................................49
+<Function180>GS(kpL pHcnfnmd1…dk (cn=49, fn =80)..........................................50
+<Function181>GS(kpL pHcnfnm (cn=49, fn =81)........................................................50
+<Function182>GS(k pL pHcnfnm (cn=49, fn =82).....................................................51
+GS ∗ xyd1...dk.....................................................................................................................................51
+GS/m........................................................................................................................................................52
+GS:............................................................................................................................................................53
+GSBn........................................................................................................................................................53
+GSHn........................................................................................................................................................53
+GSI n......................................................................................................................................................54
+GSLnL nH..............................................................................................................................................55
+@@PAGE 6@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 5
+GSPxy.....................................................................................................................................................55
+<A>GSV m............................................................................................................................................56
+<B>GSV mn.........................................................................................................................................56
+GSW nL nH...........................................................................................................................................56
+GS\nL nH..............................................................................................................................................57
+GS^rtm.................................................................................................................................................57
+GSan........................................................................................................................................................58
+GSfn.........................................................................................................................................................60
+GSg0mnL nH......................................................................................................................................60
+GSg2mnL nH......................................................................................................................................61
+GShn........................................................................................................................................................62
+<A>GSk md1...dkNUL.......................................................................................................................62
+<B>GSk mnd1...dn...........................................................................................................................62
+GSrn.........................................................................................................................................................64
+GSw n......................................................................................................................................................64
+ESCv..........................................................................................................................................................65
+FSpnm....................................................................................................................................................66
+FSqn[xL xHyL yHd1...dk]1...[xL xHyL yHd1...dk]n...................................................66
+GSv0mxL xHyL yHd1...dk..........................................................................................................68
+ESC(A pLpHfn nct1t2<Function97>...................................................................................68
+AppendixA........................................................................................................................................................70
+@@PAGE 7@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 6
+1. Overview
+1.1 Key terms
+Real-time commands:Thesecommandsareactedonimmediatelyuponbeingreceivedby
+theprinter;
+Page mode:Underthismode,theprinterstoresalldatainaspecifiedmemoryandthinksof
+thisasavirtualpage.Thepageisprintedwhentheprinterreceivesprint
+commandeitherFFor ESCFF;
+Standard mode:Standardmodeisthedefaultmodeofprinter,namelylinemode.Under
+thismode,theprinterprintsdataandfeedspaperuponprintlinebuffer
+full(dataisenoughforoneprintline)orreceivingprintcommandlike LF;
+HRI character:Barcodenotecharacter. HumanReadableInterface;
+NV:Non-volatilememoryinwhichdatastoreddoesnotlosswhenpoweredoff.NV:Non-
+volatile;
+RAM:RandomAccessMemory;
+ASB：AutoSendBack
+DPI:Printdots perinch(oneinchequalsto25.4mm).Itisusedtoidentifytheresolution
+ofaprinter.
+Example,203DPImeans203printdotsperinch. DPI:DotPerInch
+1.2 Command Notation
+[Name] Thenameofthecommand.
+[Format] Thecodesequence.
+[]k indicatesthecontentsinbrackets[]shouldberepeated k times.
+[Range] Givestheallowableranges,if any,forthecommandparameters.
+[Default] Givesthedefaultvalues,ifany,forthearguments.
+[Description] Describesthefunctionofthecommand.
+”−“inthetableindicates0or1.
+[Notes] Providesimportantinformationonsettingandusingtheprintercommand,if
+necessary.
+[Reference] Givesreferences,ifany.
+@@PAGE 8@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 7
+2. Commands
+HT
+[Name]Horizontaltab
+[Format]ASCIIHT
+Hex09
+Decimal9
+[Description] •Movestheprintpositiontothenexthorizontaltabposition.
+LF
+[Name] Printandlinefeed
+[Format]ASCIILF
+Hex0A
+Decimal10
+[Description] • Printsthedataintheprintbufferandfeedsoneline,basedonthecurrentline
+spacing.
+FF (In page mode)
+[Name] Printandreturntostandardmode(inpagemode)
+[Format]ASCIIFF
+Hex0C
+Decimal12
+[Description] • Printsallthedataintheprintbuffercollectivelyandswitchesfrompagemodeto
+standardmode.
+CR
+[Name] Printandcarriagereturn
+[Format]ASCIICR
+Hex0D
+Decimal13
+@@PAGE 9@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 8
+[Description] • Executesoneofthefollowingoperations.
+CAN
+[Name] Cancelprintdatainpagemode
+[Format] ASCIICAN
+Hex18
+Decimal24
+[Description] • Inpagemode,deletesalltheprintdatainthecurrentprintarea.
+DLE EOT n
+[Name] Transmitreal-timestatus
+[Format]ASCII DLEEOT n
+Hex1004 n
+Decimal164 n
+[Range]1 ≤ n ≤ 4
+[Description] • Transmitsthereal-timestatus.
+• Thisprintertransmitsthefollowingstatusinrealtime.
+•Printerstatus(n =1)
+@@PAGE 10@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 9
+•Offlinecausestatus(n =2)
+•Errorcausestatus(n =3)
+•Rollpapersensorstatus(n =4)
+@@PAGE 11@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 10
+[Notes] • Takethefollowingintoconsideration:
+•Ifthereceiveddataincludesadatastringmatchingthiscommand,theprinterperforms
+thiscommand.Usersmustconsiderthis.
+Example: Graphicdatamightaccidentallyincludeadatastringmatchingthiscommand.
+•Donotembedthiscommandwithinanothercommand.
+Example: Graphicdatamightincludethiscommand.
+•Transmitthiscommandusingthefollowingmethod:
+•Whenthiscommandistransmitted,thesubsequentdatamustnotbetransmitteduntil
+thestatusisreceived.
+•However,ifthiscommandmustbetransmittedcontinuously,itispossibletotransmitup
+to4commandsatonce.
+Inthiscase,thesubsequentdatamustnotbetransmitteduntiltheallstatusisreceived.
+Ifthiscommandistransmittedwithoutusingtheabovemethod,thestatusmaynotbe
+received.
+DLE ENQ n
+[Name] Sendreal-timerequesttoprinter
+[Format]ASCIIDLEENQ n
+Hex1005 n
+Decimal16 5 n
+[Range] n =1,2
+[Description] • Respondstoarequestinreal-timefromthehostcomputer.
+@@PAGE 12@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 11
+[Notes] • Usethiscommandafterremovingthecauseoftheerror.
+•Takethefollowingintoconsideration:
+•Ifthereceiveddataincludesadatastringmatchingthiscommand,theprinterperforms
+thecommand.Usersmustconsiderthis.
+Example: Graphicdatamightaccidentallyincludeadatastringmatchingthiscommand.
+•Donotembedthiscommandwithinanothercommand.
+Example: Graphicdatamightincludethiscommand.
+[Reference]APPENDIXC
+DLE DC4 fn m t (fn = 1)
+[Name] Generatepulseinreal-time
+[Format]ASCIIDLEDC4 fn m t
+Hex1014 fn m t
+Decimal16 20 fn m t
+[Range] fn=1
+m=0,1
+1 ≤ t ≤ 8
+[Description] • Outputsthepulsespecifiedbytinreal-timetoconnectorpinm.
+• tspecifiesthepulseontimeorofftimeas[t × 100ms].
+[Notes] • Takethefollowingintoconsideration:
+•Ifthereceiveddataincludesadatastringwiththiscommand,theprinterperformsthe
+command.Usersmustconsiderthis.
+@@PAGE 13@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 12
+Example: Graphicdatamightaccidentallyincludeadatastringmatchingthiscommand.
+•Donotembedthiscommandwithinanothercommand.
+Example: Graphicdatamightincludethiscommand.
+[Reference] APPENDIXF
+DLE DC4 fn a b (fn = 2)
+[Name] Executepower-offsequence
+[Format]ASCIIDLEDC4 fn a b
+Hex1014 fn a b
+Decimal16 20 fn a b
+[Range] fn =2
+a =1
+b =8
+[Description] • Executestheprinterpower-offsequenceandtransmitsthepower-offnotice.
+•Storesthevaluesofthemaintenancecounter.
+•SetstheinterfacetoBUSY.
+•Setstheprintertostandbymode.
+[Notes] • Takethefollowingintoconsideration:
+•Ifthereceiveddataincludesadatastringmatchingthiscommand,theprinterperforms
+thecommand. Usersmustconsiderthis.
+Example: Graphicdatamightaccidentallyincludeadatastringmatchingthiscommand.
+•Donotembedthiscommandwithinanothercommand.
+Example: Graphicdatamightincludethiscommand.
+• Thiscommanddoesnotshutthepoweroff. Theoperatormustturnthepoweroff
+afterreceivingthepower-offnotice.
+• Ifthiscommandisexecuted,theprinterwillnotcontinuetoprocessanything.To
+recovertheprintertoprintagain,itisnecessarytoturnthepoweronagainorexecute
+ahardwarereset.
+[Reference]APPENDIXG
+@@PAGE 14@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 13
+DLE DC4 fn d1…d7 (fn = 8)
+[Name]Clearbuffer(s)
+[Format]ASCIIDLEDC4 fn d1…d7
+Hex1014 fn d1…d7
+Decimal16 20 fn d1…d7
+[Range] fn =8
+d1=1,d2=3,d3=20, d4=1,d5=6,d6=2,d7=8
+[Description] • ClearsalldatastoredinthereceivebufferandtheprintbufferandtransmitsClear
+response.
+•Ifarecoverableerroroccurs,recoversfromtheerror.
+[Notes] • DonotusethiscommandinasystemthatusestheprinterwiththeOPOSdriverorthe
+JavaPOSdriverprovidedbySeikoEpsonCorporation.
+• Takethefollowingintoconsideration:
+•Ifthereceiveddataincludesadatastringmatchingthiscommand,theprinterperforms
+thecommand.Usersmustconsiderthis.
+Example: Graphicdatamightaccidentallyincludeadatastringmatchingthiscommand.
+•Donotembedthiscommandwithinanothercommand.
+Example: Graphicdatamightincludethiscommand.
+• Donottransmitthesubsequentdatauntilthestatusisreceivedaftertransmittingthis
+command.
+ESC FF
+[Name] Printdatainpagemode
+[Format]ASCIIESCFF
+Hex1B0C
+Decimal27 12
+[Description] • Inpagemode,printsallthedataintheprintbuffercollectively.
+@@PAGE 15@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 14
+ESC SP n
+[Name] Setright-sidecharacterspacing
+[Format]ASCIIESCSP n
+Hex1B20 n
+Decimal27 32 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0
+[Description] • Setstheright-sidecharacterspacingto[n × (horizontalorverticalmotionunit)].
+[Note] • Themaximumright-sidespacingis31.875mm{203/180"}.
+ESC ! n
+[Name] Selectprintmode(s)
+[Format]ASCIIESC! n
+Hex1B21 n
+Decimal27 33 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0
+[Description] • Selectsthecharacterfontandstyles(emphasized,double-height,double-width,
+andunderlined)together.
+
+@@PAGE 16@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 15
+ESC $ n L n H
+[Name] Setabsoluteprintposition
+[Format]ASCIIESC$ nL nH
+Hex1B24 nL nH
+Decimal27 36 nL nH
+[Range]0 ≤ (nL +nH × 256) ≤ 65535 (0 ≤ nL ≤ 255,0 ≤ nH ≤ 255)
+[Description] • Movestheprintpositionto[(nL +nH× 256) × (horizontalorverticalmotion
+unit)]fromtheleftedgeoftheprintarea.
+ESC % n
+[Name]Select/canceluser-definedcharacterset
+[Format]ASCIIESC% n
+Hex1B25 n
+Decimal27 37 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0
+[Description] • Selectsorcancelstheuser-definedcharacterset.
+•WhentheLSBofn is0,theuser-definedcharactersetiscanceled.
+•WhentheLSBofn is1,theuser-definedcharactersetisselected.
+ESC & y c1 c2 [x1 d1...d(y × x1)]...[xk d1...d(y × xk)]
+[Name] Defineuser-definedcharacters
+[Format]ASCIIESC& y c1 c2 [x1 d1...d(y×x1)]...[xk d1...d(y×xk)]
+Hex1B26 y c1 c2 [x1 d1...d(y×x1)]...[xk d1...d(y×xk)]
+Decimal27 38 y c1 c2 [x1 d1...d(y×x1)]...[xk d1...d(y×xk)]
+[Range] y =3
+32 ≤ c1 ≤ c2 ≤ 126
+0 ≤ x ≤ 12 [whenFontA(12 × 24)isselected]
+@@PAGE 17@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 16
+0 ≤ x ≤ 9 [whenFontB(9 × 17)isselected]
+0 ≤ d ≤ 255
+k =c2–c1+1
+[Description] • Definestheuser-definedcharacterpatternforthespecifiedcharactercodes.
+• y specifiesthenumberofbytes intheverticaldirection.
+• c1specifiesthebeginningcharactercodeforthedefinition,and c2specifiesthe
+finalcode.
+• x specifiesthenumberofdotsinthe horizontaldirectionfromtheleftedge.
+• d specifiesthedefineddata(columnformat).
+[Note] • User-definedcharactersandadownloadedbitimage(GS ∗)cannotbedefined
+simultaneously.Whenthiscommandisexecuted,thedownloadedbitimageisdeleted.
+ESC ∗ m nL n H d1...dk
+[Name] Selectbit-imagemode
+[Format]ASCIIESC ∗ m nL nH d1...dk
+Hex1B2A m nL nH d1...dk
+Decimal27 42 m nL nH d1...dk
+[Range] m=0,1,32,33
+1 ≤ (nL +nH × 256) ≤ 2047 (0 ≤ nL ≤ 255,0 ≤ nH ≤ 7)
+@@PAGE 18@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 17
+0 ≤ d ≤ 255
+k =nL +nH× 256 [when m=0,1]
+k =(nL +nH× 256) × 3 [when m=32,33]
+[Description] • Storesthebitimagedataintheprintbufferusingthebitimagemodespecified
+by m.
+m Bitimagemode Verticaldirection Horizontaldirection
+0 8-dotsingle-density 60dip 101dip
+1 8-dotdouble-density 68dip 203dip
+32 24-dotsingle-density 203dip 101dip
+33 24-dotdouble-density 203dip 203dip
+• nL, nHspecifythenumberofdotsoftheimagedatainthehorizontaldirection
+as(nL + nH × 256).
+• d specifiesthebitimagedata(columnformat).
+ESC − n
+[Name] Turnunderlinemodeon/off
+[Format]ASCIIESC − n
+Hex1B2D n
+Decimal27 45 n
+[Range]0 ≤ n ≤ 2,48 ≤ n ≤ 50
+[Default] n =0
+[Description] • Turnsunderlinemodeonoroff.
+
+@@PAGE 19@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 18
+ESC 2
+[Name] Selectdefaultlinespacing
+[Format]ASCIIESC2
+Hex1B32
+Decimal27 50
+[Description] • Setsthelinespacingtoapproximately3.75mm{1/6"}.
+ESC 3 n
+[Name] Setlinespacing
+[Format]ASCIIESC3 n
+Hex1B33 n
+Decimal27 51 n
+[Range]0 ≤ n ≤ 255
+[Default] Equivalenttoapproximately4.23mm{1/6"}.
+[Description] • Setsthelinespacingto[n × (verticalorhorizontalmotionunit)].
+[Note] • Themaximumis1016mm{40"}.
+ESC = n
+[Name] Selectperipheraldevice
+[Format]ASCIIESC= n
+Hex1B3D n
+Decimal27 61 n
+[Range]0 ≤ n ≤ 255
+[Default] n =1
+[Description] • Selectsthedevicetowhichthehostcomputertransmitsdata.
+
+@@PAGE 20@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 19
+•Whentheprinterisdisabled(n =2),alldataexceptthiscommandandthereal-
+timecommandsareignored.
+ESC ? n
+[Name] Canceluser-definedcharacters
+[Format]ASCIIESC? n
+Hex1B3F n
+Decimal27 63 n
+[Range]32 ≤ n ≤ 126
+[Description] • Deletestheuser-definedcharacterpatternspecifiedbycharactercode n.
+ESC @
+[Name]Initializeprinter
+[Format]ASCIIESC@
+Hex1B40
+Decimal27 64
+[Description] • Clearsthedataintheprintbufferandresetstheprintermodestothemodesthat
+wereineffectwhenthepowerwasturnedon.
+Keepsthefollowingdata:
+•Macrodefinitiondata.
+•ContentsstoredintheNVusermemory.
+•ContentsdefinedfortheNVgraphics(NVbitimage).
+•Maintenancecountervalue.
+•Settingvaluespecifiedwith GS(E.
+@@PAGE 21@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 20
+ESC D n1...nk NUL
+[Name] Sethorizontaltabpositions
+[Format]ASCIIESCD n1...nk NUL
+Hex1B44 n1...nk 00
+Decimal27 68 n1...nk 0
+[Range]1 ≤ n1 ≤ n2 ≤ ... ≤ nk ≤ 255
+0 ≤ k ≤ 32
+[Default] n =8,16,24,32,40,...,232,240,248
+[forFontA(12 × 24)inastandardcharactersizewidth]
+[Description] • Setshorizontaltabpositions.
+• n specifiesthenumberofdigitsfromthesettingpositiontotheleftedgeofthe
+printarea.
+• k isusedtoindicatethenumberofbytessetforthehorizontaltabposition.
+ESC E n
+[Name] Turnemphasizedmodeon/off
+[Format]ASCIIESCE n
+Hex1B45 n
+Decimal27 69 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0
+[Description] • Turnsemphasizedmodeonoroff.
+•WhentheLSBofn is0,turnsoffemphasizedmode.
+•WhentheLSBofn is1,turnsonemphasizedmode.
+ESC G n
+[Name] Turndouble-strikemodeon/off
+@@PAGE 22@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 21
+[Format]ASCIIESCG n
+Hex1B47 n
+Decimal27 71 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0
+[Description] • Turnsdouble-strikemodeonoroff.
+•WhentheLSBofn is0,turnsoffdouble-strikemode.
+•WhentheLSBofn is1,turnsondouble-strikemode.
+ESC J n
+[Name] Printandfeedpaper
+[Format]ASCIIESCJ n
+Hex1B4A n
+Decimal27 74 n
+[Range]0 ≤ n ≤ 255
+[Description] • Printsthedataintheprintbufferandfeedsthepaper[n × (verticalor
+horizontalmotionunit)].
+[Note] • Themaximumpaperfeedamountis1016mm{40"}.
+ESC L
+[Name] Selectpagemode
+[Format]ASCIIESCL
+Hex1B4C
+Decimal27 76
+[Description] • Switchesfromstandardmodetopagemode.
+ESC M n
+[Name] Selectcharacterfont
+@@PAGE 23@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 22
+[Format]ASCIIESCM n
+Hex1B4D n
+Decimal27 77 n
+[Range] n =0,1,48,49
+[Default] n =0
+[Description] • Selectsacharacterfont.
+ESC R n
+[Name] Selectaninternationalcharacterset
+[Format]ASCIIESCR n
+Hex1B52 n
+Decimal27 82 n
+[Range]0 ≤ n ≤ 15
+[Default] n =0 [Otherthanthefollowingmodels]
+n =15 [SimplifiedChinesemodel]
+[Description] • Selectsaninternationalcharacterset.
+@@PAGE 24@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 23
+[Reference]"InternationalCharacterSets"
+ESC S
+[Name] Selectstandardmode
+[Format]ASCIIESCS
+Hex1B53
+Decimal27 83
+[Description] • Switchesfrompagemodetostandardmode.
+ESC T n
+[Name] Selectprintdirectioninpagemode
+[Format]ASCIIESCT n
+Hex1B54 n
+Decimal27 84 n
+[Range]0 ≤ n ≤ 3,48 ≤ n ≤ 51
+[Default] n =0
+[Description] • Inpagemode,selectstheprintdirectionandstartingposition.
+@@PAGE 25@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 24
+ESC V n
+[Name]Turn90° clockwiserotationmodeon/off
+[Format]ASCIIESCV n
+Hex1B56 n
+Decimal27 86 n
+[Range]0 ≤ n ≤ 2,48 ≤ n ≤ 50
+[Default] n =0
+[Description] • Instandardmode,turns90°clockwiserotationmodeonoroffforcharacters.
+ESC W xL x H y L y H dx L dx H dy L dy H
+[Name] Setprintareainpagemode
+[Format]ASCIIESCW xL xH yL yH dxL dxH dyL dyH
+Hex1B57 xL xH yL yH dxL dxH dyL dyH
+Decimal27 87 xL xH yL yH dxL dxH dyL dyH
+[Range]0 ≤ (xL +xH × 256) ≤ 65535 (0 ≤ xL ≤ 255,0 ≤ xH ≤ 255)
+0 ≤ (yL +yH × 256) ≤ 65535 (0 ≤ yL ≤ 255,0 ≤ yH ≤ 255)
+1 ≤ (dxL +dxH × 256) ≤ 65535 (0 ≤ dxL ≤ 255,0 ≤ dxH ≤ 255)
+1 ≤ (dyL +dyH × 256) ≤ 65535 (0 ≤ dyL ≤ 255,0 ≤ dyH ≤ 255)
+[Default](xL +xH× 256)=0 (xL =0,xH=0)
+(yL +yH× 256)=0 (yL =0,yH=0)
+@@PAGE 26@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 25
+(dxL +dxH× 256)=512 (dxL =0,dxH=2) [80mmpaperwidthmodel]
+(dxL +dxH× 256)=360 (dxL =104, dxH=4) [58mmpaperwidthmodel]
+(dyL +dyH× 256)=1662 (dyL =126, dyH=6)
+[Description] • Inpagemode,setsthesizeandthelogicaloriginoftheprintarea.
+• xL, xHspecifythehorizontallogicaloriginas[(xL +xH× 256) ×
+(horizontalmotionunit)]fromabsoluteorigin.
+• yL, yHspecifytheverticallogicaloriginas[(yL +yH× 256) × (vertical
+motionunit)]fromabsoluteorigin.
+• dxL, dxHspecifythehorizontaldimensionofprintareaas[(dxL +dxH× 256)
+× (horizontalmotionunit)].
+• dyL, dyHspecifytheverticaldimensionofprintareaas[(dyL +dyH× 256) ×
+(verticalmotionunit)].
+[Note] • Whensingle-colorprintcontrolisselected,theverticaldimensionoftheprintareacan
+besetto207.95mm{3324/406"}maximum.
+ESC \ nL n H
+[Name] Setrelativeprintposition
+[Format]ASCIIESC\ nL nH
+Hex1B5C nL nH
+Decimal27 92 nL nH
+[Range]-32768 ≤ (nL +nH × 256) ≤ 32767
+[Description] • Movestheprintpositionto[(nL +nH× 256) × (horizontalorverticalmotion
+unit)]fromthecurrentposition.
+•Apositivenumberspecifiesmovementto theright,andanegativenumber
+specifiesmovementtotheleft.
+ESC a n
+[Name]Selectjustification
+@@PAGE 27@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 26
+[Format]ASCIIESCa n
+Hex1B61 n
+Decimal27 97 n
+[Range]0 ≤ n ≤ 2,48 ≤ n ≤ 50
+[Default] n =0
+[Description] • Instandardmode,alignsallthedatainonelinetotheselectedlayout.
+ESC c 3 n
+[Name] Selectpapersensor(s)tooutputpaper-endsignals
+[Format]ASCIIESCc3 n
+Hex1B6333 n
+Decimal27 99 51 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0 [whenDIPswitch[SW1-3]ison.]
+n =15 [whenDIPswitch[SW1-3]isoff.]
+[Description] • Selectswetherthepapersensor(s)tooutputpaperendsignalsornotwhena
+paperendisdetected.
+[Note] • Thiscommandisenabledonlywithaparallelinterfacemodel.
+@@PAGE 28@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 27
+ESC c 4 n
+[Name] Selectpapersensor(s)tostopprinting
+[Format]ASCIIESCc4 n
+Hex1B6334 n
+Decimal27 99 52 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0
+[Description] • Selectsthepapersensor(s)whethertousetostopprintingornotwhenapaper
+endisdetected.
+ESC c 5 n
+[Name] Enable/disablepanelbuttons
+[Format]ASCIIESCc5 n
+Hex1B6335 n
+Decimal27 99 53 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0
+[Description] • Enablesordisablesthepanelbuttons.
+•WhentheLSBofn is0,thepanelbuttonsareenabled.
+•WhentheLSBofn is1,thepanelbuttonsaredisabled.
+[Notes] • ThiscommandaffectstheFEEDbutton.
+• TheFEEDbuttonisdisabledregardlessofthesettingswiththiscommand,whenthe
+coverisopen.
+@@PAGE 29@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 28
+ESC d n
+[Name] Printandfeedn lines
+[Format]ASCIIESCd n
+Hex1B64 n
+Decimal27 100 n
+[Range]0 ≤ n ≤ 255
+[Description] • Printsthedataintheprintbufferandfeedsthepaper[n × (currentline
+spacing)].
+[Note] • Themaximumpaperfeedamountis1016mm{40"}.
+ESC p m t1 t2
+[Name]Generatepulse
+[Format]ASCIIESCp m t1 t2
+Hex1B70 m t1 t2
+Decimal27 112 m t1 t2
+[Range] m=0,1,48,49
+0 ≤ t1 ≤ 255
+0 ≤ t2 ≤ 255
+[Description] • Outputsthepulsespecifiedbyt1 andt2 toconnectorpin m.
+• t1 specifiesthepulseontimeas[t1 × 2ms].
+• t2 specifiesthepulseofftimeas[t2 × 2ms].
+[Note] • Specifyavalue(t1 <t2)sothattheofftimeislongerthantheontime.
+ESC t n
+[Name] Selectcharactercodetable
+@@PAGE 30@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 29
+[Format]ASCIIESCt n
+Hex1B74 n
+Decimal27 116 n
+[Range] 0≤n≤5; 13≤n≤21;n=26; 32≤n≤34;n=36,37; 39≤n≤40; 45≤n≤52 ；
+54≤n≤66
+[Default] n =0
+[Description] • Selectspage n fromthecharactercodetable.
+n Character Code table n Character Code table
+0 [PC437 (USA: Standard Europe)] 40 [ISO8859-15 (Latin9)]
+1 [Katakana] 45 [WPC1250]
+2 [PC850 (Multilingual)] 46 [WPC1251(Cyrillic)]
+3 [PC860 (Portuguese)] 47 [WPC1253]
+4 [PC863 (Canadian-French)] 48 [WPC1254]
+5 [PC865 (Nordic)] 49 [WPC1255]
+13 [PC857 (Turkish)] 50 [WPC1256]
+14 [PC737 (Greek)] 51 [WPC1257]
+15 [ISO8859-7 (Greek)] 52 [WPC1258]
+16 [WPC1252] 54 [MIK(Cyrillic /Bulgarian)]
+17 [PC866 (Cyrillic #2)] 55 [CP755 (East Europe，Latvian 2)]
+18 [PC852 (Latin 2)] 56 [Iran]
+19 [PC858 (Euro)] 57 [Iran II]
+20 [KU42] 58 [Latvian]
+21 [TIS11 (Thai)] 59 [ISO-8859-1 (West Europe)]
+26 [TIS18 (Thai)] 60 [ISO-8859-3(Latin 3)]
+32 [PC720] 61 [ISO-8859-4(Baltic)]
+33 [WPC775] 62 [ISO-8859-5(Cyrillic)]
+34 [PC855 (Cyrillic)] 63 [ISO-8859-6(Arabic)]
+36 [PC862 (Hebrew)] 64 [ISO-8859-8(Hebrew)]
+37 [PC864 (Arabic)] 65 [ISO-8859-9(Turkish)]
+@@PAGE 31@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 30
+39 [ISO8859-2 (Latin2)] 66 [PC856]
+[Notes]Page0/page2/page3/page4/page5/page14/page17/page18/page19/page20/page
+21/page26/page32/page47 supports both 12 x 24 fonts and 9 x 17 fonts。
+[Reference] "Appendix A"
+ESC { n
+[Name] Turnupside-downprintmodeon/off
+[Format]ASCIIESC{ n
+Hex1B7B n
+Decimal27 123 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0
+[Description] • Instandardmode,turnsupside-downprintmodeonoroff.
+•WhentheLSBofn is0,turnsoffupside-downprintmode.
+•WhentheLSBofn is1,turnsonupside-downprintmode.
+FS g 1 m a1 a2 a3 a4 nL n H d1...dk
+[Name] WritetoNVusermemory
+[Format]ASCIIFSg1 m a1 a2 a3 a4 nL nH d1...dk
+Hex1C6731 m a1 a2 a3 a4 nL nH d1...dk
+Decimal28 10349 m a1 a2 a3 a4 nL nH d1...dk
+[Range] m=0
+0 ≤ (a1+a2 × 256+a3 × 65536+a4 × 16777216) ≤ 1023
+(0 ≤ a1 ≤ 255,0 ≤ a2 ≤ 3, a3=0,a4=0)
+1 ≤ (nL +nH × 256) ≤ 1024 (0 ≤ nL ≤ 255,0 ≤ nH ≤ 4)
+32 ≤ d ≤ 255
+@@PAGE 32@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 31
+k =(nL +nH× 256)
+Theentirecapacitysize=1KB.
+[Description] • Storesthedata(d1...dk)intheareafrom(a1+a2× 256+a3× 65536+a4
+× 16777216)to(nL +nH× 256)bytesintheNVusermemory.
+[Notes] • FrequentwritecommandexecutionsbyanNVmemorywritecommandmaydamage
+theNVmemory.Therefore,itisrecommendedtolimitwritingthecommandsintothe
+NVmemorytolessthan10timesaday.
+• Ifthepoweristurnedoffortheprinterisresetviaaninterfacewhilethiscommandis
+beingexecuted,theprintermaygointoanabnormalcondition. Becarefulnottoturn
+thepowerofforlettheprinterberesetviaaninterfacewhilethiscommandisbeing
+executed.
+• Whileprocessingthiscommand,theprintermaybecomeBUSYwhilewritingthedata
+totheNVmemoryandstopsreceivingdata. Therefore,besurenottotransmitdata,
+includingthereal-timecommandswhiletheprinterisBUSY.
+FS g 2 m a1 a2 a3 a4 nL n H
+[Name] ReadfromNVusermemory
+[Format]ASCIIFSg2 m a1 a2 a3 a4 nL nH
+Hex1C6732 m a1 a2 a3 a4 nL nH
+Decimal28 10350 m a1 a2 a3 a4 nL nH
+[Range] m=0
+0 ≤ (a1+a2 × 256+a3 × 65536+a4 × 16777216) ≤ 1023
+(0 ≤ a1 ≤ 255,0 ≤ a2 ≤ 3, a3=0,a4=0)
+1 ≤ (nL +nH × 256) ≤ 80 (1 ≤ nL ≤ 80, nH=0)
+[Description] • Transmitsthedataintheareafrom(a1+a2× 256+a3× 65536+a4×
+16777216)to(nL +nH× 256)bytesintheNVusermemory.
+[Note] • Whenthiscommandistransmitted,donottransmitthesubsequentdatauntilthe
+statusisreceived.
+@@PAGE 33@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 32
+GS ! n
+[Name] Selectcharactersize
+[Format]ASCIIGS! n
+Hex1D21 n
+Decimal29 33 n
+[Range]0 ≤ n ≤ 7,16 ≤ n ≤ 23,32 ≤ n ≤ 39,48 ≤ n ≤ 55,64 ≤ n ≤71,
+80 ≤ n ≤ 87,96 ≤ n ≤ 103,112 ≤ n ≤ 119
+(1 ≤ Enlargementinverticaldirection ≤ 8,1 ≤ Enlargementinhorizontaldirection ≤8)
+[Default] n =0
+[Description] • Selectscharactersize(heightmagnificationandwidthmagnification).
+GS $ nL n H
+[Name] Setabsoluteverticalprintpositioninpagemode
+[Format]ASCIIGS$ nL nH
+Hex1D24 nL nH
+Decimal29 36 nL nH
+[Range]0 ≤ (nL +nH × 256) ≤ 65535 (0 ≤ nL ≤ 255,0 ≤ nH ≤ 255)
+@@PAGE 34@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 33
+[Description] • Inpagemode,movestheverticalprintpositionto[(nL +nH× 256) ×
+(verticalorhorizontalmotionunit)]fromthestartingpositionsetwithESCT.
+GS ( A pL p H n m
+[Name] Executetestprint
+[Format]ASCIIGS(A pL pH n m
+Hex1D2841 pL pH n m
+Decimal29 40 65 pL pH n m
+[Range](pL +pH× 256)=2 (pL =2,pH=0)
+0 ≤ n ≤ 2,48 ≤ n ≤ 50
+1 ≤ m ≤ 3,49 ≤ m ≤ 51
+[Description] • Executesaspecifiedtestprint.
+•pL,pHspecify(pL +pH× 256)asthenumberofbytesafterpH(n andm).
+• n specifiesthepaperusedforthetestprint.
+[Notes] • Theprinterexecutesasoftwareresetafterprocessingthiscommand.
+•Clearsthereceiveandprintbuffers.
+•ResetsallsettingvaluesinRAM(theprintarea,thecharacterstyles,andothers)that
+wereineffectatpoweron.(ThedataintheNVmemoryisnotreset.)
+GS ( D pL p H m [a1 b1]...[ak bk]
+[Name] Enable/disablereal-timecommand
+@@PAGE 35@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 34
+[Format]ASCIIGS(D pL pH m [a1 b1]...[ak bk]
+Hex1D2844 pL pH m [a1 b1]...[ak bk]
+Decimal29 40 68 pL pH m [a1 b1]...[ak bk]
+[Range]3 ≤ (pL +pH × 256) ≤ 65535 (0 ≤ pL ≤ 255,0 ≤ pH ≤ 255)
+m=20
+a =1,2
+b =0,1,48,49
+[Default] b =1 [when a =1]
+b =0 [when a =2]
+[Description] • Enablesordisablesthereal-timecommandspecifiedbya.
+• pL, pHspecify(pL +pH× 256)asthenumberofbytesafterpH(mand
+[a1b1]...[akbk]).
+[Note] • Ifgraphicsdataincludesadatastringmatching DLEDC4(fn =1or2),itis
+recommendedtousethiscommandinadvancetodisablethereal-timecommands.
+GS ( L pL p H m fn [parameters]
+GS 8 L p1 p2 p3 p4 m fn [parameters]
+[Name] Setgraphicsdata
+[Format]ASCIIGS(L pL pH m fn [parameters]
+Hex1D284C pL pH m fn [parameters]
+Decimal29 40 76 pL pH m fn [parameters]
+ASCIIGS8Lp1 p2 p3 p4 m fn [parameters]
+Hex1D384C p1 p2 p3 p4 m fn [parameters]
+Decimal29 56 76 p1 p2 p3 p4 m fn [parameters]
+• Inthedescriptionbelow,only GS(L isusedforexplanation.
+•Notethat GS(L andGS8Lhavethesamefunction.
+@@PAGE 36@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 35
+•Ifthe [parameters] intheFormatcolumninthetablebelowexceed65533bytes,useGS8L.
+•Theonlydifferencesbetween GS(L andGS8Lareaslistedbelow. Theformatfor GS8L
+isnotprovidedinthefollowingdescriptions;however,[Range],[Default],[Description],and
+[Notes]forparametersotherthanthoselistedinthetablebelowarethesameasfor GS(L.
+<ParametersspecifyingthenumberofparametersafterpHor p4>
+[Description] • Processesgraphicsdata.
+• pL, pHspecify(pL +pH× 256)asthenumberofbytesafterpH(m, fn,
+and[parameters]).
+• fn specifiesthefunction.
+• [parameters] specifytheprocessofeachfunction.
+[Notes] • FrequentwritecommandexecutionsbyanNVmemorywritecommandmaydamage
+theNVmemory. Therefore,itisrecommendedtolimitwritingthecommandsinto
+theNVmemorytolessthan10timesaday.
+• Ifthepoweristurnedoffortheprinterisresetviaaninterfacewhilethiscommandis
+beingexecuted,theprintermaygointoanabnormalcondition. Becarefulnottoturn
+thepowerofforlettheprinterberesetviaaninterfacewhilethiscommandisbeing
+executed.
+• Whileprocessingthiscommand,theprinterisBUSYwhilewritingthedatatotheNV
+@@PAGE 37@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 36
+memoryandstopsreceivingdata. Therefore,besurenottotransmitdata,including
+thereal-timecommands,whiletheprinterisBUSY.
+• When<Function48,51,or64>istransmitted,donottransmitthesubsequentdata
+untilthestatusisreceived. ESC/POSHandshakingProtocolproceduresisrequired
+whenusing<Function64>.
+<Function 48> GS ( L p L p H m fn (fn = 0, 48)
+[Name] TransmittheNVgraphicsmemorycapacity
+[Format]ASCIIGS(L pL pH m fn
+Hex1D284C pL pH m fn
+Decimal29 40 76 pL pH m fn
+[Range](pL +pH× 256)=2 (pL =2,pH=0)
+m=48
+fn =0,48
+[Description] • TransmitstheentirecapacityoftheNVgraphicsarea(numberofbytesintheNV
+graphicsarea).
+<Function 50> GS ( L pL p H m fn (fn = 2, 50)
+[Name] Printthegraphicsdataintheprintbuffer
+[Format]ASCIIGS(L pL pH m fn
+Hex1D284C pL pH m fn
+Decimal29 40 76 pL pH m fn
+[Range](pL +pH× 256)=2 (pL =2,pH=0)
+m=48
+fn =2,50
+[Description] • Printsthebufferedgraphicsdatastoredbyprocessingof GS(L <Function112>.
+@@PAGE 38@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 37
+<Function 51> GS ( L pL p H m fn (fn = 3, 51)
+[Name] TransmittheremainingcapacityoftheNVgraphicsmemory
+[Format]ASCIIGS(L pL pH m fn
+Hex1D284C pL pH m fn
+Decimal29 40 76 pL pH m fn
+[Range](pL +pH× 256)=2 (pL =2,pH=0)
+m=48
+fn =3,51
+[Description] • Transmitsthenumberofbytesofremainingmemory(unusedarea)intheNV
+graphicsarea.
+<Function 64> GS ( L pL p H m fn d1 d2 (fn = 64)
+[Name] TransmitthekeycodelistfordefinedNVgraphics
+[Format]ASCIIGS(L pL pH m fn d1 d2
+Hex1D284C pL pH m fn d1 d2
+Decimal29 40 76 pL pH m fn d1 d2
+[Range](pL +pH× 256)=4 (pL =4,pH=0)
+m=48
+fn =64
+d1=75
+d2=67
+[Description] • TransmitsthekeycodelistfordefinedNVgraphics.
+<Function 65> GS ( L pL p H m fn d1 d2 d3 (fn = 65)
+[Name] DeleteallNVgraphicsdata
+[Format]ASCIIGS(L pL pH m fn d1 d2 d3
+Hex1D284C pL pH m fn d1 d2 d3
+Decimal29 40 76 pL pH m fn d1 d2 d3
+@@PAGE 39@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 38
+[Range](pL +pH× 256)=5 (pL =5,pH=0)
+m=48
+fn =65
+d1=67
+d2=76
+d3=82
+[Description] • DeletesallNVgraphicsdata.
+<Function 66> GS ( L pL p H m fn kc1 kc2 (fn = 66)
+[Name] DeletethespecifiedNVgraphicsdata
+[Format]ASCIIGS(L pL pH m fn kc1 kc2
+Hex1D284C pL pH m fn kc1 kc2
+Decimal29 40 76 pL pH m fn kc1 kc2
+[Range](pL +pH× 256)=4 (pL =4,pH=0)
+m=48
+fn =66
+32 ≤ kc1 ≤ 126
+32 ≤ kc2 ≤ 126
+[Description] • DeletestheNVgraphicsdatadefinedbythekeycodes(kc1 andkc2).
+<Function 67> GS ( L pL p H m fn a kc1 kc2 b x L x H y L y H [c d1…dk]1…[c
+d1....dk]b ( fn = 67)
+[Name] DefinetheNVgraphicsdata(rasterformat)
+[Format]ASCIIGS(L pL pHmfnakc1kc2bxL xHyL yH[cd1...dk]1...[cd1...dk]b
+Hex1D284C pL pHmfnakc1kc2bxL xHyL yH[cd1...dk]1...[cd1...dk]b
+Decimal 294076 pL pHmfnakc1kc2bxL xHyL yH[cd1...dk]1...[cd1...dk]b
+[Range](pL, pH)forGS(L:
+12 ≤ (pL +pH × 256) ≤ 65535 (0 ≤ pL ≤ 255,0 ≤ pH ≤ 255)
+(p1, p2, p3, p4)forGS8L:
+@@PAGE 40@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 39
+12 ≤ (p1+p2 × 256+p3 × 65536+p4 × 16777216) ≤ 4294967295
+(0 ≤ p1 ≤ 255,0 ≤ p2 ≤ 255,0 ≤ p3 ≤ 255,0 ≤ p4 ≤ 255)
+CommonparametersforGS(L andGS8L:
+m=48
+fn =67
+a =48
+32 ≤ kc1 ≤ 126
+32 ≤ kc2 ≤ 126
+b =1 [whensingle-colorprintcontrolisselected]
+1 ≤ (xL +xH × 256) ≤ 8192 (0 ≤ xL ≤ 255,0 ≤ xH ≤ 32)
+1 ≤ (yL +yH × 256) ≤ 2304 (0 ≤ yL ≤ 255,0 ≤ yH ≤ 9)
+c =49 [whensingle-colorprintcontrolisselected]
+0 ≤ d ≤ 255
+k =(int((xL +xH× 256)+7)/8) × (yL +yH× 256)
+Theentirecapacitysize=256KBmaximum.
+[Description] • DefinestheNVgraphicsdata(rasterformat) asarecordspecifiedbythekey
+codes(kc1, kc2)intheNVgraphicsarea.
+• b specifiesthenumberofthecolorofthedefineddata.
+• xL,xHspecifythenumberofdotsin thehorizontaldirectionas(xL+xH×256).
+• yL, yHspecifythenumberofdotsintheverticaldirectionas(yL +yH× 256).
+• c specifiesthecolorofthedefineddata.
+(*)Color1meansblack(ahighlevelofenergy)inthespecifiedtwo-colorthermalpaper.
+• d specifiesthedefined data(rasterformat).
+[Notes] • IncaseswherethereissufficientcapacityisnotavailableforstoringNVgraphicsdata
+specifiedby(xL +xH× 256)and(yL +yH× 256),thisfunctionisignored.
+@@PAGE 41@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 40
+• ThenumberofitemsofNVgraphicsregisteredshouldbewithin50toshortenthe
+executiontimeofthisfunction. Theexecutiontimeis60secondsorlesswhenthe
+numberofitemsregisterediswithin50. Theexecutiontimefor100itemsis120
+secondsorless.
+• The[datavalue(k)+controlinformationdatavalue(24bytes)]areaoftheNV
+graphicsdatadomainisusedwhenthisfunctionisexecuted.
+• NVgraphicsandNVbitimage(FSq)cannotbedefinedsimultaneously. Whenthis
+functionisexecuted,allNVbitimagesaredeleted.
+<Function 69> GS ( L p L p H m fn kc1 kc2 x y (fn = 69)
+[Name] PrintthespecifiedNVgraphicsdata
+[Format]ASCIIGS(L pL pH m fn kc1 kc2 x y
+Hex1D284C pL pH m fn kc1 kc2 x y
+Decimal29 40 76 pL pH m fn kc1 kc2 x y
+[Range](pL +pH× 256)=6 (pL =6,pH=0)
+m=48
+fn =69
+32 ≤ kc1 ≤ 126
+32 ≤ kc2 ≤ 126
+x =1,2
+y =1,2
+[Description] • PrintstheNVgraphicsdatadefinedbythekeycodes(kc1 andkc2).
+•Thegraphicsdataisenlargedbyx andy inthehorizontalandverticaldirections.
+x,y Verticaldirection Horizontaldirection
+1 203dip 203dip
+2 101dip 101dip
+@@PAGE 42@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 41
+<Function 112> GS ( L pL p H m fn a bx by c x L x H y L y H d1...dk (fn =
+112)
+[Name]Storethegraphicsdataintheprintbuffer(rasterformat).
+[Format] ASCII GS ( L pL pH m fn a bx by c xL xH yL yH d1...dk
+Hex 1D 28 4C pL pH307030 bx by c xL xH yL yH d1...dk
+Decimal 29 40 76 pL pH4811248 bx by c xL xH yL yH d1...dk
+ASCII GS 8 L p1 p2 p3 p4 m fn a bx by c xL xH yL yH d1...dk
+Hex 1D 38 4C p1 p2 p3 p4307030 bx by c xL xH yL yH d1...dk
+Decimal 29 56 76 p1 p2 p3 p44811248 bx by c xL xH yL yH d1...dk
+[Range] 11≤(pL+ pH×256)≤65535(0≤ pL≤255,0≤ pH≤255)
+[Whenusing GS 8 L:11≤(p1+ p2×256+ p3×65536+ p4×16777216)≤
+4294967295]
+m=48, fn=112, a=48, a=52
+0≤ d≤255
+k=(int((xL+ xH×256)+7)/8)×(yL+ yH×256)
+bx=1,2
+by=1,2
+c=49(whensingle-colorprintingcontrolisselected)
+c=49,50(whentwo-colorprintingcontrolisselected)
+1≤(xL+xH×256)≤2047(0≤xL≤255,0≤xH≤7)
+[Whensingle-colorprintingcontrolisselected]
+(by=1):1≤(yL+yH×256)≤1662(0≤yL≤255,0≤yH≤6)
+(by=2):1≤(yL+yH×256)≤831(0≤yL≤255,0≤yH≤3)
+[Whentwo-colorprintingcontrolisselected]
+(by=1):1≤(yL+yH×256)≤831(0≤yL≤255,0≤yH≤3)
+(by=2):1≤(yL+yH×256)≤415(0≤yL≤255,yH=0,1)
+@@PAGE 43@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 42
+GS ( k pL p H cn fn [parameters]
+[Name] Setupandprintsymbol
+[Description] • Processesthedataforsymbols.
+• pL,pHspecify(pL+pH×256)asthenumberofbytesafterpH(cn,fn,
+and[parameters]).
+• cnspecifiesthetypeofsymbol.
+• fn specifiesthefunction.
+• [parameters] specifytheprocessofeachfunction
+•"Symboldata"meansthedatareceivedwith<Function080or180>before
+encoding.
+•"Symbolstoragearea"meanstheareawherethedatareceivedwith<Function
+080or180>beforeencodingisstored.
+@@PAGE 44@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 43
+[Notes] • When<Function082or182>istransmitted,donottransmitthesubsequentdata
+untilthestatusisreceived.
+• PDF417(cn=48)issupportedinANKmodel.
+[Reference] APPENDIXH,APPENDIX I
+<Function 065> GS ( k pL p H cn fn n (cn = 48, fn = 65)
+[Name] PDF417:Setthenumberofcolumnsinthedataregion
+[Format]ASCIIGS(k pL pH cn fn n
+Hex1D286B pL pH cn fn n
+Decimal29 40 107 pL pH cn fn n
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=48
+fn =65
+0 ≤ n ≤ 30
+[Default] n =0
+[Description] • SetsthenumberofcolumnsinthedataregionforPDF417.
+•Whenn =0,specifiesautomaticprocessing. Inthiscase,thenumberof
+columnsinthedataregioniscalculatedfromthenumberofcodewordsorthe
+rangeoftheprintarea.
+•Whenn ≠ 0,setsthenumberofcolumnsinthedataregionton codewords:
+[Notes] • Thefollowingdataisnotincludedinthenumberofcolumns.
+•Startpatternandstoppattern
+•Left-rowindicatorcodewordsandright-rowindicatorcodewords
+<Function 066> GS ( k pL p H cn fn n (cn = 48, fn = 66)
+[Name] PDF417:Setthenumberofrows
+@@PAGE 45@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 44
+[Format]ASCIIGS(k pL pH cn fn n
+Hex1D286B pL pH cn fn n
+Decimal29 40 107 pL pH cn fn n
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=48
+fn =66
+n =0,3 ≤ n ≤ 90
+[Default] n =0
+[Description] • SetsthenumberofrowsforPDF417.
+•Whenn =0,specifiesautomaticprocessing. Inthiscase,thenumberofrows
+inthedataregioniscalculatedfromthenumber ofcodewordsortherangeofthe
+printarea.
+•Whenn ≠ 0,setsthenumberofrowsto n rows.
+<Function 067> GS ( k pL p H cn fn n (cn = 48, fn = 67)
+[Name] PDF417:Setthewidthofthemodule
+[Format]ASCIIGS(k pL pH cn fn n
+Hex1D286B pL pH cn fn n
+Decimal29 40 107 pL pH cn fn n
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=48
+fn =67
+2 ≤ n ≤ 8
+[Default] n =3
+[Description] • SetsthewidthofthemoduleforPDF417to n dots.
+@@PAGE 46@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 45
+<Function 068> GS ( k pL p H cn fn n (cn = 48, fn = 68)
+[Name] PDF417:Settherowheight
+[Format]ASCIIGS(k pL pH cn fn n
+Hex1D286B pL pH cn fn n
+Decimal29 40 107 pL pH cn fn n
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=48
+fn =68
+2 ≤ n ≤ 8
+[Default] n =3
+[Description] • SetstherowheightforPDF417to[n × (thewidthofthemodule)].
+<Function 069> GS ( k pL p H cn fn m n (cn = 48, fn = 69)
+[Name] PDF417:Settheerrorcorrectionlevel
+[Format]ASCIIGS(k pL pH cn fn m n
+Hex1D286B pL pH cn fn m n
+Decimal29 40 107 pL pH cn fn m n
+[Range](pL +pH× 256)=4 (pL =4,pH=0)
+cn=48
+fn =69
+m=48,49
+48 ≤ n ≤ 56 [when m=48]
+1 ≤ n ≤ 40 [when m=49]
+[Default] m=49, n =1
+[Description] • SetstheerrorcorrectionlevelforPDF417.
+•Whenm=48,theerrorcorrectionlevelissetbythe“LevelSetting”andtheerror
+correctionlevelsetby“RatioSetting”is canceled.Thenumberoferrorcorrection
+codewordsareasfollows:
+@@PAGE 47@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 46
+•Whenm=49,theerrorcorrectionlevelissetbythe“RatioSetting”tothelevel
+indicatedbythenumberforencodeddata,and theerrorcorrectionlevelsetby
+the “LevelSetting”iscanceled.Therateissetto[n × 10%].
+Theerrorcorrectionlevelsinthefollowingtablearedeterminedbythecalculation
+[Datacodeword × n×0.1=(A)](Fractionsof0.5andoverareroundedup,and
+othersaretruncated.)
+<Function 070> GS ( k pL p H cn fn m (cn = 48, fn = 70)
+[Name] PDF417:Selecttheoptions
+[Format]ASCIIGS(k pL pH cn fn m
+Hex1D286B pL pH cn fn m
+Decimal29 40 107 pL pH cn fn m
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=48
+fn =70
+m=0,1
+[Default] m=0
+@@PAGE 48@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 47
+[Description] • SelectstheoptionsforPDF417.
+<Function 080> GS ( k pL p H cn fn m d1 …dk (cn = 48, fn = 80)
+[Name] PDF417:Storethedatainthesymbolstoragearea
+[Format]ASCIIGS(k pL pH cn fn m d1…dk
+Hex1D286B pL pH cn fn m d1…dk
+Decimal29 40 107 pL pH cn fn m d1…dk
+[Range]4 ≤ (pL +pH × 256) ≤ 65535 (0 ≤ pL ≤ 255,0 ≤ pH ≤ 255)
+cn=48
+fn =80
+m=48
+0 ≤ d ≤ 255
+k =(pL +pH× 256)–3
+[Description] • StoresthePDF417symboldata(d1...dk)inthesymbolstoragearea.
+<Function 081> GS ( k pL p H cn fn m (cn = 48, fn = 81)
+[Name] PDF417:Printthesymbol datainthesymbolstoragearea
+[Format]ASCIIGS(k pL pH cn fn m
+Hex1D286B pL pH cn fn m
+Decimal29 40 107 pL pH cn fn m
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=48
+fn =81
+m=48
+[Description] • EncodesandprintsthePDF417symboldatainthesymbolstorageareawithGS
+(k <Function080>.
+@@PAGE 49@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 48
+[Notes] • Usermustsecurethequietzone(left,right,upward,anddownwardspaceareas
+definedbythePDF417symbolspecifications)forPDF417printing.
+• Instandardmode,symbolshigherthan831dotscannotbeprintedwiththisprinter.
+<Function 082> GS ( k p L p H cn fn m (cn = 48, fn = 82)
+[Name] PDF417:Transmitthesizeinformationofthesymboldatainthesymbolstoragearea
+[Format]ASCIIGS(k pL pH cn fn m
+Hex1D286B pL pH cn fn m
+Decimal29 40 107 pL pH cn fn m
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=48
+fn =82
+m=48
+[Description] • TransmitsthesizeinformationfortheencodedPDF417symboldatainthesymbol
+storageareawith GS(k <Function080>.
+[Notes] • Thisfunctiondoesnotprint.
+• Thesizeinformationdoesnotincludethequietzone(left,right,upward,and
+downwardspaceareasdefinedbythePDF417symbolspecifications).
+<Function 165> GS ( k p L p H cn fn n1 n2 (cn = 49, fn = 65)
+[Name] QRCode:Selectthemodel
+[Format]ASCIIGS(k pL pH cn fn n1 n2
+Hex1D286B pL pH cn fn n1 n2
+Decimal29 40 107 pL pH cn fn n1 n2
+[Range](pL +pH× 256)=4 (pL =4,pH=0)
+cn=49
+fn =65
+n1=49,50
+n2=0
+@@PAGE 50@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 49
+[Default] n1=50, n2=0
+[Description] • SelectsthemodelforQRCode.
+<Function 167> GS ( k p L p H cn fn n (cn = 49, fn = 67)
+[Name] QRCode:Setthesizeofmodule
+[Format]ASCIIGS(k pL pH cn fn n
+Hex1D286B pL pH cn fn n
+Decimal29 40 107 pL pH cn fn n
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=49
+fn =67
+1 ≤ n ≤ 16
+[Default] n =3
+[Description] • SetsthesizeofthemoduleforQRCodeto n dots.
+<Function 169> GS ( k p L p H cn fn n (cn = 49, fn = 69)
+[Name] QRCode:Selecttheerrorcorrectionlevel
+[Format]ASCIIGS(k pL pH cn fn n
+Hex1D286B pL pH cn fn n
+Decimal29 40 107 pL pH cn fn n
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=49
+fn =69
+48 ≤ n ≤ 51
+[Default] n =48
+@@PAGE 51@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 50
+[Description] • SelectstheerrorcorrectionlevelforQRCode.
+<Function 180> GS ( k pL p H cn fn m d1 …dk (cn = 49, fn = 80)
+[Name] QRCode:Storethedatainthesymbolstoragearea
+[Format]ASCIIGS(k pL pH cn fn m d1…dk
+Hex1D286B pL pH cn fn m d1…dk
+Decimal29 40 107 pL pH cn fn m d1…dk
+[Range]4 ≤ (pL +pH × 256) ≤ 7092 (0 ≤ pL ≤ 255,0 ≤ pH ≤ 27)
+cn=49
+fn =80
+m=48
+0 ≤ d ≤ 255
+k =(pL +pH× 256)–3
+[Description] • StorestheQRCodesymboldata(d1...dk)intothesymbolstoragearea.
+<Function 181> GS ( k pL p H cn fn m (cn = 49, fn = 81)
+[Name] QRCode:Printthesymboldatainthesymbolstoragearea
+[Format]ASCIIGS(k pL pH cn fn m
+Hex1D286B pL pH cn fn m
+Decimal29 40 107 pL pH cn fn m
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=49
+fn =81
+m=48
+[Description] • EncodesandprintstheQRCodesymboldatainthesymbolstorageareawith GS
+@@PAGE 52@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 51
+(k <Function180>.
+[Note] • Usermustsecurethequietzone(left,right,upward,anddownwardspaceareas
+definedbytheQRCodesymbolspecifications)forQRCodeprinting.
+<Function 182> GS ( k p L p H cn fn m (cn = 49, fn = 82)
+[Name] QRCode:Transmitthesizeinformationofthesymboldatainthesymbolstoragearea
+[Format]ASCIIGS(k pL pH cn fn m
+Hex1D286B pL pH cn fn m
+Decimal29 40 107 pL pH cn fn m
+[Range](pL +pH× 256)=3 (pL =3,pH=0)
+cn=49
+fn =82
+m=48
+[Description] • TransmitsthesizeinformationfortheencodedQRCodesymboldatainthe
+symbolstorageareawith GS(k <Function180>.
+[Notes] • Thisfunctiondoesnotprintdata.
+• Thesizeinformationdoesnotincludethequietzone(left,right,upward,and
+downwardspaceareasdefinedbytheQRCodesymbolspecifications).
+GS ∗ x y d1...dk
+[Name] Definedownloadedbitimage
+[Format]ASCIIGS ∗ x y d1...dk
+@@PAGE 53@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 52
+Hex1D2A x y d1...dk
+Decimal29 42 x y d1...dk
+[Range]1 ≤ x ≤ 255
+1 ≤ y ≤ 48 [where1 ≤ x × y ≤ 1536]
+0 ≤ d ≤ 255
+k =x × y × 8
+[Description] • Definesthedownloadedbitimageinthedownloadedgraphicarea.
+• x specifiesthenumberofbytes inthehorizontaldirectionas x bytes.
+• y specifiesthenumberofbytes intheverticaldirectionas y bytes.
+• d specifiesthedefineddata(columnformat).
+[Note] • Adownloadedbitimageanduser-definedcharacters(ESC&)cannotbedefined
+simultaneously.Whenthiscommandisexecuted,alluser-definedcharactersare
+deleted.
+GS / m
+[Name] Printdownloadedbitimage
+[Format]ASCIIGS/ m
+Hex1D2F m
+Decimal29 47 m
+[Range]0 ≤ m ≤ 3,48 ≤ m ≤ 51
+[Description] • PrintsdownloadedbitimagedefinedbyGS ∗andusingthemodespecifiedby m.
+M mode Verticaldirection Horizontaldirection
+0,48 normal 203dip 203dip
+1,49 double-width 203dip 101dip
+2,50 double-height 101dip 203dip
+@@PAGE 54@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 53
+3,51 quadruple 101dip 101dip
+GS :
+[Name] Start/endmacrodefinition
+[Format]ASCIIGS:
+Hex1D3A
+Decimal29 58
+[Description] • Startsorendsmacrodefinition.
+[Note] • Thecontentsofthemacrocanbedefinedupto2048bytes.
+GS B n
+[Name] Turnwhite/blackreverseprintmodeon/off
+[Format]ASCIIGSB n
+Hex1D42 n
+Decimal29 66 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0
+[Description] • Turnswhite/blackreverseprintmodeonoroff.
+•WhentheLSBofn is0,turnsoffwhite/blackreversemode.
+•WhentheLSBof, n is1,turnsonwhite/blackreversemode.
+GS H n
+[Name] SelectprintpositionofHRIcharacters
+[Format]ASCIIGSH n
+Hex1D48 n
+Decimal29 72 n
+[Range]0 ≤ n ≤ 3,48 ≤ n ≤ 51
+@@PAGE 55@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 54
+[Default] n =0
+[Description] • SelectstheprintpositionofHRI characterswhenprintingabarcode.
+GS I n
+[Name] TransmitprinterID
+[Format]ASCIIGS I n
+Hex1D49 n
+Decimal29 73 n
+[Range] n =1,2,49,50 [theprinterID]
+65 ≤ n ≤ 69 [printerinformationB]
+[Description] • TransmitstheprinterIDortheinformationoftheprinterspecified.
+•TheprinterIDsthatcanbespecifiedareasfollows:
+n TypeofprinterID ID
+1,49 PrintermodelID hexadecimal：20/decimal32
+2,50 TypeID Seetable[typeID]
+[typeID]
+Bit off/on hex decimal contents
+0 Off 00 0 Multi-bytecodecharacteranotsupported
+On 01 1 Multi-bytecodecharacterssupported
+1 On 02 2 Autocutterinstalled(fixed)
+2,3 -- -- -- Notused
+4 off 00 0 Fixed
+5 -- -- -- Reserved
+6 -- -- -- Notused
+7 关 00 0 Fixed
+TheinformationBthatcanbespecifiedisasfollows:
+@@PAGE 56@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 55
+n Typeofprinterinformation contents
+65 Firmwareversion Dependsonfirwareversion
+66 Manufacturer “HPRT”
+67 Printername “TP801”or“TP805“or“TP806”
+68 PriductID Serialnumber
+69 Typeofmountedadditionalfonts SimplifiedChinesemodel:CHINAGB18030
+Chinesetraditionalmodel:TAIWANBIG-5
+[Note] • Whenthiscommandistransmitted,donottransmitthesubsequentdatauntilthe
+statusisreceived.
+GS L nL n H
+[Name] Setleftmargin
+[Format]ASCIIGSL nL nH
+Hex1D4C nL nH
+Decimal29 76 nL nH
+[Range]0 ≤ (nL +nH × 256) ≤ 65535 (0 ≤ nL ≤ 255,0 ≤ nH ≤ 255)
+[Default](nL +nH× 256)=0 (nL =0,nH=0)
+[Description] • Instandardmode,setstheleftmarginto[(nL +nH× 256) × (horizontal
+motionunit)].
+GS P x y
+[Name] Sethorizontalandverticalmotionunits
+[Format]ASCIIGSP x y
+Hex1D50 x y
+Decimal29 80 x y
+[Range]0 ≤ x ≤ 255
+0 ≤ y ≤ 255
+[Default] x =180, y =360
+[Description] • Setsthehorizontalandverticalmotionunitstoapproximately25.4/x mm{1/x"}
+@@PAGE 57@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 56
+andapproximately25.4/y mm{1/y"},respectively.
+•Whenx =0,thedefaultvalueofthehorizontalmotionunitisused.
+•Wheny =0,thedefaultvalueoftheverticalmotionunitisused.
+<A> GS V m
+<B> GS V m n
+[Name] Selectcutmodeandcutpaper
+[Format]<A>ASCII GSV m
+Hex 1D56m
+Decimal29 86m
+<B>ASCIIGSVm n
+Hex 1D56m n
+Decimal2986m n
+[Range]<A> m=0,1,48,49
+<B>m=65,66, 0 ≤ n ≤ 255
+[Description] • Executespapercuttingspecifiedby m.
+[Note] • Thisprinterexecutesapartialcut(onepointleftuncut).
+GS W nL n H
+[Name] Setprintareawidth
+[Format]ASCIIGSW nL nH
+Hex1D57 nL nH
+Decimal29 87 nL nH
+[Range]0 ≤ (nL +nH × 256) ≤ 65535 (0 ≤ nL ≤ 255,0 ≤ nH ≤ 255)
+@@PAGE 58@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 57
+[Default](nL +nH× 256)=576 (nL =40,nH=2) [80mmpaperwidthmodel]
+(nL +nH× 256)=384 (nL =80, nH=1) [58mmpaperwidthmodel]
+[Description] • Instandardmode,setstheprintareawidthto[(nL +nH× 256) ×
+(horizontalmotionunit)].
+GS \ nL n H
+[Name] Setrelativeverticalprintpositioninpagemode
+[Format]ASCIIGS \ nL nH
+Hex1D5C nL nH
+Decimal29 92 nL nH
+[Range]-32768 ≤ (nL +nH × 256) ≤ 32767
+[Description] • Inpagemode,movestheverticalprintpositionto[(nL +nH× 256) ×
+(verticalorhorizontalmotionunit)]fromthecurrentposition.
+•Apositivenumberspecifiesdownward movement,andanegativenumberspecifies
+upwardmovement.
+GS ^ r t m
+[Name]Executemacro
+[Format]ASCIIGS^ r t m
+Hex1D5E r t m
+Decimal29 94 r t m
+[Range]1 ≤ r ≤ 255
+0 ≤ t ≤ 255
+m=0,1
+[Description] • Executesthemacrothatwasdefinedwith
+GS:.
+
+@@PAGE 59@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 58
+GS a n
+[Name] Enable/disableAutomaticStatusBack(ASB)
+[Format]ASCIIGSa n
+Hex1D61 n
+Decimal29 97 n
+[Range]0 ≤ n ≤ 255
+[Default] n =0
+[Description] • EnablesordisablesbasicASB(AutomaticStatusBack).
+• WhilebasicASBisactive,theselectedenabledbasicASBstatusistransmitted
+wheneverthestatuschanges.
+• ThebasicASBstatustobetransmittedisthefourbytesthatfollow:
+•Firstbyte(printerinformation)
+@@PAGE 60@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 59
+[Reference]APPENDIXJ
+@@PAGE 61@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 60
+GS f n
+[Name] SelectfontforHRIcharacters
+[Format]ASCIIGSf n
+Hex1D66 n
+Decimal29 102 n
+[Range] n =0,1,48,49
+[Default] n =0
+[Description] • SelectsafontfortheHRIcharacterswhenprintingabarcode.
+GS g 0 m nL n H
+[Name] Initializemaintenancecounter
+[Format]ASCIIGSg0 m nL nH
+Hex1D6730 m nL nH
+Decimal29 10348 m nL nH
+[Range] m=0
+(nL +nH× 256)=20,21,50,70 (nL =20,21,50,70, nH=0)
+[Description] • Setstheresettablemaintenancecounterspecifiedby(nL +nH× 256)to0.
+[Notes] • FrequentwritecommandexecutionsbyanNVmemorywritecommandmaydamage
+theNVmemory.Therefore,itisrecommendedtolimitwritingthecommandsintothe
+NVmemorytolessthan10timesaday.
+• Ifthepoweristurnedoffortheprinterisresetviaaninterfacewhilethiscommandis
+@@PAGE 62@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 61
+beingexecuted,theprintermaygointoanabnormalcondition.Donotturnthe
+poweroffordonotresettheprinterviaaninterfacewhilethiscommandisbeing
+executed.
+• Whileprocessingthiscommand,theprintermaybecomeBUSYwhilewritingthedata
+totheNVmemoryandstopsreceivingdata. Therefore,donottransmitdatafromthe
+hostcomputerwhiletheprinterisBUSY.
+[Reference]APPENDIXG
+GS g 2 m nL n H
+[Name] Transmitmaintenancecounter
+[Format]ASCIIGSg2 m nL nH
+Hex1D6732 m nL nH
+Decimal29 10350 m nL nH
+[Range] m=0
+(nL +nH× 256)=20,21,50,70,148,149,178,198
+(nL =20,21,50,70,148,149,178,198, nH=0)
+[Description] • Transmitsthevalueofthemaintenancecounterspecifiedby(nL +nH× 256).
+[Notes] • Themaintenancecountervaluesaremeasurements;therefore,theirvalueswillbe
+affectedbythetimingoferrorsand howandwhenthepoweristurnedoff.
+• Whenthiscommandistransmitted,donottransmitthesubsequentdatauntilthe
+statusisreceived.
+[Reference]APPENDIXG
+@@PAGE 63@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 62
+GS h n
+[Name] Setbarcodeheight
+[Format]ASCIIGSh n
+Hex1D68 n
+Decimal29 104 n
+[Range]1 ≤ n ≤ 255
+[Default] n =162
+[Description] • Setstheheightofthebarcodeto n dots.
+<A> GS k m d1...dk NUL
+<B> GS k m n d1...dn
+[Name] Printbarcode
+[Format]<A>ASCIIGSk m d1...dk NUL
+Hex 1D6Bm d1...dk 00
+Decimal29107m d1...dk 0
+<B>ASCIIGSkm n d1...dn
+Hex 1D6Bm n d1...dn
+Decimal29107m n d1...dn
+[Range]<A>0 ≤ m ≤ 6 (Fortherangeof k andd, see[Description].)
+<B>65 ≤ m ≤ 73 (Fortherangeofn andd, see[Description].)
+[Description] • Printsthebarcodeusingthebarcodesystemspecifiedbym.
+For<FunctionA>
+@@PAGE 64@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 63
+• k of<FunctionA>indicatesthenumberofbytesofbarcodedata.
+• d specifiesthebarcodedata.
+For<FunctionB>
+• n of<FunctionB>specifiesthenumberofbytesofbarcodedata.
+• d specifiesthebarcodedata.
+[Note] • Usersmustsecurethequietzone(leftorrightsidespaceareadefinedbythebar
+codestandard)forbarcodeprinting.
+[Reference] APPENDIXH,APPENDIX I
+@@PAGE 65@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 64
+GS r n
+[Name]Transmitstatus
+[Format]ASCIIGSr n
+Hex1D72 n
+Decimal29 114 n
+[Range] n =1,2,49,50
+[Description] • Transmitsthestatus.
+• Thisprintertransmitsthefollowingstatus.
+•Papersensorstatus(n =1,49)
+•Drawerkick-outconnectorstatus(n =2,50)
+[Note] • Whenthiscommandistransmitted,donottransmitthesubsequentdatauntilthis
+statusisreceived.
+GS w n
+[Name] Setbarcodewidth
+@@PAGE 66@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 65
+[Format]ASCIIGSw n
+Hex1D77 n
+Decimal29 119 n
+[Range]2 ≤ n ≤ 6
+[Default] n =3
+[Description] • Setsthehorizontalsizeofthebarcode.
+n Multi-levelbarcode Binary-levelbarcode
+Modulewidth(mm) Thinelementwidth(mm) Thickelementwidth(mm)
+2 0.25 0.25 0.625
+3 0.375 0.375 2.303
+4 0.5 0.5 1.250
+5 0.625 0.625 1.625
+6 0.750 0.750 2
+•Multi-levelbarcodesareasfollows:
+UPC-A,UPC-E,JAN13/EAN13, JAN8/EAN8,CODE93,andCODE128
+•Binary-levelbarcodesareasfollows:
+CODE39,ITF,andCODABAR
+ESC v
+GSr,whichistheupward-compatiblecommandreplacing ESCv,isrecommendedtouse,since
+ESCvisanobsoletecommandintheESC/POScommandsystem.
+[Name] Transmitpapersensorstatus
+[Format]ASCIIESCv
+Hex1B76
+Decimal27 118
+[Description] • Transmitsthestatusofpapersensor(s)as1byteofdata,asfollows:
+@@PAGE 67@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 66
+Bits2and3: Whilethecoverisopen,thisshowsthestatewhenthecoverwasstillclosed.(This
+commandisnotexecuted.)
+[Note] • Whenthiscommandistransmitted,donottransmitthesubsequentdatauntilthe
+statusisreceived.
+FS p n m
+[Name] PrintNVbitimage
+[Format]ASCIIFSp n m
+Hex1C70 n m
+Decimal28 112 n m
+[Range]1 ≤ n ≤ 255
+0 ≤ m ≤ 3,48 ≤ m ≤ 51
+[Description] •PrintsNVbitimagenusingtheprocessof FSqandusingthemodespecifiedbym.
+M mode Verticaldirection Horizontaldirection
+0,48 normal 203dip 203dip
+1,49 double-width 203dip 101dip
+2,50 double-height 101dip 203dip
+3,51 quadruple 101dip 101dip
+FS q n [x L x H y L y H d1...dk]1 ... [x L x H y L y H d1...dk]n
+[Name] DefineNVbitimage
+[Format]ASCIIFSq n [xL xHyL yHd1...dk]1...[xL xHyL yHd1...dk]n
+Hex1C71 n [xL xHyL yHd1...dk]1...[xL xHyL yHd1...dk]n
+@@PAGE 68@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 67
+Decimal28 113 n [xL xHyL yHd1...dk]1...[xL xHyL yHd1...dk]n
+[Range]1 ≤ n ≤ 255
+1 ≤ (xL +xH × 256) ≤ 1023 (0 ≤ xL ≤ 255,0 ≤ xH ≤ 3)
+1 ≤ (yL +yH × 256) ≤ 288 (0 ≤ yL ≤ 255, yH=0,1)
+0 ≤ d ≤ 255
+k =(xL +xH× 256) × (yL +yH× 256) × 8
+Theentirecapacitysize=256KB.
+[Description] • DefinestheNVbitimageintheNVgraphicsarea.
+• n specifiesthenumberofdefinedNVbitimages.
+• xL,xHspecifythenumberofbytesinthehorizontaldirectionas(xL+xH×
+256).
+• yL, yHspecifythenumberofbytesintheverticaldirectionas(yL +yH×
+256).
+• d specifiesthedefineddata(columnformat).
+[Notes] • FrequentwritecommandexecutionsbyanNVmemorywritecommandmaydamage
+theNVmemory.Therefore,itisrecommendedtolimitwritingthecommandsintothe
+NVmemorytolessthan10timesaday.
+• Ifthepoweristurnedoffortheprinterisresetviaaninterfacewhilethiscommandis
+beingexecuted,theprintermaygointoanabnormalcondition.Donotturnthe
+poweroffordonotresettheprinterviaaninterfacewhilethiscommandisbeing
+executed.
+• Whileprocessingthiscommand,theprintermaybecomeBUSYwhilewritingdatato
+theNVmemoryandstopsreceivingdata. Therefore,donottotransmitdatafrom
+thehostcomputerwhiletheprinterisBUSY.
+• Theprinterexecutesasoftwareresetafterprocessingthiscommand.
+•Clearsthereceiveandprintbuffers.
+•ResetsallsettingvaluesinRAM(theprintarea,thecharacterstyles,user-defined
+@@PAGE 69@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 68
+characters,andothers)thatwereineffectatpoweron.(ThedataintheNVmemory
+arenotreset.)
+• NVbitimageandNVgraphics(GS(L/GS8L)cannotbedefinedsimultaneously.
+Whenthiscommandisexecuted,allNVgraphicsaredeleted.
+GS v 0 m xL x H y L y H d1...dk
+[Name] Printrasterbitimage
+[Format]ASCIIGSv0 m xL xH yL yH d1...dk
+Hex1D7630 m xL xH yL yH d1...dk
+Decimal29 11848 m xL xH yL yH d1...dk
+[Range]0 ≤ m ≤ 3,48 ≤ m ≤ 51
+1 ≤ (xLʴxH × 256) ≤ 65535 (0 ≤ xL ≤ 255,0 ≤ xH ≤ 255)
+1 ≤ (yL +yH × 256) ≤ 2303 (0 ≤ yL ≤ 255,0 ≤ yH ≤ 8)
+0 ≤ d ≤ 255
+k =(xL +xH× 256) × (yL +yH× 256)
+[Description] • Printsarasterbitimageusingthemodespecifiedby m.
+M mode Verticaldirection Horizontaldirection
+0,48 normal 203dip 203dip
+1,49 double-width 203dip 101dip
+2,50 double-height 101dip 203dip
+3,51 quadruple 101dip 101dip
+• xL,xHspecifythenumberofbytesinthehorizontaldirectionas(xL+xH×256).
+• yL, yHspecifythenumberofdotsintheverticaldirectionas(yL +yH× 256).
+• d specifiesthedefined data(rasterformat).
+ESC ( A p L p H fn n c t1 t2 < Function 97 >
+[Name]BeepintegratedbeeperinTP801 （TP805/TP806）models
+@@PAGE 70@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 69
+[Format]ASCII ESC(ApLpHfnnct1t2
+Hex 1B2841050061nct1t2
+Decimal 274065 5097nct1t2
+[Range](pL+pH × 256)=5(pL=5,pH=0)
+fn=97
+n=100
+0 ≤ c ≤ 63
+0 ≤ t1 ≤ 255
+0 ≤ t2 ≤ 255
+[Description]Beepstheintegratedbeeper.
+•c specifiestimesofbeeping.
+•t1specifiesbeepingtime(t1× 100ms).
+•t2specifiestimeforstopbeeping(t2× 100ms).
+[Notes] •Thisfunctionrepeatsintegratedbeepercontrolof[(t1 ×100ms)beep/(t2 ×100ms)
+stop]c times.
+•Ifthiscommandisnewlyprocessedduringbeepingofthebuzzer,thecurrentprocessfor
+beepingthebuzzerisstoppedandthenewprocessforbeeping thebuzzerisstarted.
+•Integratedbeeperbeepingbythisfunctionstopsduetoanyofthefollowingfactors.
+•Finishspecificationof(c).
+•Resetorpoweroff.
+@@PAGE 71@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 70
+Appendix
+
+@@PAGE 72@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 71
+
+@@PAGE 73@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 72
+
+@@PAGE 74@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 73
+
+@@PAGE 75@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 74
+
+@@PAGE 76@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 75
+
+@@PAGE 77@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 76
+
+@@PAGE 78@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 77
+
+@@PAGE 79@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 78
+
+@@PAGE 80@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 79
+
+@@PAGE 81@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 80
+
+@@PAGE 82@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 81
+
+@@PAGE 83@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 82
+
+@@PAGE 84@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 83
+
+@@PAGE 85@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 84
+
+@@PAGE 86@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 85
+
+@@PAGE 87@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 86
+
+@@PAGE 88@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 87
+
+@@PAGE 89@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 88
+
+@@PAGE 90@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 89
+
+@@PAGE 91@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 90
+
+@@PAGE 92@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 91
+
+@@PAGE 93@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 92
+
+@@PAGE 94@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 93
+
+@@PAGE 95@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 94
+
+@@PAGE 96@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 95
+
+@@PAGE 97@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 96
+
+@@PAGE 98@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 97
+
+@@PAGE 99@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 98
+
+@@PAGE 100@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 99
+
+@@PAGE 101@@
+TP801/TP805/TP806 Programming Manual
+www.hprt.com 100

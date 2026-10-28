@@ -114,7 +114,8 @@ impl LabelJob {
         self.buf.extend_from_slice(&[ESC, b'$', xl, xh]);
         let [yl, yh] = le16(y);
         self.buf.extend_from_slice(&[GS, b'$', yl, yh]);
-        self.buf.extend_from_slice(&[GS, b'h', 0x30]); 
+        self.buf.extend_from_slice(&[GS, b'w', 0x02]);
+        self.buf.extend_from_slice(&[GS, b'h', 0x30]);
         self.buf.extend_from_slice(&[GS, b'H', 0x02]); 
         self.buf.extend_from_slice(&[GS, b'k', 0x02]);
         self.buf.extend_from_slice(digits.as_bytes());

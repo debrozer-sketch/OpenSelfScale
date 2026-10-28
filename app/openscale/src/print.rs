@@ -87,8 +87,9 @@ pub const FONT_A_CELL_MM: f64 = 1.5;
 pub const FONT_A_HEIGHT_MM: f64 = 3.0;
 pub const FONT_B_CELL_MM: f64 = 1.125;
 pub const FONT_B_HEIGHT_MM: f64 = 2.125;
-pub const BARCODE_WIDTH_MM: f64 = 24.0;
+pub const BARCODE_WIDTH_MM: f64 = 23.75;
 pub const BARCODE_HEIGHT_MM: f64 = 6.0;
+pub const BARCODE_HRI_HEIGHT_MM: f64 = 3.0;
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreviewItem {
     pub x_mm: f64,
@@ -159,7 +160,7 @@ pub fn preview_items(
                 x_mm: f.x_mm,
                 y_mm: f.y_mm,
                 w_mm: BARCODE_WIDTH_MM * if f.size2 { 2.0 } else { 1.0 },
-                h_mm: BARCODE_HEIGHT_MM * if f.size2 { 2.0 } else { 1.0 },
+                h_mm: (BARCODE_HEIGHT_MM + BARCODE_HRI_HEIGHT_MM) * if f.size2 { 2.0 } else { 1.0 },
                 text: String::new(),
                 barcode: true,
             });
@@ -1540,7 +1541,7 @@ mod tests {
         let items = preview_items(&spec, &sample(), 1350, 26999, "13.10.26", "18:40:00");
         let barcode = items.iter().find(|i| i.barcode).unwrap();
         assert_eq!((barcode.x_mm, barcode.y_mm), (2.0, 5.0));
-        assert_eq!((barcode.w_mm, barcode.h_mm), (24.0, 6.0));
+        assert_eq!((barcode.w_mm, barcode.h_mm), (23.75, 9.0));
         let fields: Vec<_> = items.iter().filter(|i| !i.barcode).collect();
         assert!(fields.iter().any(|i| i.text.contains("ВИНОГРАД")));
         let name = fields.iter().find(|i| i.text.contains("ВИНОГРАД")).unwrap();

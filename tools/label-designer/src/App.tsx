@@ -30,12 +30,12 @@ const initialLayout = (): Layout => ({
 
 function fieldSize(field: LabelField) {
   if (field.w && field.h) return { w: field.w, h: field.h };
-  if (field.kind === "barcode") return { w: field.w || 24 * field.size, h: field.h || 6 * field.size };
+  if (field.kind === "barcode") return { w: field.w || 23.75 * field.size, h: field.h || (6 + 3) * field.size };
   const cw = field.font === "A" ? 1.5 : 1.125;
   const ch = field.font === "A" ? 3 : 2.125;
-  const multiplier = field.kind === "sum" ? field.size * 2 : field.size;
   const text = field.kind === "text" ? field.text || "" : SAMPLES[field.kind];
-  return { w: field.w || Math.max(2, text.length * cw * multiplier), h: field.h || ch * multiplier };
+  const width = field.kind === "text" ? text.length * cw * field.size : text.length * cw;
+  return { w: field.w || Math.max(2, width), h: field.h || ch * field.size };
 }
 
 const cellWidth = (field: LabelField) => (field.font === "A" ? 1.5 : 1.125) * (field.size === 2 ? 2 : 1);

@@ -1,0 +1,2850 @@
+
+@@PAGE 1@@
+ESC POS
+Programming Manual
+Rev.1.0
+Xiamen Hanin Co.,Ltd.
+Web: www.hprt.com
+@@PAGE 2@@
+ESC POS Programming Manual
+Change Record
+REV Date DESCRIPTION
+1.0 2024.12 First edition
+@@PAGE 3@@
+ESC POS Programming Manual
+Contents
+1. Overview .......................................................................................................................................... 1
+1.1 Key Terms ............................................................................................................................... 1
+1.2 Command Notation ................................................................................................................1
+2. Printing Command Set ..................................................................................................................... 2
+2.1 Basic Setting Commands ........................................................................................................2
+ESC @ ................................................................................................................................... 2
+GS P x y ................................................................................................................................. 2
+ESC 2 .....................................................................................................................................2
+ESC 3 n ..................................................................................................................................3
+ESC S ..................................................................................................................................... 3
+ESC L ..................................................................................................................................... 3
+CAN .......................................................................................................................................4
+2.2 Basic Print Commands ........................................................................................................... 4
+LF .......................................................................................................................................... 4
+CR ......................................................................................................................................... 4
+FF ..........................................................................................................................................5
+ESC FF ................................................................................................................................... 5
+ESC J n ...................................................................................................................................6
+ESC K n ..................................................................................................................................6
+ESC d n ..................................................................................................................................7
+ESC e n ..................................................................................................................................7
+2.3 Print Position Commands .......................................................................................................8
+HT ......................................................................................................................................... 8
+ESC D n1 ... nk NUL ...............................................................................................................8
+ESC $ nL nH ...........................................................................................................................9
+ESC \ nL nH ......................................................................................................................... 10
+GS L nL nH .......................................................................................................................... 11
+GS W nL nH .........................................................................................................................12
+ESC a n ................................................................................................................................13
+GS T n ................................................................................................................................. 14
+ESC W xL xH yL yH dxL dxH dyL dyH ...................................................................................14
+ESC T n ................................................................................................................................15
+GS $ nL nH .......................................................................................................................... 16
+GS \ nL nH ...........................................................................................................................16
+2.4 Basic Character Commands ................................................................................................. 17
+ESC SP n ..............................................................................................................................17
+ESC ! n ................................................................................................................................ 17
+ESC M n .............................................................................................................................. 18
+ESC E n ................................................................................................................................18
+ESC G n ............................................................................................................................... 19
+@@PAGE 4@@
+ESC POS Programming Manual
+ESC - n .................................................................................................................................19
+[Name] ............................................................................................................................... 19
+Turn underline mode on/off .............................................................................................. 19
+GS ! n .................................................................................................................................. 20
+ESC V n ................................................................................................................................21
+ESC { n .................................................................................................................................21
+GS B n ................................................................................................................................. 22
+ESC R n ................................................................................................................................22
+ESC t n ................................................................................................................................ 23
+2.5 Kanji Command .................................................................................................................... 24
+FS ........................................................................................................................................ 24
+FS . ...................................................................................................................................... 24
+FS ! n ...................................................................................................................................24
+FS S n1 n2 ........................................................................................................................... 25
+FS W n .................................................................................................................................26
+FS - n ...................................................................................................................................26
+2.6 Custom Character Commands ............................................................................................. 27
+ESC & y c1 c2 [x1 d1...d(y × x1)]...[xk d1...d(y × xk)][name] ...........................................27
+Define user-defined characters ..........................................................................................27
+ESC % n ............................................................................................................................... 28
+ESC ? n ................................................................................................................................ 28
+FS 2 c1 c2 d1...dk ................................................................................................................29
+FS ? c1 c2 ............................................................................................................................ 29
+2.7 Bit Image Commands ........................................................................................................... 30
+ESC * m nL nH d1 ... dk .......................................................................................................30
+FS q n [xL xH yL yH d1...dk]1...[xL xH yL yH d1...dk]n .........................................................32
+FS p n m ..............................................................................................................................32
+GS * x y d1...dk ................................................................................................................... 33
+GS / m .................................................................................................................................33
+GS v 0 m xL xH yL yH d1....dk ............................................................................................. 34
+GS ( L & GS 8 L ................................................................................................................. 35
+2.8 Bar Code Commands ............................................................................................................49
+GS H n .................................................................................................................................49
+GS f n .................................................................................................................................. 50
+GS h n ................................................................................................................................. 50
+GS w n ................................................................................................................................ 51
+GS k .....................................................................................................................................52
+2.9 Two Dimension Code Commands ........................................................................................ 53
+GS ( k .................................................................................................................................. 53
+<Function 065> GS ( k pL pH cn fn n (cn=48, fn=65) ..........................................................54
+<Function 066> GS ( k pL pH cn fn n (cn=48, fn=66) ..........................................................55
+<Function 067> GS ( k pL pH cn fn n (cn=48, fn=67) ..........................................................55
+<Function 068> GS ( k pL pH cn fn n (cn=48, fn=68) ..........................................................56
+<Function 069> GS ( k pL pH cn fn m n (cn=48, fn=69) ......................................................56
+@@PAGE 5@@
+ESC POS Programming Manual
+<Function 070> GS ( k pL pH cn fn m (cn=48, fn=70) ......................................................58
+<Function 082> GS ( k pL pH cn fn m (cn=48, fn=82) ....................................................58
+<Function 165 > GS ( k pL pH cn fn n1 n2 (cn=49,fn=65) ..................................... 59
+<Function 167> GS ( k pL pH cn fn n (cn=49,fn=67) ................................................. 59
+<Function 169> GS ( k pL pH cn fn n (cn=49,fn=69) ................................................. 60
+2.10 Status Commands ........................................................................................................... 61
+ESC v ................................................................................................................................... 61
+GS r n .................................................................................................................................. 61
+DLE EOT n [a] ...................................................................................................................... 63
+GS a n ................................................................................................................................. 65
+GS I n .................................................................................................................................. 68
+2.11 Mechanism Control Commands .........................................................................................69
+ESC i ....................................................................................................................................69
+ESC m ..................................................................................................................................69
+GS V .................................................................................................................................... 69
+2.12 Control Commands ............................................................................................................ 70
+ESC p m t1 t2 ...................................................................................................................... 70
+2.13 Beeper Commands .............................................................................................................70
+ESC ( A pL pH fn n c t1 t2 <Function 97 > ...........................................................................70
+2.14 Miscellaneous Commands（including Macro Function Commands） .............................71
+GS ( A pL pH n m .................................................................................................................71
+ESC c 5 n ............................................................................................................................. 72
+ESC = n ................................................................................................................................72
+DLE DC4 (fn = 1) m t ........................................................................................................... 73
+DLE DC4（fn=8）d1...d7 ................................................................................................... 74
+GS : ..................................................................................................................................... 74
+GS ^ r t m ............................................................................................................................75
+@@PAGE 6@@
+ESC POS Programming Manual
+1
+1. Overview
+1.1 Key Terms
+Real-time commands: These commands are acted on immediately upon being received by the
+printer.
+Page mode: Under this mode, the printer stores all data in a specified memory and thinks of this
+as a virtual page. The page is printed when the printer receives print command
+either FF or ESC FF.
+Standard mode: Standard mode is the default mode of printer, namely line mode. Under this
+mode, the printer prints data and feeds paper upon print line buffer full (data is
+enough for one print line) or receiving print command like LF.
+HRI character: Bar code note character. HRI：Human Readable Interface
+NV: Non-volatile memory in which data stored does not loss when powered off. NV: Non-volatile
+RAM: Random Access Memory.
+ASB: Auto Send Back ASB：Auto Send Back
+DPI: Print dots per inch (one inch equals to 25.4mm). It is used to identify the resolution of
+a printer.
+For example, 203DPI means that 203 dots can be printed per inch. DPI：Dot Per Inch
+1.2 Command Notation
+[Name] The name of the command.
+[Format] This part describes the command with ASCII code format, HEX. format,
+and Decimal format.
+[Range] Gives the allowable ranges, if any, for the command parameters.
+[Description] Describes the function of the command. " − " in the table indicates 0 or 1.
+[Notes] Provides important information on setting and using the printer
+command, if necessary.
+[Default] Gives the default values, if any, for the arguments.
+[Reference] Gives references, if any.
+@@PAGE 7@@
+ESC POS Programming Manual
+2
+2. Printing Command Set
+2.1 Basic Setting Commands
+ESC @
+[Name] Initialize printer
+[Format] ASCII ESC @
+Hex 1b 40
+Decimal 27 64
+GS P x y
+[Name] Set horizontal and vertical motion units
+[Format] ASCII GS P x y
+Hex 1d 50 x y
+Decimal 29 80 x y
+[Range] 0 ≤ x ≤ 255
+0 ≤ y ≤ 255
+[Default] x = 180, y = 360
+[Description] Sets the horizontal and vertical motion units to approximately 25.4/x mm {1/x"}
+and approximately 25.4/y mm {1/y"}, respectively.
+• When x = 0, the default value of the horizontal motion unit is used.
+• When y = 0, the default value of the vertical motion unit is used.
+ESC 2
+[Name] Select default line spacing
+[Format] ASCII ESC 2
+Hex 1b 32
+Decimal 27 50
+[Description] Selects 3.75 mm (30×0.125 mm) line spacing.
+[Reference] ESC 3
+@@PAGE 8@@
+ESC POS Programming Manual
+3
+ESC 3 n
+[Name] Sets the line spacing to n dot.
+[Format] ASCII ESC 3 n
+Hex 1b 33 n
+Decimal 27 51 n
+[Range] 0 ≤ n ≤ 255
+[Default] Approximately 4.23 mm {1/6"}
+[Description] • Sets the line spacing to n × (vertical or horizontal motion unit).
+[Notes] • The maximum line spacing is 1016 mm {40 inches}.
+[Reference] ESC 2
+ESC S
+[Name] Select standard mode
+[Format] ASCII ESC S
+Hex 1b 53
+Decimal 27 83
+[Description] Switches from page mode to standard mode.
+[Notes] • This command is enabled only in page mode.
+• Data in print buffer is cleared.
+• This command sets the print position to the beginning of the line.
+• Standard mode is selected as the default.
+• This command returns the values to default value in standard mode:
+① Set right-side character spacing: ESC
+SP, FS S
+① Select line spacing: ESC 2, ESC 3
+[Reference] FF, ESC FF, ESC L
+ESC L
+[Name] Select page mode
+[Format] ASCII ESC L
+Hex 1b 4c
+Decimal 27 76
+[Description] Switches from standard mode to page mode.
+This command is enabled only when processed at the beginning of a line in
+standard mode. In other cases, this command is ignored.
+@@PAGE 9@@
+ESC POS Programming Manual
+4
+CAN
+[Name] Cancel print data in page mode
+[Format] ASCII CAN
+Hex 18
+Decimal 24
+[Description] In page mode, deletes all the print data in the current print area.
+[Notes] • This command is effective only in the page mode.
+• If the regional set up previously overlaped with the current area, the
+overlap will be deleted.
+[Reference] ESC L, ESC W
+2.2 Basic Print Commands
+LF
+[Name] Print and line feed.
+[Format] ASCII LF
+Hex 0a
+Decimal 10
+[Description] Prints the data in the print buffer and feeds one line, based on the current line
+spacing.
+[Notes]
+• This command sets the print position to the beginning of the line.
+• When this command is processed in page mode, only the print position
+moves, and the printer does not perform actual printing.
+[Reference] ESC 2, ESC 3
+CR
+[Name] Print and carriage return
+[Format] ASCII CR
+Hex 0d
+Decimal 13
+[Description] When automatic line feed is enabled, it functions in the same way as LF.
+When automatic line feed is disabled, this command is ignored.
+[Notes] • With a serial interface, the command performs as if auto line feed is
+disabled.
+• With a parallel interface, set this command through storage switches 1-5.
+• Set the print position to the beginning of the line.
+[Reference] LF
+@@PAGE 10@@
+ESC POS Programming Manual
+5
+FF
+[Name] Print and return to standard mode (in page mode)
+[Format] ASCII FF
+Hex 0c
+Decimal 12
+[Description] Prints all the data in the print buffer collectively and switches from page
+mode to standard mode.
+[Notes] Paper type is continuous paper:
+• In page mode, prints all the data in the print buffer collectively and
+switches from page mode to standard mode.
+• This command is equivalent to LF in standard mode.
+• This command returns the values set by ESC W to the default values. Paper
+type is marked paper:
+• In page mode, prints all the data in the print buffer, not to return to
+standard mode, not clear the data in the print buffer. The printer feeds the
+marked paper to the next print starting position after finished printing.
+Don’t change horizontal and vertical coordinates in the print buffer.
+• This command is effective only in the page mode.
+• This command sets the print position to the beginning of the line.
+[Reference] ESC FF, ESC L, ESC S , GS ( F , GS FF
+ESC FF
+[Name] Print data in the page mode
+[Format] ASCII ESC FF
+Hex 1b 0c
+Decimal 27 12
+[Description] Print all buffered data in the printable area collectively in page mode.
+[Notes]
+• This command is effective only in the page mode.
+• The butter data, ESC T and ESC W set and character set are not deleted
+after printing.
+[Reference] FF, ESC L, ESC S
+@@PAGE 11@@
+ESC POS Programming Manual
+6
+ESC J n
+[Name] Print and feed paper
+ASCII ESC J n
+Hex 1b 4a n
+Decimal 27 74 n
+[Range] 0 ≤n ≤ 255
+[Description]Prints the data in the print buffer and feeds the paper [n × (vertical or horizontal
+motion unit)].
+[Notes] • The maximum paper feed amount is 1016 mm {40"}.
+• After printing is completed, this command sets the print starting position to the
+beginning of the line.
+• The paper feed amount set by this command does not affect the values set by ESC 2
+or ESC 3.
+• The maximum paper feed amount is 900 mm. If the paper feed amount (n × line
+spacing) of more than 900 mm is specified, the printer feeds the paper only 900 mm .
+ESC K n
+[Name] Print and reverse feed
+[Format] ASCII ESC K n
+Hex 1b 4b n
+Decimal 27 75 n
+[Description]Prints the data in the print buffer and feeds the paper n × (vertical motion unit) in
+the reverse direction.
+[Notes] • The maximum paper feed amount depends on the printer model.
+• After printing, the print position moves to the beginning of the line. When a left
+margin is set, the position of the left margin is the beginning of the line.
+• When standard mode is selected, the vertical motion unit is used.
+• When page mode is selected, the vertical or horizontal motion unit is used for the
+print direction set by ESC T.
+• When the starting position is set to the upper left or lower right of the print area
+using ESC T, the vertical motion unit is used.
+• When the starting position is set to the upper right or lower left of the print area
+using ESC T, the horizontal motion unit is used.
+• When this command is processed in page mode, only the print position moves; the
+printer does not perform actual printing.
+• This command is used to temporarily feed a specific length without changing the
+line spacing set by other commands.
+@@PAGE 12@@
+ESC POS Programming Manual
+7
+ESC d n
+[Name] Print and feed n lines
+ASCII ESC d n
+Hex 1b 64 n
+Decimal 27 100 n
+[Range] 0 ≤n ≤ 255
+[Description]Prints the data in the print buffer and feeds n lines.
+[Notes] • This command sets the print starting position to the beginning of the line.
+• The amount of paper fed per line is based on the value set using the line spacing
+command (ESC 2 or ESC 3).
+• The maximum paper feed amount is 1016 mm {40 inches}. If the specified amount
+exceeds 1016 mm {40 inches}, the paper feed amount is automatically set to 1016
+mm {40 inches}.
+[Reference] ESC 2, ESC 3
+ESC e n
+[Name] Print and reverse feed n lines
+[Format] ASCII ESC e n
+Hex 1B 65 n
+Decimal 27 101 n
+[Default] None
+[Description] Prints the data in the print buffer and feeds n lines in the reverse direction.
+[Notes] • The amount of paper fed per line is based on the value set using the line
+spacing command (ESC 2 or ESC 3).
+• The maximum paper feed amount depends on the printer model.
+• After printing, the print position moves to the beginning of the line. When a left
+margin is set, the position of the left margin is the beginning of the line.
+• When this command is processed in page mode, only the print position moves,
+and the printer does not perform actual printing.
+• This command is used to temporarily feed a specific line without changing the
+line spacing set by other commands.
+@@PAGE 13@@
+ESC POS Programming Manual
+8
+2.3 Print Position Commands
+HT
+[Name] Horizontal tab
+ASCII HT
+Hex 09
+Decimal 9
+[Description]Moves the print position to the next horizontal tab position.
+[Notes] • This command is ignored unless the next horizontal tab position has been set.
+• If the next horizontal tab position exceeds the printing area, the printer sets the
+printing position to [printing area width + 1].
+• Horizontal tab positions are set with ESC D.
+• If this command is received when the printing position is at [printing area width+ 1],
+the printer executes print buffer-full printing of the current line and horizontal tab
+processing from the beginning of the next line.
+• Set Horizontal tab default to 8 character width of character ASCII (12×24).
+• When the print buffer is full，the printer performs the following actions：In standard
+mode, the printer prints the current line and sets the print position to the beginning
+of the line. In page mode, the printer sets the print position to the beginning of the
+line.
+[Reference] ESC D
+ESC D n1 ... nk NUL
+[Name] Set horizontal tab positions
+ASCII ESC D n1...nk NUL
+Hex 1b 44 n1...nk 00
+Decimal 27 68 n1...nk 0
+[Range] 1 ≤ n1 ≤ n2 ≤ ... ≤ nk ≤ 255
+0≤ k ≤ 32
+[Default] n = 8, 16, 24, 32, ... (Every eight characters for the default font set by ESC ! or ESC M)
+[Description]Sets horizontal tab positions
+• n specifies the number of digits from the setting position to the left edge of the
+print area.
+• k indicates the number of horizontal tab positions to be set.
+@@PAGE 14@@
+ESC POS Programming Manual
+9
+[Notes] • The horizontal tab position is stored as a value of [character width × n] measured
+from the beginning of the line.
+• There are a total of k horizontal tab positions.
+• Multiple horizontal tab commands, with the last one taking precedence.
+• The horizontal tab position is calculated by the following formula:
+Character width x n, the character width includes the right-side character spacing.
+• This command cancels any previous horizontal tab settings.
+• When n=8, the current position is in the ninth column.
+• A maximum of 32 horizontal tab positions can be set. Data exceeding 32 horizontal
+tab positions is processed as normal data.
+• Transmit [n]k in ascending order and place a NUL code at the end.
+• When [n] is less than or equal to the preceding value [n]k-1, horizontal tab setting
+is finished, and the following data is processed as normal data.
+• ESC D NUL cancels all horizontal tab positions.
+• Even if the character width is changed after setting the horizontal tab positions, the
+setting of the horizontal tab positions will not be changed.
+• The character width is independent in standard mode and page mode.
+[Reference] HT
+ESC $ nL nH
+[Name] Set absolute print position
+ASCII ESC $ nL nH
+Hex 1b 24 nL nH
+Decimal 27 36 nL nH
+[Range] 0 ≤ ( n L + n H × 256) ≤ 65535 (0 ≤ n L ≤ 255, 0 ≤ n H ≤ 255)
+[Description]Moves the print position to (nL + nH × 256) × (horizontal or vertical motion unit)
+from the left edge of the print area.
+[Notes] • This command starts from the printing position at the beginning of the line.
+• This command is only valid for printing the first line of data under it.
+• If multiple commands are sent consecutively, the last received command shall
+prevail. The printer ignores any setting that exceeds the print area.
+• If the horizontal absolute printing position is greater than or equal to the maximum
+printable width or the set printing width, the horizontal absolute printing position is
+invalid and printing starts from the beginning of the line.
+• If the set horizontal absolute printing position is smaller than the current printing
+position, (1) character overlap printing will occur; (2) Move the printing position to
+the left.
+• If the absolute printing position is greater than or equal to the printing page width,
+the absolute printing position setting is invalid and printing starts from the top of the
+page.
+[Reference] ESC \, GS $, GS \
+@@PAGE 15@@
+ESC POS Programming Manual
+10
+ESC \ nL nH
+[Name] Set relative print position
+ASCII ESC \ nL nH
+Hex 1b 5c nL nH
+Decimal 27 92 nL nH
+[Range] -32768 ≤ ( nL + nH × 256) ≤ 32767
+[Description]Moves the print position to (nL + nH × 256) × (horizontal or vertical motion unit)
+from the current position.
+A positive number specifies movement to the right, and a negative number specifies[Notes] • The printer ignores any setting that exceeds the print area.
+• N pitch movement to the right: (nL + nH × 256) = N.
+• Use the complement of N for setting N pitch movement to the left: (nL + nH × 256)
+= 65536 – N.
+• Print starting position from the current position to [N × 0.125mm].
+• This command starts counting from the current printing position.
+• When set to 0, characters are printed immediately after.
+• If multiple commands are sent consecutively, the movement position will be
+accumulated.
+• Horizontal relative printing position>=maximum printable width or set printing
+width, relative printing position is invalid.
+• When page mode is selected, the horizontal or vertical motion unit is used for the
+print direction set by ESC T.
+• When the starting position is set to the upper left or lower right of the print area
+using ESC T, the horizontal motion unit is used.
+• When the starting position is set to the upper right or lower left of the print area
+using ESC T, the vertical motion unit is used.
+• When the relative printing position is greater than or equal to the printing page
+width, the absolute printing position setting is invalid, and printing starts from the top
+of the page.
+[Reference] ESC $
+@@PAGE 16@@
+ESC POS Programming Manual
+11
+GS L nL nH
+[Name] Set left margin
+ASCII GS L nL nH
+Hex 1d 4c nL nH
+Decimal 29 76 nL nH
+[Range] 0 ≤ ( nL + nH × 256) ≤ 65535 (0 ≤ nL ≤ 255, 0 ≤ nH ≤ 255)
+[Default] ( nL + nH × 256) = 0 (nL = 0, nH = 0)
+[Description]• Set left margin.
+• In standard mode, sets the left margin to (nL + nH × 256) × (horizontal motion
+unit) from the left edge of the printable area.
+[Notes] • The left margin set by this command is valid for printing data below it.
+• If multiple commands are sent consecutively, the last received command shall
+prevail.
+• Set the left margin at the beginning of the line, which is invalid, and output the nl
+and nh of this command as normal characters.
+• Left margin greater than maximum printable width: The left margin decreases, and
+the print width expands to one character width.
+• The left margin has no effect in page mode. If this command is processed in page
+mode, the left margin is set and it is enabled when the printer returns to standard
+mode.
+[Reference] GS W
+Printable area
+Printing area widthLeft margin
+@@PAGE 17@@
+ESC POS Programming Manual
+12
+GS W nL nH
+[Name] Set print area width
+ASCII GS W nL nH
+Hex 1d 57 nL nH
+Decimal 29 87 nL nH
+[Range] 0 ≤ ( nL + nH × 256) ≤ 65535 (0 ≤ nL ≤ 255, 0 ≤ nH ≤ 255)
+[Default] ( nL+ nH × 256) = 576 ( nL=40, nH = 2) [when paper width is set to 80 mm]
+( nL+ nH ×256) = 384 ( nL= 80, nH = 1) [when paper width is set to 58 mm]
+[Description]• Set printing area width using nL and nH.
+• Set printing area width to [( nL + nH × 256)× 0.125mm)] from the beginning of a
+line.
+[Notes] • In standard mode, this command is enabled only when processed at the beginning
+of a line.
+• If this command and GS L set the print area width to less than the width of one
+character, the print area width is extended to accommodate one character for the
+line. If the [left margin + print area width] exceeds the printable area, the print area
+width is automatically set to [printable area – left margin].
+• Set the print width at the beginning of the non line, the print width setting is invalid,
+and the print width is the maximum printable width.
+• This command is invalid in page mode: the character "A" is printed to the maximum
+width of the paper. After returning to standard mode, the printing width takes effect,
+and the printing width of character "B" is 30mm.
+• If the [left margin + print area width] exceeds the printable area, the print area
+width is automatically set to [printable area – left margin].
+Printable area
+Printing area widthLeft margin
+@@PAGE 18@@
+ESC POS Programming Manual
+13
+ESC a n
+[Name] Select justification
+ASCII ESC a n
+Hex 1b 61 n
+Decimal 27 97 n
+[Range] 0 ≤ n ≤ 2, 48 ≤ n ≤ 50
+[Default] n=0
+[Description]In standard mode, aligns all the data in one line to the selected layout, using n as
+follows:
+n Justification
+0, 48 Left justification
+1, 49 Centered
+2, 50 Right justification
+[Notes] • When standard mode is selected, this command is enabled only when processed at
+the beginning of the line in standard mode.
+• This command only changes the internal flag bit in page mode.
+• This command justifies printing data (such as characters, all graphics, bar codes, and
+two dimensionl codes) and space area set by HT, ESC $, and ESC \.
+• Setting barcode, QR code, and image alignment methods is effective.
+• The justification has no effect in page mode. If this command is processed in page
+mode, an internal flag is activated, and this flag is enabled when the printer returns to
+standard mode.
+[Example]
+ Left justification Centered Right justification
+@@PAGE 19@@
+ESC POS Programming Manual
+14
+GS T n
+[Name] Set print position to the beginning of print line
+[Format] ASCII GS T n
+Hex 1d 54 n
+Decimal 29 84 n
+[Range] n = 0, 1, 48, 49
+[Description] In standard mode, moves the print position to the beginning of the print line after
+performing the operation specified by n.
+n Function
+0.48 Cancel data in the current print
+buffer
+1.49 Print data in the current print buffer
+ESC W xL xH yL yH dxL dxH dyL dyH
+[Name] Set print area in page mode
+ASCII ESC W xL xH yL yH dxL dxH dyL dyH
+Hex 1b 57 xL xH yL yH dxL dxH dyL dyH
+Decimal 27 87 xL xH yL yH dxL dxH dyL dyH
+[Range] 0 ≤ ( x L + x H × 256) ≤ 65535 (0 ≤ x L ≤ 255, 0 ≤ x H ≤ 255)
+0 ≤ ( y L + y H × 256) ≤ 65535 (0 ≤ y L ≤ 255, 0 ≤ y H ≤ 255)
+1 ≤ (dxL + dxH × 256) ≤ 65535 (0 ≤ dxL ≤ 255, 0 ≤ dxH ≤ 255)
+1 ≤ (dyL + dyH × 256) ≤ 65535 (0 ≤ dyL ≤ 255, 0 ≤ dyH ≤ 255)
+[Default] ( x L + x H × 256) = 0 ( x L = 0, x H = 0)
+( y L + y H × 256) = 0 ( y L = 0, y H = 0)
+(dxL + dxH ×256) = 512 ( dxL = 0, dxH = 2) [80 mm paper width model]
+(dxL + dxH ×256) = 360 ( dxL = 104, dxH = 4) [58 mm paper width model]
+(dyL + dyH ×256) = 1662 ( dyL = 126, dyH = 6)
+[Description]In page mode, sets the size and the logical origin of the print area as follows:
+• Horizontal logical origin = (xL + xH × 256) × (horizontal motion unit) from absolute
+origin.
+• Vertical logical origin = (yL + yH × 256) × (vertical motion unit) from absolute
+origin.
+• Print area width = (dxL + dxH × 256) × (horizontal motion unit)
+• Print area height = (dyL + dyH × 256) × (vertical motion unit)
+@@PAGE 20@@
+ESC POS Programming Manual
+15
+[Notes]
+• If [horizontal logical origin + print area width] exceeds the printable area, the print
+area width is automatically set to [horizontal printable area – horizontal logical
+origin].
+• When both the page height and width are set to 0, the page size setting is invalid,
+and the printing width and height are the maximum printable width and height.
+• If the horizontal or vertical logical origin is set outside the printable area, this
+command is canceled, and the following data is processed as normal data.
+• This command setting has no effect in standard mode. If this command is processed
+in standard mode, the logical origin and the print area are set, and they are enabled
+when the printer selects page mode.
+• The maximum vertical motion unit that can be set is 207.95 mm {3324/406 inches}.
+ESC T n
+[Name] Select print direction in page mode
+ASCII ESC T n
+Hex 1b 54 n
+Decimal 27 84 n
+[Range] 0 ≤ n ≤ 3, 48 ≤ n ≤ 51
+[Default] n=0
+[Description]In page mode, selects the print direction and starting position using n as follows:
+n Print
+direction
+Starting
+position
+0.48 Left to right Upper left
+1.49 Bottom to top Lower left
+2.50 Right to left Lower right
+3.51 Top to bottom Upper right
+[Notes] This command setting has no effect in standard mode. If this command is processed in
+standard mode, an internal flag is activated, and this flag is enabled when the printer
+selects page mode.
+@@PAGE 21@@
+ESC POS Programming Manual
+16
+GS $ nL nH
+[Name] Set absolute vertical print position in page mode
+ASCII GS $ nL nH
+Hex 1d 24 nL nH
+Decimal 29 36 nL nH
+[Range] 0 ≤ ( n L + n H × 256) ≤ 65535 (0 ≤ nL ≤ 255, 0 ≤ n H ≤ 255)
+[Description]In page mode, moves the vertical print position to (nL + nH × 256) × (vertical or
+horizontal motion unit) from the starting position set by ESC T.
+[Notes] • This command is enabled only in page mode. If this command is processed in
+standard mode, it is ignored.
+• The printer ignores any setting that exceeds the print area set by ESC W.
+• The horizontal or vertical motion unit is used for the print direction set by ESC T.
+• When the starting position is set to the upper left or lower right of the print area
+using ESC T, the vertical motion unit is used.
+• When the starting position is set to the upper right or lower left of the print area
+using ESC T, the horizontal motion unit is used.
+[Reference] ESC $, ESC T, ESC W, ESC \, GS \
+GS \ nL nH
+[Name] Set relative vertical print position in page mode
+ASCII GS \ nL nH
+Hex 1D 5C nL nH
+Decimal 29 92 nL nH
+[Range] -32768 ≤ ( n L + n H × 256) ≤ 32767
+[Description]In page mode, moves the vertical print position to (nL + nH × 256) × (vertical or
+horizontal motion unit) from the current position.
+[Notes] • The printer ignores any setting that exceeds the print area set by ESC W.
+• The horizontal or vertical motion unit is used for the print direction set by ESC T.
+• When the starting position is set to the upper left or lower right of the print area
+using ESC T, the vertical motion unit is used.
+• When the starting position is set to the upper right or lower left of the print area
+using ESC T, the horizontal motion unit is used.
+• This command is enabled only in page mode. If this command is processed in
+standard mode, it is ignored.
+@@PAGE 22@@
+ESC POS Programming Manual
+17
+2.4 Basic Character Commands
+ESC SP n
+[Name] Set right-side character spacing
+[Format] ASCII ESC SP n
+Hex 1b 20 n
+Decimal 27 32 n
+[Range] 0 ≤ n ≤255
+[Default] n = 0
+[Description] Sets the right-side character spacing to n × (horizontal or vertical motion unit).
+[Notes] • The maximum character spacing on the right side is 31.875 millimeters {203/180
+"}.
+• The next (character width+character right spacing) exceeds the maximum
+printable width and jumps to the beginning of the next line for printing.
+ESC ! n
+[Name] Select print mode(s)
+[Format] ASCII ESC ！ n
+Hex 1b 21 n
+Decimal 27 33 n
+[Range] 0 ≤ n ≤255
+[Default] n = 0
+[Description] Selects the character font and styles (emphasized, double-height, double-width,
+and underline) together as follows:
+n:
+Bit Off/On Hex Decimal Function
+0 OFF 00 0 Character font 1 selected.
+ON 01 1 Character font 2 selected.
+1, 2 OFF 00 0 Undefined.
+3
+OFF 00 0 Emphasized mode is turned
+off.
+ON 08 8 Emphasized mode is turned
+on.
+4 OFF 00 0 Double-height canceled.
+ON 10 16 Double-height selected.
+5 OFF 00 0 Double-width canceled.
+ON 20 32 Double-width selected.
+6 OFF 00 0 Undefined.
+7 OFF 00 0 Underline mode is turned off.
+ON 80 128 Underline mode is turned on.
+@@PAGE 23@@
+ESC POS Programming Manual
+18
+ESC M n
+[Name] Select character font
+[Format] ASCII ESC M n
+Hex 1b 4d n
+Decimal 27 77 n
+[Range] n = 0, 1, 48, 49
+[Default] n = 0
+[Description] Selects a character font, using n as follows:
+n Function
+0.48 Font A: (12 × 24)
+1.49 Font B: (9 × 17)
+[Notes] • The command ESC ! can also be used to set the font, and the final received
+command is valid.
+• If the font to be set is not configured in the font library, the instruction is invalid.
+[Description] ESC !
+ESC E n
+[Name] Turn emphasized mode on/off
+[Format] ASCII ESC E n
+Hex 1b 45 n
+Decimal 27 69 n
+[Range] 0 ≤ n ≤ 255
+[Default] n = 0
+[Description] Turns emphasized mode on or off.
+• When the LSB of n is 0, emphasized mode is turned off.
+• When the LSB of n is 1, emphasized mode is turned on.
+[Notes] • Only the lowest value of n is valid.
+• ESC ! command can also select/cancel bold mode, and the last received command
+is valid.
+• Bold and double print ESC G commands can be cancelled from each other, and
+the last received command is valid.
+[Reference] ESC !
+@@PAGE 24@@
+ESC POS Programming Manual
+19
+ESC G n
+[Name] Turn double-strike mode on/off
+[Format] ASCII ESC G n
+Hex 1b 47 n
+Decimal 27 71 n
+[Range] 0 ≤ n ≤ 255
+[Default] n = 0
+[Description] Turns double-strike mode on or off.
+• When the LSB of n is 0, double-strike mode is turned off.
+• When the LSB of n is 1, double-strike mode is turned on.
+[Notes] • Only the lowest value of n is valid.
+• This command has the same effect as bold printing.
+• Bold and double print ESC G commands can be cancelled from each other, and
+the last received command is valid.
+[Reference] ESC E
+ESC - n
+[Name] Turn underline mode on/off
+[Format] ASCII ESC - n
+Hex 1b 2d n
+Decimal 27 45 n
+[Range] 0 ≤ n ≤2, 48 ≤n ≤ 50
+[Description] Turns underline mode on or off using n as follows:
+n Function
+0, 48 Turns off underline mode
+1, 49 Turns on underline mode (1-dot thick)
+2, 50 Turns on underline mode (2-dot thick)
+[Notes] • The underline can be added under all characters (including right spacing, spaces),
+but not including spaces set by HT.
+• When underline mode is turned on, 90° clockwise rotated characters and
+white/black reverse characters cannot be underlined.
+• When underline mode is turned off, the following data cannot be underlined, but
+the thickness is maintained. The default width is1-dot thick.
+• Changing the character size does not affect the current underline thickness.
+• This command and bit 7 of ESC ! turn on and off underline mode in the same way.
+The last executed command is valid.
+[Default] n = 0
+[Reference] ESC !
+@@PAGE 25@@
+ESC POS Programming Manual
+20
+GS ! n
+Table 1 Character width selection Table 2 Character height selection
+Hex Decimal Width Hex Decimal Height
+00 0 1 (normal) 00 0 1 (normal)
+10 16 2 (double
+width) 01 1 2 (double
+height)
+20 32 3 02 2 3
+30 48 4 03 3 4
+40 64 5 04 4 5
+50 80 6 05 5 6
+60 96 7 06 6 7
+70 112 8 07 7 8
+[Notes] • This instruction is valid for all characters (ASCII characters and Chinese characters),
+except for HRI characters.
+• If n is outside the defined range, the command is ignored.
+• In standard mode, the character is enlarged in the paper feed direction when
+double-height mode is selected, and it is enlarged perpendicular to the paper feed
+direction when double-width mode is selected. However, when character orientation
+changes in 90° clockwise rotation mode, the relationship between double-height
+and double-width is reversed.
+• In page mode, double-height and double-width are on the character orientation.
+• When the characters are enlarged with different heights on one line, all the
+characters on the line are aligned at the baseline.
+• ESC ! can also turn double-width and double-height modes on or off.
+[Default] n = 0
+[Reference] ESC !
+[Name] Select character size
+[Format] ASCII GS ! n
+Hex 1d 21 n
+Decimal 29 33 n
+[Range] 0 ≤ n ≤ 255
+(1 ≤ height ≤ 8, 1 ≤ width ≤ 8)
+[Description] Selects the character height (vertical number of times normal font size) using bits 0
+to 3 and selects the character width (horizontal number of times normal font size)
+using bits 4 to 7, as follows:
+Bit Function
+0-3 Character width selection, see Table 2
+4-7 Character height selection, see Table 1
+@@PAGE 26@@
+ESC POS Programming Manual
+21
+ESC V n
+[Name] Turn 90° clockwise rotation mode on/off
+[Format] ASCII ESC V n
+Hex 1b 56 n
+Decimal 27 86 n
+[Range] 0 ≤ n ≤ 2, 48 ≤ n ≤ 50
+[Default] n = 0
+[Description] In standard mode, turns 90° clockwise rotation mode on or off for characters,
+using n as follows:
+n Function
+0, 48 Turns off 90° clockwise
+rotation mode.
+1, 49
+2, 50
+Turns on 90° clockwise
+rotation mode.
+[Notes] • This command is effective only in the standard mode.
+• When underline mode is turned on, the printer does not underline 90°
+clockwise-rotated characters.
+• When character orientation changes in 90° clockwise rotation mode, the
+relationship between vertical and horizontal directions is reversed.
+[Reference] ESC !, ESC -
+ESC { n
+[Name] Turn upside-down print mode on/off
+[Format] ASCII ESC { n
+Hex 1b 7b n
+Decimal 27 123 n
+[Range] 0 ≤ n ≤ 255
+[Default] n = 0
+[Description]In standard mode, turns upside-down print mode on or off.
+• When the LSB of n is 0, upside-down print mode is turned off.
+• When the LSB of n is 1, upside-down print mode is turned on.
+[Notes] • Only the lowest value of n is valid.
+• When standard mode is selected, this command is enabled only when processed at
+the beginning of the line.
+• If this command is processed in page mode, an internal flag is activated, and this
+flag is enabled when the printer returns to standard mode.
+• The upside-down print mode has no effect in page mode.[Example]
+Feed Direction
+@@PAGE 27@@
+ESC POS Programming Manual
+22
+GS B n
+[Name] Turn white/black reverse print mode on/off
+[Format] ASCII GS B n
+Hex 1d 42 n
+Decimal 29 66 n
+[Range] 0 ≤ n ≤ 255
+[Description] Turns white/black reverse print mode on or off.
+• When the LSB of n is 0, white/black reverse print mode is turned off.
+• When the LSB of n is 1, white/black reverse print mode is turned on.
+[Notes] • Only the lowest value of n is valid.
+• This command is valid for all characters except for HRI characters.
+• When white/black reverse print mode is turned on, it also affects the right-side
+character spacing set by ESC SP.
+• This command does not affect bitmap, custom bitmap, barcode, HRI character, or
+HT, ESC $, and ESC \ setting blank.
+• When white/black reverse print mode is turned on, it does not affect the space
+between lines.
+• In white/black reverse print mode, characters are printed in white on a black
+background. When underline mode is turned on, the printer does not underline
+white/black reverse characters.
+[Default] n = 0
+ESC R n
+[Name] Select an international character set
+[Format] ASCII ESC R n
+Hex 1b 52 n
+Decimal 27 82 n
+[Range] 0≤n≤15
+[Default] N=0 [Other than the following model]
+n=15 [Simplified Chinese model]
+[Description] Selects an international character set n as follows:
+n Country n Country
+0 U.S.A. 8 Japan
+1 France 9 Norway
+2 Germany 10 Denmark II
+3 U.K. 11 Spain II
+4 Denmark I 12 Latin America
+5 Sweden 13 Korea
+6 Italy 14 Slovenia / Croatia
+7 Spain I 15 China
+[Note] • Only Font 0 and Font 1 fonts have international character sets. This instruction is invalid in
+other fonts.
+@@PAGE 28@@
+ESC POS Programming Manual
+23
+ESC t n
+[Name] Select character code table
+[Format] ASCII ESC t n
+Hex 1b 74 n
+Decimal 27 116 n
+[Range] 0≤n≤5; 13≤n≤21;n=26; 32≤n≤34;n=36,37; 39≤n≤40; 45≤n≤52
+[Default] n = 0
+[Description Selects a page n from the character code table as follows:
+n Character code table n Character code table
+0 [PC437 (USA: Standard Europe)] 40 [ISO8859-15 (Latin9)]
+1 [Katakana] 45 [WPC1250]
+2 [PC850 (Multilingual)] 46 [WPC1251(Cyrillic)]
+3 [PC860 (Portuguese)] 47 [WPC1253]
+4 [PC863 (Canadian-French)] 48 [WPC1254]
+5 [PC865 (Nordic)] 49 [WPC1255]
+13 [PC857 (Turkish)] 50 [WPC1256]
+14 [PC737 (Greek)] 51 [WPC1257]
+15 [ISO8859-7 (Greek)] 52 [WPC1258]
+16 [WPC1252] 54 [MIK(Cyrillic /Bulgarian)]
+17 [PC866 (Cyrillic #2)] 55 [CP755 (East Europe，Latvian 2)]
+18 [PC852 (Latin 2)] 56 [Iran]
+19 [PC858 (Euro)] 57 [Iran II]
+20 [KU42] 58 [Latvian]
+21 [TIS11 (Thai)] 59 [ISO-8859-1 (West Europe)]
+26 [TIS18 (Thai)] 60 [ISO-8859-3(Latin 3)]
+32 [PC720] 61 [ISO-8859-4(Baltic)]
+33 [WPC775] 62 [ISO-8859-5(Cyrillic)]
+34 [PC855 (Cyrillic)] 63 [ISO-8859-6(Arabic)]
+36 [PC862 (Hebrew)] 64 [ISO-8859-8(Hebrew)]
+37 [PC864 (Arabic)] 65 [ISO-8859-9(Turkish)]
+39 [ISO8859-2 (Latin2)] 66 [PC856]
+67 [ABICOMP]
+[Notes] Page 0/page 2/page 3/page 4/page 5/ page 14/page 17/ page 18/ page 19/ page
+20/ page 21/ page 26/page 32 /page 47 Supports both 12x24 and 9x17 fonts.
+@@PAGE 29@@
+ESC POS Programming Manual
+24
+2.5 Kanji Command
+FS
+[Name] Select Kanji character mode
+[Format] ASCII FS
+Hex 1c
+Decimal 28
+[Description] Selects Kanji character mode.
+FS .
+[Name] Cancel Kanji character mode
+[Format] ASCII FS .
+Hex 1c 2e
+Decimal 28 46
+[Description] Cancels Kanji character mode.
+[Notes] • If Kanji mode is canceled, the printer processes a character code as a 1-byte
+code of characters.
+• When the power is turned on, the printer automatically enters Kanji mode.
+FS ! n
+[Name] Select print mode(s) for Kanji characters
+[Format] ASCII FS ！ n
+Hex 1c 21 n
+Decimal 28 33 n
+[Range] 0 ≤n ≤ 255
+[Default] n = 0
+[Description]Selects the character styles (double-height, double-width, and Kanji-underlined)
+together for multi-byte code character as follows:
+n:
+Bit 0/1 Hex Decimal Function
+0, 1 Reserved
+2 0 00 0 Double-width canceled
+1 04 4 Double-width selected
+3 0 00 0 Double-height canceled
+1 08 8 Double-height selected
+4-6 Reserved
+7 0 00 0 Kanji underline mode is turned off
+1 80 128 Kanji underline mode is turned on
+@@PAGE 30@@
+ESC POS Programming Manual
+25
+[Notes] • When both double-width and double-height modes are specified, quadruple-size
+characters are printed.
+• The printer can underline all characters, including left and right spacing and spaces.
+Even if Kanji underline mode is specified, 90° clockwise-rotated characters,
+white/black reverse characters, and spaces skipped by HT are not underlined.
+• When Kanji underline mode is specified, the width of the underline set by FS – is
+added. Even if the character size is changed, the width is not changed.
+• When the heights of characters in a line are different, all characters in that line are
+aligned with the bottom line.
+• You can use FS W or GS! command to bold the characters, and the last instruction is
+valid.
+• You can also use the FS - command to select or cancel underline mode, and the last
+instruction is valid.
+FS S n1 n2
+[Name] Set Kanji character spacing
+[Format] ASCII FS S n1 n2
+Hex 1C 53 n1 n2
+Decimal 28 83 n1 n2
+[Range] 0 ≤ n1 ≤ 255
+0 ≤ n2 ≤ 255
+[Default] n1 = 0, n2 = 0
+[Description]Sets the right-side character spacing to [(n1 + n2)× 0.125mm].
+[Notes] • When a character size is set to N times as large as a normal size, both right- and
+left-side character spacings are also set to N times as large as a normal size.
+• The maximum right spacing of Kanji characters is about 36mm. If it exceeds this
+value, the maximum value will be taken.
+@@PAGE 31@@
+ESC POS Programming Manual
+26
+FS W n
+[Name] Turn quadruple-size mode on/off for Kanji characters
+[Format] ASCII FS W n
+Hex 1c 57 n
+Decimal 28 87 n
+[Range] 0 ≤ n ≤ 255
+[Default] n = 0
+[Description] Turns quadruple-size mode on or off for multi-byte code character.
+• When the LSB of n is 0, quadruple-size mode is turned off and normal size is
+specified.
+• When the LSB of n is 1, quadruple-size mode is turned on.
+[Notes] • Only the lowest value of n is valid.
+• In the Kanji character double height and double width mode, the size of the
+printed Kanji characters is the same as when both the double width and double
+height modes are selected simultaneously.
+• After canceling the Kanji character height and width mode, the Kanji characters
+printed in the future will be of normal size.
+• Characters are aligned according to the bottom line.
+• You can also use FS! Or GS! The instruction (select the double height and double
+width mode) is used to select or cancel the Kanji character double height and
+double width mode, and and the last received command is valid.
+[Reference] FS !, GS !
+FS - n
+[Name] Turn underline mode on/off for Kanji characters
+[Format] ASCII FS - n
+Hex 1c 2d n
+Decimal 28 45 n
+[Range] 0≤n≤2, 48≤n≤50
+[Default] n=0
+[Description]Turns on or off underline mode for multi-byte code character (Kanji-underline), using
+n as follows:
+n Function
+0, 48 Turns off Kanji-underline mode
+1, 49 Turns on Kanji-underline mode (1-dot thick)
+2, 50 Turns on Kanji-underline mode (2-dot thick)
+@@PAGE 32@@
+ESC POS Programming Manual
+27
+[Notes] • The printer can underline all characters, including left and right spacing. Even if
+Kanji underline mode is specified, 90° clockwise-rotation characters, white/black
+reverse characters, and spaces skipped by HT are not underlined.
+• When underline mode is canceled, the following characters are not underlined;
+however, an underline width set right before the mode is canceled remains. The
+width of the underlined line should be 1-dot.
+• When a character size is changed, an underline width is not changed.
+• Use FS! command can also select or cancel the underline mode, and the last
+instruction is valid.
+2.6 Custom Character Commands
+ESC & y c1 c2 [x1 d1...d(y ×
+x1)]...[xk d1...d(y ×
+xk)][name]
+Define user-defined characters
+[Format] ASCII ESC & y c1 c2 [x1 d1...d(y × x1)]...[xk d1...d(y
+× xk)]Hex 1B 26 y c1 c2 [x1 d1...d(y × x1)]...[xk d1...d(y
+× xk)]Decimal 27 38 y c1 c2 [x1 d1...d(y × x1)]...[xk d1...d(y
+[Range] y = 3
+32 ≤ c1 ≤ c2 ≤ 126
+0 ≤ x ≤ 12 [Font A (12 × 24]
+0 ≤ x ≤ 9 [Font B (9 × 17)]
+0 ≤ d ≤ 255
+k = c2 – c1 +1
+[Description] Defines the user-defined character pattern for the specified
+character codes.
+• y specifies the number of bytes in the vertical direction.
+• c1 specifies the beginning character code for the definition,
+and c2 specifies the final code.
+• x specifies the number of dots in the horizontal direction
+from the left.
+• d specifies the defined data (column format).
+[Notes] • A user-defined character, downloaded graphics, and
+downloaded bit image cannot be defined simultaneously on
+some printer models.
+• When this command is executed, the downloaded bit image
+is cleared.
+@@PAGE 33@@
+ESC POS Programming Manual
+28
+ESC % n
+[Name] Select/cancel user-defined character set
+[Format] ASCII ESC % n
+Hex 1b 25 n
+Decimal 27 37 n
+[Range] 0 ≤ n ≤ 255
+[Default] n = 0
+[Description]Selects or cancels the user-defined character set.
+• When the LSB of n is 0, the user-defined character set is canceled.
+• When the LSB of n is 1, the user-defined character set is selected.
+[Notes] • When the user-defined character set is canceled, the resident character set is
+automatically selected.
+• Only the lowest value of n is valid.
+[Reference] ESC &, ESC ?
+ESC ? n
+[Name] Cancel user-defined characters
+[Format] ASCII ESC ? n
+Hex 1b 3F n
+Decimal 27 63 n
+[Range] 32 ≤ n ≤ 126
+[Description] Deletes the user-defined character pattern specified by character code n.
+[Notes] • After the user-defined characters are canceled, the resident character set is
+printed.
+• If the character is not included in the custom character, the command is ignored.
+[Reference] ESC &, ESC %
+@@PAGE 34@@
+ESC POS Programming Manual
+29
+FS 2 c1 c2 d1...dk
+[Name] Define user-defined Kanji characters
+[Format] ASCII FS 2 c1 c2 d1...dk
+Hex 1C 32 c1 c2 d1...dk
+Decimal 28 50 c1 c2 d1...dk
+[Range] • c1 specifies the first byte of a character code for a user-defined Kanji character.
+• c2 specifies the second byte of a character code for a user-defined Kanji character.
+The ranges of c1 and c2 differ, depending on models and the character code system
+used.
+FS ? c1 c2
+[Name] Cancel user-defined characters
+[Format]ASCII FS ? c1 c2
+Hex 1c 3F c1 c2
+Decimal 28 63 n
+Models c1 c2
+Japanese model (JIS code) c1 = 77H 21H ≤ c2 ≤ 7EH
+Japanese model (SHIFT JIS code) c1 = ECH 40H ≤ c2 ≤ 7EH
+80H ≤ c2 ≤ 9EH
+Simplified Chinese model c1 = FEH A1H ≤ c2 ≤ FEH
+Traditional Chinese model c1 = FEH A1H ≤ c2 ≤ FEH
+Korean model c1 = FEH A1H ≤ c2 ≤ FEH
+0 ≤ d ≤ 255
+k = 72
+[Description] Defines the user-defined Kanji character pattern specified by the character codes
+(c1 and c2) of the currently selected Kanji font.
+[Notes] • c1 specifies the first byte of a character code for a user-defined
+Kanji character.
+• c2 specifies the second byte of a character code for a
+user-defined Kanji character.
+• d specifies the defined data (column format). The defined data
+(d) sets a corresponding bit to 1 to print a dot or to 0 not to print
+a dot.
+• Use the command ESC c1 to select the printing paper and print
+user-defined Kanji characters.
+[Default] Space
+[Reference] FS C
+@@PAGE 35@@
+ESC POS Programming Manual
+30
+2.7 Bit Image Commands
+ESC * m nL nH d1 ... dk
+[Name] Select bit-image mode
+[Format] ASCII ESC * m nL nH d1...dk
+Hex 1B 2A m nL nH d1...dk
+Decimal 27 42 m nL nH d1...dk
+[Range] m = 0, 1, 32, 33 0 ≤ nL ≤ 255
+0 ≤ nH ≤ 3 0 ≤ d ≤25
+[Description]The bit image modes selectable by m are as follows:
+m Bit Image Mode Vertical dot density Horizontal dot density
+0 8-dot single-density 68 dpi 101 dpi
+1 8-dot double-density 68 dpi 203 dpi
+32 24-dot single-density 203 dpi 101 dpi
+33 24-dot double-density 203 dpi 203 dpi
+dpi: dots per 25.4 mm (dots per inch)
+[Notes]• If the value of m exceeds the specified range, nL and subsequent data are treated as normal data.
+• nL, nH specifies a bit image in the horizontal direction as (nL + nH × 256) dots.
+• If the bit image data exceeds the number of dots to be printed on a line, the excess data is ignored.
+• d specifies the bit image data (column format). Data (d) specifies a bit printed to 1 and not printed
+to 0.
+• After printing a bit image, the printer processes normal data.
+• If the printing area set by GS L and GS W is smaller than the required printing width of instruction
+GS/, the following actions will be executed immediately (but not exceeding the maximum printing
+width):
+① Expand the printing area to the right to accommodate the data volume of the printed bitmap
+② If step ① cannot provide sufficient width for the data, the left edge is reduced to fit the data. For
+each bit of data in single density mode (m=0, 32), the printer prints two dots; for each bit of data in
+dual density mode (m=1, 33), the printer prints one dot. When calculating the amount of data that
+can be printed in a row, these must be taken into account.
+• After printing a bitmap, the printer returns to normal data processing mode.
+• Except for the inverted mode, this instruction is not affected by other printing modes (bold, double
+print, underline, character enlargement, and reverse).
+• The relationship between data and the points to be printed is as follows:
+@@PAGE 36@@
+ESC POS Programming Manual
+31
+When selecting an 8-dot density:
+When selecting an 24-dot density:
+Bitmap Data
+Print Data
+Bitmap Data
+Print Data
+Print Data
+Print Data
+Highest Position
+Highest Position
+Lowest
+Position
+Lowest Position
+Bitmap Data
+Bitmap Data
+1 dot
+1 dot
+Single Density Double Density
+Double DensitySingle Density
+@@PAGE 37@@
+ESC POS Programming Manual
+32
+FS q n [xL xH yL yH d1...dk]1...[xL xH yL yH d1...dk]n
+Recommend using the GS (L (Function 69) command instead of the FS p command , as it is
+compatible with the FS p command upwards
+[Name] Define NV bit image
+[Format] ASCII FS q n [ xL xH yL yH d1...dk]...[ xL xH yL yH d1...dk]
+Hex 1C 71 n [xL xH yL yH d1...dk]...[ xL xH yL yH d1...dk]
+Decimal 28 113 n [xL xH yL yH d1...dk]...[ xL xH yL yH d1...dk]
+[Range] 1 ≤ n ≤ 255
+0 ≤ xL ≤ 255
+1 ≤ ( xL + xH × 256) ≤ 1023
+1 ≤ ( yL + yH × 256) ≤ 800
+0 ≤ d ≤ 255
+k = ( xL + xH × 256) × ( yL + yH × 256) × 8
+The definition area is maximum 64 KB
+[Description] Defines the NV bit image in the NV graphics area.
+• n specifies the number of defined NV bit images.
+• xL, xH specifies (xL + xH × 256) bytes in the horizontal direction for the NV bit
+image you defined.
+• yL, yH specifies (yL + yH × 256) bytes in the vertical direction for the NV bit
+image you defined.
+[Notes] • The commands such as bold, overlap, underline, character size, and reverse
+printing are invalid for this bitmap, but the reverse printing mode setting is valid.
+• In page mode, print the lower image in normal mode normally.
+FS p n m
+Recommend using the GS (L (Function 69) command instead of the FS p command , as it is
+compatible with the FS p command upwards
+[Name] Print NV bit image
+[Format] ASCII FS p n m
+Hex 1C 70 n m
+Decimal 28 112 n m
+[Range] 1 ≤ n ≤ 255, 0 ≤ m ≤ 3, 48 ≤ m ≤ 51
+[Description] Prints NV bit image n using the process of FS q and using the mode specified by m.
+m Mode Vertical Dot density Horizontal Dot
+density0, 48 Normal 203 dpi 203 dpi
+1, 49 Double-width 203 dpi 101 dpi
+2, 50 Double-height 101 dpi 203 dpi
+3, 51 Quadruple 101 dpi 101 dpi
+@@PAGE 38@@
+ESC POS Programming Manual
+33
+GS * x y d1...dk
+[Name] Define downloaded bit image
+[Format] ASCII GS * x y d1 ... dk
+Hex 1D 2A x y d1 ... dk
+Decimal 29 42 x y d1 ... dk
+[Range] 1 ≤ x ≤ 255
+1 ≤ y ≤ 48 [when 1 ≤ x × y ≤ 1536]
+0 ≤ d ≤ 255
+k = x × y × 8
+[Description] Defines the downloaded bit image in the downloaded graphic area.
+• x specifies the number of bytes in horizontal direction as x bytes.
+• y specifies the number of bytes in vertical direction as y bytes.
+[Notes] • A downloaded bit image and a user-defined character cannot be defined
+simultaneously. When this command is executed, the user-defined character is
+cleared.
+• Continuously define 2 down conversion bitmaps, with the last one being valid.
+• This command is not affected by the printing mode (bold, overlapping, underline,
+character size, or reversed printing), but the reverse printing mode setting is valid.
+GS / m
+[Name] Print downloaded bit image
+[Format] ASCII GS / m
+Hex 1D 2F m
+Decimal 29 47 m
+[Range] 0 ≤ m ≤ 3，48 ≤ m ≤ 51
+[Descripti Prints downloaded bit image using the mode specified by m, as follows:
+m Mode Vertical Dot density Horizontal Dot density
+0.48 Normal 203 dpi 203 dpi
+1.49 Double-width 203 dpi 101 dpi
+2.50 Double-height 101 dpi 203 dpi
+3.51 Quadruple 101 dpi 101 dpi
+[Notes] •This command is ignored if a downloaded bit image has not been defined.
+• The printer is in the beginning of a line and data is not in the print buffer.
+The downloaded bit image is not affected by print mode (emphasized,
+double-strike, underline, character size, or white/black reverse printing), except for
+upside-down print mode.
+If a downloaded bit image exceeds one line, the excess data is not printed.
+If the printing area set by GS L and GS W is smaller than the width required for the
+data transmitted by GS/command, perform the following subsequent operations
+on the problematic line [printing does not exceed the maximum print area].
+@@PAGE 39@@
+ESC POS Programming Manual
+34
+① The width of the printing area is expanded to the right to accommodate the
+amount of data.
+② If step ① does not provide sufficient width for the data, the left margin is
+reduced to accommodate the data. For each bit of data in normal mode (m =
+0,48) and double high mode (m = 2, 50), the printer prints a point; For each bit
+of data in double width mode (m = 1, 49) and quadruple mode (m = 3, 51), the
+printer prints two points.
+GS v 0 m xL xH yL yH d1....dk
+[Name] Print raster bit image
+[Format] ASCII GS v 0 m xL xH yL yH d1...dk
+Hex 1D 76 30 m xL xH yL yH d1...dk
+Decimal29 118 48 m xL xH yL yH d1...dk
+[Range] 0 ≤ m ≤ 3, 48 ≤ m ≤ 51
+0 ≤ xL ≤ 255
+0 ≤ xH ≤ 255
+0 ≤ yL ≤ 255
+0 ≤ d ≤ 255
+k = ( xL + xH × 256) × ( yL + yH × 256) ( k ≠ 0)
+[Description]Prints a raster bit image using the mode specified by m, as follows:
+m Mode Vertical Dot density Horizontal Dot density
+0, 48 Normal 203 DPI 203 DPI
+1, 49 Double-width 203 DPI 101 DPI
+2, 50 Double-height 101DPI 203 DPI
+3, 51 Quadruple 101DPI 101 DPI
+• xL, xH specifies (xL + xH × 256) bytes in horizontal direction for the bit image.
+• yL, yH specifies (yL + yH × 256) dots in vertical direction for the bit image.
+• d specifies the bit image data (raster format).
+[Notes] • When standard mode is selected, this command is enabled only when there is no
+data in the print buffer.
+• The raster bit image is not affected by print modes (emphasized, double-strike,
+underline, character size, white/black reverse printing, or upside-down printing).
+• If a raster bit image exceeds one line, the excess data is not printed.
+• ESC a (select alignment mode) is effective for raster bitmap.
+• If this command is processed while a macro is being defined, the printer cancels
+macro definition, clears the definition, and prints a raster bit image.
+• d specifies the bit image data (raster format). Data (d) specifies a bit printed to 1
+and not printed to 0.
+[Reference] FS p
+@@PAGE 40@@
+ESC POS Programming Manual
+35
+GS ( L & GS 8 L
+[Name] Set graphics data
+[Description]Processes graphics data.
+• Function code (fn) specifies the function.
+fn Function No. Function name
+0.48 48 Transmit the NV graphics memory capacity.
+1.49 49 Set the reference standard dot density for graphics.
+2.50 50 Print the graphics data in the print buffer.
+3.51 51 Transmit the remaining capacity of the NV graphics memory.
+4.52 52 Transmit the remaining capacity of the download graphics memory.
+64 64 Transmit the key code list for defined NV graphics.
+65 65 Delete all NV graphics data.
+66 66 Delete the specified NV graphics data.
+67 67 Define the NV graphics data (raster format).
+68 68 Define the NV graphics data (column format).
+69 69 Print the specified NV graphics data.
+80 80 Transmit the key code list for defined download graphics.
+81 81 Delete all download graphics data.
+82 82 Delete the specified download graphics data.
+83 83 Define the downloaded graphics data (raster format).
+84 84 Define the downloaded graphics data (column format).
+85 85 Print the specified download graphics data.
+112 112 Store the graphics data in the print buffer (raster format).
+113 113 Store the graphics data in the print buffer (column format).
+• pL, pH specifies (pL + pH × 256) as the number of bytes after pH (m, fn, and
+[parameters]).
+• p1, p2, p3, and p4 specify (p1 + p2 × 256 + p3 × 65536 + p4 × 16777216) as the
+number of bytes after pH (m, fn, and [parameters]).
+• Description of the [parameters] is described in each function.• Differences between GS ( L and GS 8 L
+• All commands possess the same functions for "Graphics data processing."
+• Specifications (conventions) concerning function code (fn) are identical, while only the
+parameters (pL, pH, p1, p2, p3, and p4) used to specify the parameter values from m
+differ.
+Command Description
+GS ( L Parameter value is 2 bytes less than that for GS 8 L. Used to fix the
+parameter value. Used when sending data divided into blocks.
+GS 8 L Possesses powerful range of expression.
+Used for batch transfer of large volumes of data.
+@@PAGE 41@@
+ESC POS Programming Manual
+36
+• Be sure to use GS 8 L when the parameter value exceeds 65535 bytes for Functions 67,
+68, 83, 84, 112, and 113.
+[Recommended Functions]
+• This command is recommended for use when printing image data.
+• The image processing controlled using this command is referred to as the "Graphics
+function." The name is important as it distinguishes it from conventional bit image
+functions.
+• The graphics functions provided here maintain upward compatibility with conventional
+bit image processing.
+Graphics type Corresponding bit image command (*1)
+NV graphics FS p, FS q
+Download
+graphics
+GS✻, GS /
+Graphics GS Q 0, GS v 0
+(*1) These commands are supported by some of the printer models but will not be
+supported by future
+models.
+• The various graphics functions (of this command), more user-friendly than conventional
+bit image functions, offer the following advantages.
+• Definition of multiple items of logo mark and insignia data (with most functions).
+• Management of data using key codes.
+• Deletion of and redefinition of data per key code.
+• Color coding of image-data.
+• Definition of image-data in both raster and column formats.
+• Confirmation of available capacity in domain.
+• Continuous processing possible (without a software reset when a command has been
+processed).
+• The following three types of graphics functions are included.
+• NV graphics [Functions 48, 51, 64, 65, 66, 67, 68, and 69] Stores data in non-volatile
+memory.
+Defined data is retained when power is turned off.
+There is a limit on the number of times that non-volatile memory can be written to.
+• Download graphics [Functions 52, 80, 81, 82, 83, 84, and 85] Stores data in volatile
+memory (RAM).
+Defined data is lost when the ESC @ command is executed, the system is reset, or power
+is turned off.
+• Graphics [Functions 50, 112, and 113] Stores data in the print buffer.
+When standard mode is selected, prints data using Function 50 and clears the print buffer.
+When page mode is selected, prints data using FF and ESC FF and clears the print buffer
+after FF is executed.
+@@PAGE 42@@
+ESC POS Programming Manual
+37
+[Notes]• The functions of this command are determined by the (fn) setting. Actual command
+operation varies according to function.
+• The NV graphics and download graphics data is managed using key codes.
+• Expressed as kc1 and kc2, the key codes are used to identify data groups.
+• The key codes have a 2-byte configuration and can be specified using the full range of
+character codes in Hexadecimal: 20H to 7EH / in Decimal: 32 to 126.
+• The data referred to here is image data specified using d1 through dk of Functions 67,
+68, 83, and 84.
+• The printer automatically adds control information when it stores the data. The image
+data domain is used as the control information. Control information formats and data
+values vary according to function.
+• Note that it is not possible to create definitions for both NV graphics data (this
+command) and NV bit image data (FS q). NV bit image data definitions are deleted when
+this command is used.
+• Note that it is not possible to create definitions for both download graphics data (this
+command) and download bit image data (GS ✻). Download bit image data definitions are
+deleted when this command is used.
+• With certain printers, it is not possible to create definitions for both download graphics
+data (this command) and download character data (ESC &).
+• Defined download character data is deleted when this command is used.
+• Executing ESC & deletes download graphics data.
+• Always execute Function 50 after executing this command 112 or 113 when the
+standard mode is selected.
+• When printing the various types of graphics data, using the ESC U command will ensure
+that the printed results are properly aligned vertically by printing in a single direction.
+• Functions 65, 66, 67, or 68 write data to a non-volatile memory. Note the following
+items when using the function.
+• Do not turn off the power or reset the printer from the interface when the relevant
+functions are being executed.
+• The printer may be BUSY when storing data and will not receive any data. In this case, be
+sure not to transmit data from the host.
+• Excessive use of this function may destroy the non-volatile memory. As a guideline, do
+not use any combination of the following commands more than 10 times per day for
+writing data to the nonvolatile memory: GS ( A (part of functions), GS ( C (part of
+functions), GS ( E (part of functions), GS ( L / GS 8 L (part of functions), GS ( M (part of
+functions), GS g 0, FS q 1, FS q.
+• The following restrictions apply when performing non-volatile memory operations
+(including data store and delete).
+• The paper cannot be fed by paper feed switch.
+• The real time command is not processed.
+• The ASB status will not be sent, even when the ASB function is set to enable.
+@@PAGE 43@@
+ESC POS Programming Manual
+38
+[Notes for transmission process]
+• Data send operations are performed using Functions 48, 51, 52, 64, and 80. When you
+use these functions, obey the following rules.
+• When the host PC transmits the function data, transmit the next data after receiving the
+corresponding data (Header ~ NULL) from the printer.
+• When operating with a serial interface, be sure to configure operation so that the host
+computer uses the printer only when it is READY.
+• When operating with a parallel interface, the data sent by this function (starting with
+Header and ending with NUL), as with other data, is first stored in the send buffer, then
+output in sequential order when the host computer changes to the reverse mode. Note
+that the send buffer capacity is 99 bytes, and any data exceeding this volume limit will be
+lost; therefore, when using this command, it is important to configure the operation so
+that the host computer’s change to the reverse mode and the subsequent status
+send/receive process is performed quickly.
+• During the interval between the sending of the data header and NUL, ASB status and the
+real time commands are rendered invalid.
+• When communication with the printer uses XON/XOFF control with serial interface, the
+XOFF code may interrupt the "Header to NUL" data string.
+• The information for each function can be identified to other transmission data according
+to specific data of the transmission data block. When the header transmitted by the
+printer is [hex = 37H/decimal =55], treat NUL [hex = 00H/decimal =0] as a data group and
+identify it according to the combination of the header and the identifier.
+@@PAGE 44@@
+ESC POS Programming Manual
+39
+[Notes for ESC/POS Handshaking Protocol]
+• It will be necessary to perform the ESC/POS Handshaking Protocol procedures listed
+below when using Functions 64 and 80.
+Procedure Host operation Printer operation
+1 This command sends
+Function 64.
+Function 64 is initiated.
+2 Data is received from printer. Key code list is sent.
+3 Response code (*1) is sent. Procedures (*2 and *3) are
+performed according to response
+code.
+(*1) Response Code
+ASCII Hexadecimal Decimal Request definition
+ACK 06 6 Send next data group.
+NAK 15 21 Resend just-received data group.
+CAN 18 24 Cancel send operation.
+(*2) Processing According to Response Code
+Response
+code
+Description
+ACK Initiates operation to send next data.
+NAK Resends the just-received data.
+CAN Cancels processing initiated by this command.
+(*3) Processing According to Response Code (When No More Send Data Remains (indicated
+by identification status of send data group))
+Response
+code
+Description
+ACK, CAN Cancels procedure initiated by this command.
+NAK Resends the just-received data.
+• When codes other than the ACK, NAK, or CAN codes are received, the CAN procedure is
+executed.
+@@PAGE 45@@
+ESC POS Programming Manual
+40
+GS8Lp1p2p3p4mfnakc1kc2bxLxHyLyH[cd1...dk]1...[cd1...dk]b
+[Name] Define the NV graphics data (raster format).
+[Format] ASCII GS ( L pL pH m fn a kc1 kc2 b xL xH yL yH [c d1...dk]1...[c
+d1...dk]b
+Hex 1D 28 4C pL pH 30 43 30 kc1 kc2 b xL xH yL yH [c d1...dk]1...[c
+d1...dk]b
+Decimal 29 40 76 pL pH 48 67 48 kc1 kc2 b xL xH yL yH [c d1...dk]1...[c
+d1...dk]b
+ASCII GS 8 L p1 p2 p3 p4 m fn a kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+Hex 1D 38 4C p1 p2 p3 p4 30 43 30 kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+Decimal 29 56 76 p1 p2 p3 p4 48 67 48 kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+[Range] 12 ≤ (pL + pH × 256) ≤ 65535
+(0 ≤ pL ≤ 255, 0 ≤ pH ≤ 255)
+When using GS 8 L:
+12 ≤ (p1 + p2 × 256 + p3 × 65536 + p4 × 16777216) ≤ 4294967295]
+m = 48, fn = 67, a = 48
+32 ≤ kc1 ≤ 126
+32 ≤ kc2 ≤ 126
+b = 1, 2
+1 ≤ (xL + xH × 256) ≤ 8192 (0 ≤ xL ≤ 255, 0 ≤ xH ≤ 32)
+1 ≤ (yL + yH × 256) ≤ 2304 (0 ≤ yL ≤ 255, 0 ≤ yH ≤ 9)
+c = 49, 50 (when using recommended two-color paper)
+C=49 (when using recommended solid color paper)
+0 ≤ d ≤ 255
+k = (int((xL + xH × 256) + 7)/8) × (yL + yH × 256)
+b=1 (when monochrome printing control is selected)
+b = 1, 2 (When selecting dual color printing control)
+[Description] Defines the NV graphics data (raster format) as a record specified by the key codes
+(kc1 and kc2) in the NV graphics area.
+• b specifies the number of colors for the defined data.
+• xL and xH specify the number of dots in the horizontal direction as (xL + xH ×
+256).
+• yL and yH specify the number of dots in the vertical direction as (yL + yH × 256).
+c Color specifications
+49 Color 1
+50 Color 2
+d specifies the defined data (raster format).
+k indicates the number of the definition data. k is an explanation parameter;
+therefore it does not need to be transmitted.
+@@PAGE 46@@
+ESC POS Programming Manual
+41
+[Notes] In cases where the specified key code already exists in memory, it will be necessary
+to overwrite the data.
+NV graphics indicate image data groups defined in the printer’s internal
+non-volatile memory. Data definitions for NV graphics data created using this
+command are valid until redefined by this function or <Function 68>.
+The functions used to define NV graphics data are this function and Function 68.
+Even with printer models that support both, it is recommended that only one of the
+functions be used for data definition tasks.
+• The two functions differ only in that one function (this function) defines data in
+raster format, while the other (Function 68) defines data in column format. The
+domains and control information are identical.
+• In cases where the key code specified by this function coincides with a key code
+being used by Function 68, a new data definition is created.
+Use this function at the beginning of the line when the standard mode is selected.
+This function is incompatible with macros, so make sure to avoid including it when
+defining macros.
+In cases where there is insufficient capacity available for storing NV graphics data,
+this function cannot be used. Use Function 51 to confirm the available capacity in
+the NV graphics data area.
+One option is to delete items of NV graphics data that were previously defined to
+the same key code.
+The data for byte k of d1 ... dk is processed as a single item of defined NV graphics
+data. The defined data (d) specifies "1" for bits corresponding to dots that will be
+printed and "0" for bits corresponding to dots that will not be printed.
+NV graphics data is defined using the dot density set by Function 49.
+Specify single data groups [c d1 ... dk] when monochrome is selected (b = 1) as the
+color.
+Specify b number of data groups [c d1 ... dk] when multiple colors are selected (b
+≠ 1). It is also important to specify different colors in units of data groups when
+specifying color (c).
+NV graphics data is printed using Function 69.
+Note that it is not possible to create definitions for both NV graphics data (this
+command) and NV bit image data (FS q). NV bit image data definitions are deleted
+when this command is used.
+The relationship between NV graphics data (raster format) and print results is
+shown in the table below.
+
+@@PAGE 47@@
+ESC POS Programming Manual
+42
+GS 8 L p1 p2 p3 p4 m fn a kc1 kc2 b xL xH yL yH [c d1...dk]1...[c d1...dk]b
+[Name] Define the NV graphics data (column format).
+[Format] ASCII GS ( L pL pH m fn a kc1 kc2 b xL xH yL yH [c d1...dk]1...[c
+d1...dk]b
+Hex 1D 28 4C pL pH 30 44 30 kc1 kc2 b xL xH yL yH [c d1...dk]1...[c
+d1...dk]b
+Decimal 29 40 76 pL pH 48 68 48 kc1 kc2 b xL xH yL yH [c d1...dk]1...[c
+d1...dk]b
+ASCII GS 8 L p1 p2 p3 p4 m fn a kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+Hex 1D 38 4C p1 p2 p3 p4 30 44 30 kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+Decimal 29 56 76 p1 p2 p3 p4 48 68 48 kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+[Range] 12 ≤ (pL + pH × 256) ≤ 65535
+(0 ≤ pL ≤ 255, 0 ≤ pH ≤ 255)
+When using GS 8 L:
+12 ≤ (p1 + p2 × 256 + p3 × 65536 + p4 × 16777216) ≤ 4294967295]
+m = 48, fn = 68, a = 48
+32 ≤ kc1 ≤ 126
+32 ≤ kc2 ≤ 126
+0 ≤ d ≤ 255
+k = (xL + xH × 256) × (int((yL + yH × 256) + 7)/8)
+[Description] Defines the NV graphics data (column format) as a record specified by the key
+codes (kc1 and kc2) in the NV graphics area.
+• b specifies the number of colors for the defined data.
+• xL and xH specify the number of dots in the horizontal direction as (xL + xH ×
+256).
+• yL and yH specify the number of dots in the vertical direction as (yL + yH × 256).
+• c specifies the color of the defined data.
+c Color specifications
+49 Color 1
+50 Color 2
+51 Color 3
+• d specifies the defined data (column format).
+k indicates the number of the definition data. k is an explanation parameter;
+therefore it does not need to be transmitted.
+@@PAGE 48@@
+ESC POS Programming Manual
+43
+[Notes] • In cases where the specified key code already exists in memory, it will be
+necessary to overwrite the data.
+• NV graphics indicate image data groups defined in the printer’s internal
+non-volatile memory. Data definitions for NV graphics data created using this
+command are valid until redefined by this function or <Function 67>.
+• The functions used to define NV graphics data are this function and Function 67.
+Even with printer models that support both, it is recommended that only one of the
+functions be used for data definition tasks.
+• The two functions differ only in that one function (this function) defines data in
+raster format, while the other (Function 67) defines data in column format. The
+domains and control information are identical.
+• In cases where the key code specified by this function coincides with a key code
+being used by Function 67, a new data definition is created.
+Use this function at the beginning of the line when the standard mode is selected.
+This function is incompatible with macros, so make sure to avoid including it when
+defining macros.
+• In cases where there is insufficient capacity available for storing NV graphics data,
+this function cannot be used. Use Function 51 to confirm the available capacity in
+the NV graphics data area.
+• One option is to delete items of NV graphics data that were previously defined to
+the same key code.
+• The data for byte k of d1 ... dk is processed as a single item of defined NV graphics
+data. The defined data (d) specifies "1" for bits corresponding to dots that will be
+printed and "0" for bits corresponding to dots that will not be printed.
+• NV graphics data is defined using the dot density set by Function 49.
+• Specify single data groups [c d1 ... dk] when monochrome is selected (b = 1) as
+the color.
+• Specify b number of data groups [c d1 ... dk] when multiple colors are selected (b
+≠ 1). It is also important to specify different colors in units of data groups when
+specifying color (c).
+• NV graphics data is printed using Function 69.
+• Note that it is not possible to create definitions for both NV graphics data (this
+command) and NV bit image data (FS q). NV bit image data definitions are deleted
+when this command is used.
+• The relationship between NV graphics data (column format) and print results is
+shown in the table below.
+
+@@PAGE 49@@
+ESC POS Programming Manual
+44
+GS 8 L p1 p2 p3 p4 m fn a kc1 kc2 b xL xH yL yH [c d1...dk]1...[c d1...dk]b
+[Name] Define the downloaded graphics data (raster format).
+[Format] ASCII GS ( L pL pH m fn a kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+Hex 1D 28 4C pL pH 30 53 30 kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+Decimal 29 40 76 pL pH 48 83 48 kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+ASCII GS 8 L p1 p2 p3 p4 m fn a kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[cd1...dk]b
+Hex 1D 38 4C p1 p2 p3 p4 30 53 30 kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[cd1...dk]b
+Decimal 29 56 76 p1 p2 p3 p4 48 83 48 kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[cd1...dk]b
+[Range] 12 ≤ (pL + pH × 256) ≤ 65535 (0 ≤ pL ≤ 255, 0 ≤ pH ≤ 255)
+[When using GS 8 L: 12 ≤ (p1 + p2 × 256 + p3 × 65536 + p4 × 16777216) ≤ 4294967295]
+m = 48, fn = 83, a = 48, a = 52
+32 ≤ kc1 ≤ 126
+32 ≤ kc2 ≤ 126
+Defines the downloaded graphics data (raster format) as a record specified by the key
+codes (kc1 and kc2) in the downloaded graphics area.
+• b specifies the number of colors for the defined data.
+• xL and xH specify the number of dots in the horizontal direction as (xL + xH × 256).
+• yL and yH specify the number of dots in the vertical direction as (yL + yH × 256).
+• c specifies the color of the defined data.
+C Color
+49 Color 1
+50 Color 2
+51 Color 3
+52 Color 4
+• d specifies the defined data (raster format).
+• k indicates the number of the definition data. k is an explanation parameter;
+therefore it does not need to be transmitted.
+• In cases where the specified key code already exists in memory, it will be necessary
+to overwrite the data.
+
+@@PAGE 50@@
+ESC POS Programming Manual
+45
+[Notes] • Downloaded graphics indicate image data groups defined in the printer’s internal
+volatile memory (RAM).
+Once the download graphics data have been defined, they are available until GS ( L
+<Function 83>, <Function 84> or ESC @ is executed. The download graphics data are
+lost when the power is turned off or the printer is reset.
+• The functions used to define downloaded graphics data are this function and
+Function 84. Even with printer models that support both, it is recommended that only
+one of the functions be used for data definition tasks.
+• The two functions differ only in that one function (this function) defines data in
+raster format, while the other (Function 84) defines data in column format. The
+domains and control information are identical.
+• In cases where the key code specified by this function coincides with a key code
+being used by Function 84, a new data definition is created.
+• Use this function at the beginning of the line when the standard mode is selected.
+• This function is incompatible with macros, so make sure to avoid including it when
+defining macros.
+• In cases where there is insufficient capacity available for storing downloaded
+graphics data, this function cannot be used. Use Function 52 to confirm the available
+capacity in the downloaded graphics data area.
+• One option is to delete items of downloaded graphics data that were previously
+defined to the same key code.
+• The data for byte k of d1 ... dk is processed as a single item of defined downloaded
+graphics data. The defined data (d) specifies "1" for bits corresponding to dots that
+will be printed and "0" for bits corresponding to dots that will not be printed.
+• Downloaded graphics data is defined using the dot density set by Function 49.
+• Specify single data groups [c d1 ... dk] when monochrome is selected (b = 1) as the
+color.
+• Specify b number of data groups [c d1 ... dk] when multiple colors are selected (b ≠
+1). It is also important to specify different colors in units of data groups when
+specifying color (c).
+• Downloaded graphics data is printed using Function 85.
+• Note that it is not possible to create definitions for both downloaded graphics data
+(this command) and downloaded bit image data (GS ✻). Downloaded bit image data
+definitions are deleted when this command is used.
+• For some models, downloaded graphics (this command) and user-defined characters
+(ESC &) cannot be defined simultaneously.
+• User-defined characters defined are deleted by using this command.
+• Downloaded graphics data are deleted by ESC &.
+• The relationship between downloaded graphics data (raster format) and print results
+is shown in the table below.
+@@PAGE 51@@
+ESC POS Programming Manual
+46
+GS 8 L p1 p2 p3 p4 m fn a kc1 kc2 b xL xH yL yH [c d1...dk]1...[c d1...dk]b
+[Name] Define the downloaded graphics data (column format).
+[Format] ASCII GS ( L pL pH m fn a kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+Hex 1D 28 4C pL pH 30 54 30 kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+Decimal 29 40 76 pL pH 48 84 48 kc1 kc2 b xL xH yL yH [c
+d1...dk]1...[c d1...dk]b
+ASCII GS 8 L p1 p2 p3 p4 m fn a kc1 kc2 b xL xH yL yH
+[c d1...dk]1...[cd1...dk]b
+Hex 1D 38 4C p1 p2 p3 p4 30 54 30kc1 kc2 b xL xH yL yH
+[c d1...dk]1...[cd1...dk]b
+Decimal 29 56 76 p1 p2 p3 p4 48 84 48kc1 kc2 b xL xH yL yH
+[c d1...dk]1...[cd1...dk]b
+[Range] 12 ≤ (pL + pH × 256) ≤ 65535 (0 ≤ pL ≤ 255, 0 ≤ pH ≤ 255)
+[When using GS 8 L: 12 ≤ (p1 + p2 × 256 +p3 × 65536 + p4 × 16777216) ≤
+4294967295]
+m = 48, fn = 84, a = 48
+32 ≤ kc1 ≤ 126
+32 ≤ kc2 ≤ 126
+0 ≤ d ≤ 255
+k = (xL + xH × 256) × (int((yL + yH × 256) + 7)/8)
+[Description] Defines the downloaded graphics data (column format) as a record specified by the
+key codes (kc1 and kc2) in the downloaded graphics area.
+• b specifies the number of colors for the defined data.
+• xL and xH specify the number of dots in the horizontal direction as (xL + xH ×
+256).
+• yL and yH specify the number of dots in the vertical direction as (yL + yH × 256).
+• c specifies the color of the defined data.
+C Color
+49 Color 1
+50 Color 2
+51 Color 3
+• d specifies the defined data (raster format).
+• k indicates the number of the definition data. k is an explanation parameter;
+therefore it does not need to be transmitted.
+• In cases where the specified key code already exists in memory, it will be
+necessary to overwrite the data.
+[Notes] • Downloaded graphics indicate image data groups defined in the printer’s
+internal volatile memory (RAM). Once the download graphics data have been
+defined, they are available until GS ( L <Function 83>, <Function 84> or ESC @ is
+@@PAGE 52@@
+ESC POS Programming Manual
+47
+executed. The download graphics data are lost when the power is turned off or the
+printer is reset.
+• The functions used to define download graphics data are this function and
+Function 83. Even with printer models that support both, it is recommended that
+only one of the functions be used for data definition tasks.
+• The two functions differ only in that one function (this function) defines data in
+raster format, while the other (Function 83) defines data in column format. The
+domains and control information are identical.
+• In cases where the key code specified by this function coincides with a key code
+being used by Function 83, a new data definition is created.
+• Use this function at the beginning of the line when the standard mode is selected.
+• This function is incompatible with macros, so make sure to avoid including it
+when defining macros.
+• In cases where there is insufficient capacity available for storing download
+graphics data, this function cannot be used. Use Function 52 to confirm the
+available capacity in the download graphics data area.
+• One option is to delete items of download graphics data that were previously
+defined to the same key code.
+• The data for byte k of d1 ... dk is processed as a single item of defined
+downloaded graphics data. The defined data (d) specifies "1" for bits corresponding
+to dots that will be printed and "0" for bits corresponding to dots that will not be
+printed.
+• Downloaded graphics data is defined using the dot density set by Function 49.
+• Specify single data groups [c d1 ... dk] when monochrome is selected (b = 1) as
+the color.
+• Specify b number of data groups [c d1 ... dk] when multiple colors are selected (b
+≠ 1). It is also important to specify different colors in units of data groups when
+specifying color (c).
+• Downloaded graphics data is printed using Function 85.
+• Note that it is not possible to create definitions for both download graphics data
+(this command) and download bit image data (GS ✻). download bit image data
+definitions are deleted when this command is used.
+• For some models, downloaded graphics (this command) and user-defined
+characters (ESC &) cannot be defined simultaneously.
+• User-defined characters defined are deleted by using this command.
+• Downloaded graphics data are deleted by ESC &.
+• The relationship between download graphics data (column format) and print
+results is shown in the table below.
+@@PAGE 53@@
+ESC POS Programming Manual
+48
+<Function112>GS(LpLpHmfnabxbycxLxHyLyHd1…dk(fn=112)
+[Name] Store the graphics data in the print buffer (raster format).
+[Format]ASCII GS ( L pL pH m fn a bx by c xL xH yL yH d1...dk
+Hex 1D 28 4C pL pH 30 70 30 bx by c xL xH yL yH d1...dk
+Decimal 29 40 76 pL pH 48 112 48 bx by c xL xH yL yH d1...dk
+ASCII GS 8 L p1 p2 p3 p4 m fn a bx by c xL xH yL yH d1...dk
+Hex 1D 38 4C p1 p2 p3 p4 30 70 30 bx by c xL xH yL yH d1...dk
+Decimal 29 56 76 p1 p2 p3 p4 48 112 48 bx by c xL xH yL yH d1...dk
+[Range] 11 ≤ (pL + pH × 256) ≤ 65535 (0 ≤ pL ≤ 255, 0 ≤ pH ≤ 255)
+When using GS 8 L: 11 ≤ (p1 + p2 × 256 + p3 × 65536 + p4 × 16777216) ≤
+4294967295]
+m = 48, fn = 112, a = 48, a = 52
+0 ≤ d ≤ 255
+k = (int((xL + xH × 256) + 7)/8) × (yL + yH × 256)
+bx = 1, 2
+by = 1, 2
+c = 49 (when the recommended monochrome paper is used)
+c = 49, 50 (when the recommended two-color paper is used)
+1 ≤ (xL + xH × 256) ≤ 2047 (0 ≤ xL ≤ 255, 0 ≤ xH ≤ 7)
+With recommended monochrome paper
+(by = 1): 1 ≤ (yL + yH × 256) ≤ 1662 (0 ≤ yL ≤ 255, 0 ≤ yH ≤ 6)
+(by = 2): 1 ≤ (yL + yH × 256) ≤ 831 (0 ≤ yL ≤ 255, 0 ≤ yH ≤ 3)
+With recommended two-color paper
+(by = 1): 1 ≤ (yL + yH × 256) ≤ 831 (0 ≤ yL ≤ 255, 0 ≤ yH ≤ 3)
+(by = 2): 1 ≤ (yL + yH × 256) ≤ 415 (0 ≤ yL ≤ 255, yH = 0, 1)
+<Function48>GS(LpLpHmfn (fn=0,48)
+[Name] Transmit the NV graphics memory capacity.
+[Format] ASCII GS ( L pL pH m fn
+Hex 1D 28 4C 02 00 30 fn
+Decimal 29 40 76 2 0 48 fn
+[Range] (pL + pH × 256) = 2 (pL = 2, pH = 0)
+m = 48
+fn = 0, 48+
+[Description]Transmits the entire capacity of the NV graphics area (number of bytes in the NV
+graphics area).
+@@PAGE 54@@
+ESC POS Programming Manual
+49
+2.8 Bar Code Commands
+GS H n
+[Name] Select print position of HRI characters
+ASCII GS H n
+Hex 1d 48 n
+Decimal 29 72 n
+[Range] 0 ≤ n ≤ 3, 48 ≤ n ≤ 51
+[Default] n = 0
+[Description]Selects the print position of Human Readable Interpretation (HRI) characters when
+printing a bar code, using n as follows:
+n Print position
+0, 48 Not printed
+1, 49 Above the bar code
+2, 50 Below the bar code
+3, 51 Both above and below the bar code[Notes] • HRI characters are printed using the font specified by GS f.
+• The font of HRI characters is specified by the GS f command.
+• ESC ! command is invalid for HRI character settings such as font selection,
+height/width doubling, bold, underline, etc.
+• GS ！ (character double-height and double-width), ESC SP (right-side character
+spacing setting), and ESC V (rotation 90 degrees) are invalid for HRI characters.
+[Reference] GS f, GS k
+@@PAGE 55@@
+ESC POS Programming Manual
+50
+GS f n
+[Name] Select font for HRI characters
+ASCII GS f n
+Hex 1d 66 n
+Decimal 29 102 n
+[Range] n = 0, 1, 48, 49
+[Default] n = 0
+[Description]Selects a font for the Human Readable Interpretation (HRI) characters when printing a
+bar code, using n as follows:
+N Font of HRI characters
+0,48 Font A: 12 × 24
+1,49 Font B: 9 × 17
+[Notes] • HRI character is Human Readable Interpretation character indicated with bar code.
+• HRI characters are printed at the position specified by GS H.
+[Reference] GS H, GS k
+GS h n
+[Name] Set bar code height
+ASCII GS h n
+Hex 1d 68 n
+Decimal 29 104 n
+[Range] 1 ≤ n ≤ 255
+[Default] n = 162
+[Description]Sets the height of a bar code to n dots.
+[Notes] When the barcode height exceeds the set page height in page mode, the excess part
+will not be printed.
+[Reference] GS k
+@@PAGE 56@@
+ESC POS Programming Manual
+51
+GS w n
+[Name] Set bar code width
+ASCII GS w n
+Hex 1d 77 n
+Decimal 29 119 n
+[Range] 2 ≤ n ≤ 6
+[Default] n = 3
+[Description] Sets the horizontal size of a bar code.
+n specifies the bar code module width.
+n
+Module width
+(mm) for multilevel
+bar code
+Binary level bar code
+Width (mm) Thin element width
+(mm)
+Thick element
+width (mm)
+2 0.250 0.250 0.625
+3 0.375 0.375 1.000
+4 0.500 0.500 1.250
+5 0.625 0.625 1.625
+6 0.750 0.750 2.000
+• Bar code types are Multi level bar code UPC-A, UPC-E, JAN13 / EAN13, JAN8 / EAN8,
+CODE93, CODE128, GS1-128
+• Binary level bar code [CODE39, ITF, CODABAR(NW-7)].
+[Notes] • When the barcode printing width exceeds the set width, it will not be printed.
+• In page mode, if the barcode width exceeds the set page width, the excess part will
+not be printed.
+[Reference]GS k
+@@PAGE 57@@
+ESC POS Programming Manual
+52
+GS k
+①GSkmd1...dkNUL②GSkmnd1...dn
+[Name] Print bar code
+①ASCII GS k m d1...d k NUL
+Hex 1D 6B m d1...d k 00
+Decimal 29 107 m d1...d k 0
+②ASCII GS k m n d1... dn
+Hex 1D 6B m n d1... dn
+Decimal 29 107 m n d1... dn
+[Range] ①0 ≤ m ≤ 6 (The domain of d and k differs according to the bar code)
+②65 ≤ m ≤ 73 (The domain of d and k differs according to the bar code)
+[Description]Select a barcode type and print the barcode.
+Prints the bar code using the bar code system specified by m.
+m Bar code
+system
+Bar code
+data
+d
+① 0 UPC-A 11 ≤ k ≤
+12
+48 ≤ d ≤ 57
+1 UPC-E 11 ≤ k ≤
+12
+48 ≤ d ≤ 57
+2 JAN13 (EAN13) 12 ≤ k ≤
+13
+48 ≤ d ≤ 57
+3 JAN 8 (EAN8) 7 ≤ k ≤ 8 48 ≤ d ≤ 57
+4 CODE39 1 ≤ k ≤
+255
+45 ≤ d ≤ 57, 65 ≤ d ≤ 90, 32, 36,
+37,43
+5 ITF 1 ≤ k ≤
+255
+48 ≤ d ≤ 57
+6 CODABAR 1 ≤ k ≤
+255
+48 ≤ d ≤ 57, 65 ≤ d ≤ 68 , 36,
+43,45,46,47,58
+② 65 UPC-A 11 ≤ n ≤
+12
+48 ≤ d ≤ 57
+66 UPC-E 11 ≤ n ≤
+12
+48 ≤ d ≤ 57
+67 JAN13 (EAN13) 12 ≤n ≤
+13
+48 ≤ d ≤ 57
+68 JAN 8 (EAN8) 7 ≤n ≤ 8 48 ≤ d ≤ 57
+69 CODE39 1 ≤ n ≤
+255
+45 ≤ d ≤ 57, 65 ≤ d ≤ 90, 32, 36,
+37,43 d1 = dk = 42
+70 ITF 1 ≤ n≤
+255
+48 ≤ d ≤ 57
+71 CODABAR 1 ≤ n≤
+255
+48 ≤ d ≤ 57 65 ≤ d ≤ 68,
+36,43,45,46,47,58
+72 CODE93 1 ≤ n≤
+255
+0 ≤ d ≤ 127
+73 CODE128 2 ≤ n≤
+255
+0 ≤ d ≤ 127
+@@PAGE 58@@
+ESC POS Programming Manual
+53
+2.9 Two Dimension Code Commands
+GS ( k
+[Name] Set up and print the symbol
+[Description] Performs data processing related to 2-dimensional codes (PDF417, QR Code,
+MaxiCode, 2-dimensional GS1 DataBar, Composite Symbology).
+• Symbol type is specified by cn
+• Function code fn specifies the function.
+cn fn Function
+No.
+Function name
+48 65 Function
+065
+PDF417: Set the number of columns in the data region
+66 Function
+066
+PDF417: Set the number of rows
+67 Function
+067
+PDF417: Set the width of the module
+68 Function
+068
+PDF417: Set the row height
+69 Function
+069
+PDF417: Set the error correction level
+70 Function
+070
+PDF417: Select the options
+80 Function
+080
+PDF417: Store the data in the symbol storage area
+81 Function
+081
+PDF417: Print the symbol data in the symbol storage
+area
+82 Function
+082
+PDF417: Transmit the size information of the symbol
+data in the symbol storage area
+[Notes ①] • This command ends with NULL in this format.
+• When selecting UPC-A or UPC-E code, the printer receives 12 byte barcode data and
+processes the remaining characters as regular characters.
+• When selecting JAN13 (EAN13) type, after the printer receives 13 byte barcode data,
+the remaining characters are treated as normal characters.
+• When selecting JAN8 (EAN8) type, after the printer receives 8-byte barcode data,
+the remaining characters are treated as normal characters.
+• The number of ITF code data must be even. If an odd number of barcode data are
+entered, the last data is ignored.
+@@PAGE 59@@
+ESC POS Programming Manual
+54
+49 65 Function
+165
+QR Code: Select the model
+67 Function
+167
+QR Code: Set the size of module
+69 Function
+169
+QR Code: Select the error correction level
+80 Function
+180
+QR Code: Store the data in the symbol storage area
+81 Function
+181
+QR Code: Print the symbol data in the symbol storage
+area
+82 Function
+182
+QR Code: Transmit the size information of the symbol
+data in the symbol storage area
+<Function 065> GS ( k pL pH cn fn n (cn=48, fn=65)
+[Name] PDF417: Set the number of columns in the data region
+[Format] ASCII GS ( k pL pH cn fn n
+Hex 1D 28 6B 03 00 30 41 n
+Decimal 29 40 107 3 0 48 65 n
+[Range] (pL + pH × 256) = 3 (pL = 3, pH = 0)
+cn = 48
+fn = 65
+0 ≤ n ≤ 30
+[Description] Sets the number of columns in the data region for PDF417.
+• When n = 0, specifies automatic processing
+• When n is not 0, sets the number of columns in the data region to n codeword.
+[Notes]
+The following data is not included in the number of columns:
+• Start pattern and stop pattern
+• Indicator codeword of left and right
+[Default] n=0
+@@PAGE 60@@
+ESC POS Programming Manual
+55
+<Function 066> GS ( k pL pH cn fn n (cn=48, fn=66)
+[Name] PDF417: Set the number of rows
+[Format] ASCII GS ( k pL pH cn fn n
+Hex 1D 28 6B 03 00 30 42 n
+Decimal 29 40 107 3 0 48 66 n
+[Range] (pL + pH × 256) = 3 (pL = 3, pH = 0)
+cn = 48
+fn = 66
+n=0, 3 ≤ n ≤ 90
+[Description] ·Sets the number of rows for PDF417.
+• When n = 0 specifies automatic processing.
+• When n is not 0, sets the number of rows to n rows.
+[Default] n=0
+<Function 067> GS ( k pL pH cn fn n (cn=48, fn=67)
+[Name] PDF417: Set the width of the module
+[Format] ASCII GS ( k pL pH cn fn n
+Hex 1D 28 6B 03 00 30 43 n
+Decimal 29 40 107 3 0 48 67 n
+[Range] (pL + pH × 256) = 3 (pL = 3, pH = 0)
+cn = 48
+fn = 67
+2 ≤ n ≤ 8
+[Description] Sets the width of the module for PDF417 to n dots.
+[Default] n=3
+@@PAGE 61@@
+ESC POS Programming Manual
+56
+<Function 068> GS ( k pL pH cn fn n (cn=48, fn=68)
+[Name] PDF417: Set the row height
+[Format] ASCII GS ( k pL pH cn fn n
+Hex 1D 28 6B 03 00 30 44 n
+Decimal 29 40 107 3 0 48 68 n
+[Range] (pL + pH × 256) = 3 (pL = 3, pH = 0)
+cn = 48
+fn = 68
+2 ≤ n ≤ 8
+[Description] Sets the row height for PDF417 to [n × (the width of the module)].
+[Default] n=3
+<Function 069> GS ( k pL pH cn fn m n (cn=48, fn=69)
+[Name] PDF417: Set the error correction level
+[Format] ASCII GS ( k pL pH cn fn m n
+Hex 1D 28 6B 04 00 30 45 m n
+Decimal 29 40 107 4 0 48 69 m n
+[Range] (pL + pH × 256) = 4 (pL = 4, pH = 0)
+cn = 48
+fn = 69
+m = 48, 49
+48 ≤ n ≤ 56 [when m =48]
+0 ≤ n ≤ 40 [when m =48]
+@@PAGE 62@@
+ESC POS Programming Manual
+57
+[Description] Sets the error correction level for PDF417.
+Error correction level specified by "level" (m = 48) is as follows. The number of the
+error correction codeword is fixed regardless of the number of codewords in the
+data area.
+n Function Number of error correction
+codeword
+48 Error correction level 0 2
+49 Error correction level 1 4
+50 Error correction level 2 8
+51 Error correction level 3 16
+52 Error correction level 4 32
+53 Error correction level 5 64
+54 Error correction level 6 128
+55 Error correction level 7 256
+56 Error correction level 8 512
+[Description] Error correction level specified by "ratio" (m = 49) is as follows. The error correction
+level is defined by the calculated value [number of data codeword × n × 0.1 =
+(A)]. The number of the error correction codeword is changeable in proportion to
+the number of the codeword in the data area.
+Calculated value
+(A) Function
+Number of error
+correction
+codeword
+0 ～ 3 Error correction
+level 1 4
+4 ～ 10 Error correction
+level 2 8
+11～20 Error correction
+level 3 16
+21～45 Error correction
+level 4 32
+46～100 Error correction
+level 5 64
+101～200 Error correction
+level 6 128
+201～400 Error correction
+level 7 256
+401 or more Error correction
+level 8 512
+[Default] m=49, n=1
+@@PAGE 63@@
+ESC POS Programming Manual
+58
+<Function 070> GS ( k pL pH cn fn m (cn=48, fn=70)
+[Name] PDF417: Select the options
+[Format] ASCII GS ( k pL pH cn fn m
+Hex 1D 28 6B 03 00 30 46 m
+Decimal 29 40 107 3 0 48 70 m
+[Range] (pL + pH × 256) = 4 (pL = 4, pH = 0)
+cn = 48
+fn = 70
+m = 0, 1
+[Description] Selects the option for PDF417.
+m Function
+0 Selects the standard
+PDF417.
+1 Selects the truncated
+PDF417.
+<Function 082> GS ( k pL pH cn fn m (cn=48, fn=82)
+[Name] PDF417: Transmit the size information of the symbol data in the symbol storage
+area[Format] ASCII GS ( k pL pH cn fn m
+Hex 1D 28 6B 03 00 30 52 m
+Decimal 29 40 107 3 0 48 82 m
+[Range] (pL + pH × 256) =3 (pL = 3 ,pH = 0 )
+cn = 48
+fn = 82
+m = 48
+[Description] Transmits the size information for the encoded PDF417 symbol data in the symbol
+storage area using the process of <Function 080>.
+[Notes] ·This function does not print.
+·Size information does not include safe blank areas (defined by the PDF417
+symbol specification as upper, lower, left, and right margins).
+@@PAGE 64@@
+ESC POS Programming Manual
+59
+<Function 165 > GS ( k pL pH cn fn n1 n2 (cn=49,fn=65)
+[Name] QR Code: Select the model
+[Format] ASCII GS ( k pL pH cn fn n1 n2
+Hex 1D 28 6B 04 00 31 41 n1 n2
+Decimal 29 40 107 4 0 49 65 n1 n2
+[Range] (pL + pH × 256) = 4 (pL = 4, pH = 0)
+cn = 49
+fn = 65
+n1 = 49, 50
+n2 = 0
+[Default] n1 = 50，n2 = 0
+[Description] Selects the model for QR Code
+n1 Function
+49 Selects model 1.
+50 Selects model 2.
+<Function 167> GS ( k pL pH cn fn n (cn=49,fn=67)
+[Name] QR Code: Set the size of module
+[Format] ASCII GS ( k pL pH cn fn n
+Hex 1D 28 6B 03 00 31 43 n
+Decimal 29 40 107 3 0 49 67 n
+[Range] (pL + pH × 256) = 3 (pL = 3, pH = 0)
+cn = 49
+fn = 67
+1 ≤ n ≤ 16
+[Default] n = 3
+[Description] Sets the size of the module for QR Code to n dots.
+@@PAGE 65@@
+ESC POS Programming Manual
+60
+<Function 169> GS ( k pL pH cn fn n (cn=49,fn=69)
+[Name] QR Code: Select the error correction level
+[Format] ASCII GS ( k pL pH cn fn n
+Hex 1D 28 6B 03 00 31 45 n
+Decimal 29 40 107 3 0 49 69 n
+[Range] (pL + pH × 256) = 3 (pL = 3, pH = 0)
+cn = 49
+fn = 69
+48 ≤ n ≤ 51
+[Default] n = 48
+[Description] Selects the error correction level for QR Code.
+n Function Recovery Capacity %
+(approx.)
+48 Selects Error
+correction level L 7%
+49 Selects Error
+correction level M 15%
+50 Selects Error
+correction level Q 25%
+51 Selects Error
+correction level H 30%
+@@PAGE 66@@
+ESC POS Programming Manual
+61
+2.10 Status Commands
+ESC v
+[Name] Transmit paper sensor status
+[Format] ASCII ESC v
+Hex 1b 76
+Decimal 27 118
+[Description]Transmitting printer status to the printer is only valid for serial port printers.
+Transmits the status of paper sensor(s) as 1 byte of data.
+The paper sensor status to be transmitted is as follows:
+Bit Off/On HEX Decimal Status
+0.1 OFF 00 0 Roll paper near-end sensor: paper adequate.
+ON 03 3 Roll paper near-end sensor: paper near end.
+2.3 OFF 00 0 Roll paper end sensor: paper present.
+ON 0C 12 Roll paper end sensor: paper not present.
+4 OFF 00 0 Fixed
+5.6 --- -- -- Undefined.
+7 OFF 00 0 Fixed
+[Notes] This instruction is only valid for serial port models.
+GS r n
+[Name] Transmit status
+[Format] ASCII GS r n
+Hex 1d 72 n
+Decimal 29 114 n
+[Range] n = 1, 49 2, 50
+[Description]Transmits the status using n as follows:
+N Function
+1,49 Transmits paper sensor status
+2,50 Transmits drawer kick-out connector status
+[Notes] • This command is only valid for serial printers.
+• After the data before this command in the receiving buffer is processed, the
+instruction is executed, so there is a certain time lag between sending the command
+and receiving the return status.
+• The status to be transmitted is as follows:
+@@PAGE 67@@
+ESC POS Programming Manual
+62
+Paper sensor status (n = 1, 49)
+Bit Off/O
+n HEX Decim
+al Status
+0.1
+OFF 00 0 Roll paper near-end sensor: paper
+adequate.
+ON 03 3 Roll paper near-end sensor: paper
+near end.
+2.3
+OFF 00 0 Roll paper end sensor: paper
+present.
+ON 0C 12 Roll paper end sensor: paper not
+present.
+4 OFF 00 0 Fixed to Off.
+5.6 --- -- -- Undefined.
+7 OFF 00 0 Fixed to Off.
+Paper sensor status (n = 2, 50)
+Bit Off/O
+n HEX Decima
+l Status
+0
+OFF 00 0 Drawer kick-out connector pin 3
+is LOW.
+ON 01 1 Drawer kick-out connector pin 3
+is HIGH.
+1-3 --- -- -- Undefined.
+4 OFF 00 0 Fixed to Off.
+5.6 --- -- -- Undefined.
+7 OFF 00 0 Fixed to Off.
+[Notes] Do not transmit more data from the PC until the response data or status data are
+received from the printer.
+[Reference] DLE EOT，GS a
+@@PAGE 68@@
+ESC POS Programming Manual
+63
+DLE EOT n [a]
+[Name] Transmit real-time status
+[Format] ASCII DLE EOT n [a]
+Hex 10 04 n [a]
+Decimal 16 4 n [a]
+[Range] 1≤n≤4
+[Description] Transmits the real-time status, using n as follows:
+n = 1：Transmit printer status
+n = 2：Transmit offline status
+n = 3：Transmit error status
+n = 4：Transmit roll paper sensor status
+n=1： Printer status is as follows:
+Bit Off/On HEX Decimal Function
+0 OFF 00 0 Fixed to Off.
+1 ON 02 2 Fixed to On.
+2
+OFF 00 0
+Drawer kick-out connector pin 3
+is LOW.
+ON 04 4
+Drawer kick-out connector pin 3
+is HIGH.
+3 OFF 00 0 Online.
+ON 08 8 Offline.
+4 ON 10 16 Fixed to On.
+5.6 --- -- -- Undefined.
+7 OFF 00 0 Fixed to Off.
+Offline status A (n = 2) is as follows:
+Bit Off/On HEX Decimal Function
+0 OFF 00 0 Fixed to Off.
+1 ON 02 2 Fixed to On.
+2 OFF 00 0 Cover is closed.
+ON 04 4 Cover is open.
+3
+OFF 00 0 Paper is not being fed by the
+paper feed button.
+ON 08 8 Paper is being fed by the paper
+feed button.
+4 ON 10 16 Fixed to On.
+5
+OFF 00 0 No paper-end stop.
+ON 20 32 Printing stops due to a
+paper-end.
+6 OFF 00 0 No error.
+ON 40 64 Error occurred.
+7 OFF 00 0 Fixed to Off.
+@@PAGE 69@@
+ESC POS Programming Manual
+64
+Error status (n = 3) is as follows:
+Bit Off/On Hex Decimal Function
+0 OFF 00 0 Fixed to Off.
+1 ON 02 2 Fixed to On.
+2 --- -- -- Undefined.
+3 OFF 00 0 No autocutter error.
+ON 08 8 Autocutter error occurred.
+4 ON 10 16 Fixed to On.
+5 OFF 00 0 No unrecoverable error.
+ON 20 32 Unrecoverable error occurred.
+6 OFF 00 0 No auto-recoverable error.
+ON 40 64 Auto-recoverable error occurred.
+7 OFF 00 0 Not used. Fixed to Off.
+Bit 5：Unrecoverable error occurred：Refers to abnormal input voltage;
+Bit 6：Auto-recoverable error occurred：Refers to the overheating error of the print
+head; When a print head overheating error occurs, wait for a period of time until the
+print head temperature decreases, and the error will automatically restored.
+Roll paper sensor status (n = 4) is as follows:
+Bit Off/On Hex Decimal Function
+0 OFF 00 0 Fixed to Off.
+1 ON 02 2 Fixed to On.
+2.3 OFF 00 0 Roll paper near-end sensor: paper adequate.
+ON 0C 12 Roll paper near-end sensor: paper near end.
+4 ON 10 16 Fixed to On.
+5.6 OFF 00 0 Roll paper end sensor: paper present.
+ON 60 96 Roll paper end sensor: paper not present.
+7 OFF 00 0 Fixed to Off.
+[Notes] When you use this command, follow these rules.
+• If another command (such as graphics data or defined data) has a code string in a
+parameter that is the same as this command, the printer starts processing this
+command. Users need to consider this situation;
+Example: The graphic data may contain data that matches the command. Do not embed
+the command into another command.
+Example: The graphic data may contain this command.
+Transfer the instruction through the following methods:
+If this command is sent while another command is processing, processing of the other
+command is canceled.
+However, if the command must be transmitted continuously, 4 commands can be
+transmitted at a time.
+In this case, subsequent data cannot be transmitted until all states are received.
+If the command is not transmitted using the above method, its status may not be
+received.
+@@PAGE 70@@
+ESC POS Programming Manual
+65
+GS a n
+[Name] Enable/disable Automatic Status Back (ASB)
+[Format] ASCII GS a n
+Hex 1d 61 n
+Decimal 29 97 n
+[Range] 0 ≤ n ≤ 255
+[Default] n = 0
+[Description]Enables or disables basic ASB (Automatic Status Back) and specifies the status items to
+include, using n as follows:
+Bit Off/On Hex Decimal Function
+0
+OFF 00 0 Drawer kick-out connector status
+disabled.
+ON 01 1 Drawer kick-out connector
+status enabled.
+1 OFF 00 0 Online/offline status disabled.
+ON 02 2 Online/offline status enabled.
+2 OFF 00 0 Error status disabled.
+ON 04 4 Error status enabled.
+3
+OFF 00 0 Roll paper sensor status
+disabled.
+ON 08 8 Roll paper sensor status
+enabled.
+4~7 OFF 00 0 Undefined.
+@@PAGE 71@@
+ESC POS Programming Manual
+66
+When ASB is active, ASB status is transmitted whenever the status changes
+Basic ASB status is 4-byte configuration [first byte - fourth byte].
+First byte (printer information)
+Bit Off/O
+n Hex Decimal Printer status is as follows:
+0,1 OFF 00 0 Fixed to Off.
+2
+OFF 00 0 Drawer kick-out connector pin
+3 is LOW.
+ON 04 4 Drawer kick-out connector pin
+3 is HIGH.
+3 OFF 00 0 Online.
+ON 08 8 Offline.
+4 ON 10 16 Fixed to On.
+5 OFF 00 0 Cover is closed.
+ON 20 32 Cover is open.
+6
+OFF 00 0 Paper is not being fed by the
+paper feed button.
+ON 40 64 Paper is being fed by the paper
+feed button.
+7 OFF 00 0 Fixed to Off.
+Second byte (printer information)
+Bit Off/On Hex Decimal Printer status is as
+follows:
+0-2 -- -- -- Undefined.
+3 OFF 00 0 Undefined.
+ON 08 8 No cutter error.
+4 OFF 00 0 Fixed
+5
+OFF 00 0 No unrecoverable error.
+ON 20 32 Unrecoverable error
+occurred.
+6
+OFF 00 0 No automatically
+recoverable error.
+ON 40 64
+Automatically
+recoverable error
+occurred.
+7 OFF 00 0 Fixed
+Unrecoverable error: refers to abnormal input voltage;
+Automatic recovery error: Refers to the overheating error of the print head,
+waiting for a period of time for the print head to overheat and automatically
+recover from errors
+@@PAGE 72@@
+ESC POS Programming Manual
+67
+Third byte (paper sensor information)
+Bit Off/On Hex Decimal Printer status is as
+follows:
+0, 1
+OFF 00 0
+Roll paper near-end
+sensor: paper
+adequate.
+ON 03 3
+Roll paper near-end
+sensor: paper near
+end.
+2, 3
+OFF 00 0 Roll paper end sensor:
+paper present.
+ON 0C 12 Roll paper end sensor:
+paper not present.
+4 OFF 00 0 Fixed
+5, 6 -- -- - Undefined.
+7 OFF 00 0 Fixed
+Fourth byte (paper sensor information)
+Bit Off/On Hex Decimal Printer information
+0~3 -- -- -- Undefined.
+4 OFF 00 0 Fixed
+5, 6 -- -- -- Undefined.
+7 0 00 0 Fixed
+@@PAGE 73@@
+ESC POS Programming Manual
+68
+GS I n
+[Name] Transmit printer ID
+[Format] ASCII GS I n
+Hex 1d 49 n
+Decimal 29 73 n
+[Range] n = 1, 2, 49, 50 [printer ID]
+65 ≤ n ≤ 69 [printer information B]
+[Description] Transmits the printer ID.
+• Transmits 1 byte of printer ID, using n as follows:
+n Printer ID ID
+1,49 Printer model ID Hex code: 20 / Decimal code: 32
+2,50 Type ID See the table below
+smits specified printer information B, using n as follows:
+n Printer ID Specification
+65 Firmware version Firmware version
+66 Maker name "HPRT"/ Tally DASCOM
+67 Printer model "TP801"or"TP805"or"TP806" / DT-230
+68 Serial No Serial No of the printer
+69 Font of Language for
+each country
+Japanese model: "KANJI JAPANESE"
+Simplified Chinese model: "CHINA GB18030"
+Traditional Chinese model: "TAIWAN BIG-5"
+[Notes] When this command is transmitted, the guidance receives the status, otherwise subsequent data will not
+be transmitted.
+Bit Off/On Hex Decimal Content
+0
+OFF 00 0 Multi-byte character codes are not supported.
+ON 01 1 Multi-byte character codes are supported.
+1 ON 02 2 Autocutter installed.
+2.3 -- -- -- Not used.
+4 OFF 00 0 Not used. Fixed to Off.
+5 -- -- -- Reserved.
+6 -- -- -- Not used.
+7 OFF 00 0 Not used. Fixed to Off.
+@@PAGE 74@@
+ESC POS Programming Manual
+69
+2.11 Mechanism Control Commands
+ESC i
+[Name] Partial cut (one point left uncut)
+[Format] ASCII ESC i
+Hex 1b 69
+Decimal 27 105
+[Description]Executes a partial cut of the roll paper.
+ESC m
+[Name] Partial cut (three points left uncut)
+[Format] ASCII ESC m
+Hex 1b 6d
+Decimal 27 109
+[Description]Executes a partial cut of the roll paper.
+GS V
+①GSVm ②GSVmn
+[Name] Select cut mode and cut paper
+Function A ASCII GS V m
+Hex 1d 56 m
+Decimal 29 86 m
+Function B ASCII GS V m n
+Hex 1d 56 m n
+Decimal 29 86 m n
+[Range] <A> m = 0, 1, 48, 49
+[Range] <B> m = 65, 66, 0 ≤ n ≤ 255
+[Description]Executes paper cutting specified by m, as follows:
+m Function
+<A> 0.48 Executes a full cut (cuts the paper completely).
+1.49 Executes a partial cut (one point left uncut).
+<B>
+65 Feeds paper to (cutting position + n × vertical motion unit) and
+executes a full cut (cuts the paper completely).
+66 Feeds paper to (cutting position + n × vertical motion unit) and
+executes a partial cut (one point left uncut).
+[Notes] The printer performs a partial cut (one point left uncut).
+@@PAGE 75@@
+ESC POS Programming Manual
+70
+2.12 Control Commands
+ESC p m t1 t2
+[Name] Generate pulse
+[Format] ASCII ESC p m t1 t2
+Hex 1B 70 m t1 t2
+Decimal 27 112 m t1 t2
+[Range] m = 0, 1, 48, 49
+0 ≤t1 ≤ 255
+0 ≤ t2 ≤ 255
+[Description]Outputs the pulse specified by t1 and t2 to the specified connector pin m as follows:
+m Connector pin
+0, 48 Drawer kick-out connector pin
+2
+1, 49 Drawer kick-out connector pin
+5
+The pulse for ON time is (t1 × 2 msec) and for OFF time is (t2 × 2 msec).
+[Notes] If t2 < t1, the OFF time is equal to the ON time.
+2.13 Beeper Commands
+ESC ( A pL pH fn n c t1 t2 <Function 97 >
+[Name] Beep integrated beeper
+[Format] ASCII ESC ( A pL pH fn n c t1 t2
+Hex 1B 28 41 05 00 61 n c t1 t2
+Decimal 27 40 65 5 0 97 c t1 n t2
+[Range] ( pL + pH × 256) = 5 ( pL = 5, pH = 0)
+fn = 97
+n = 100
+0 ≤ c ≤ 63
+0 ≤ t1 ≤ 255
+0 ≤ t2 ≤ 255
+[Description] Beeps the integrated beeper.
+• c specifies times of beeping.
+• t1 specifies beeping time (t1 × 100 ms).
+• t2 specifies time for stop beeping (t2 × 100 ms).
+@@PAGE 76@@
+ESC POS Programming Manual
+71
+[Notes] •This function repeats integrated beeper control of [(t1 × 100 ms) beep/ (t2 ×
+100 ms) stop] c times.
+If this command is newly processed during beeping of the buzzer, the current
+process for beeping the buzzer is stopped and the new process for beeping the
+buzzer is started.
+Integrated beeper beeping by this function stops due to any of the following
+factors.
+• Finish specification of (c).
+• Reset or power off.
+2.14 Miscellaneous Commands（including Macro Function Commands）
+GS ( A pL pH n m
+[Name] Execute test print
+[Format] ASCII GS ( A pL pH n m
+Hex 1D 28 41 pL pH n m
+Decimal 29 40 65 pL pH n m
+[Range] (pL + pH × 256)=2 (pL=2, pH=0)
+0 ≤ n ≤ 2，48 ≤ n ≤ 50
+1 ≤ m≤ 3，49 ≤ m ≤ 51
+[Description]Executes a specified test print.
+• pL, pH specifies (pL + pH × 256) as the number of bytes after pH (n and m).
+• n specifies the paper used for the test print as follows:
+n Paper Type
+0, 48 Basic sheet (roll paper)
+1, 49 Roll paper2, 50
+• m specifies a test pattern as follows:
+1, 49 Hexadecimal dump
+2, 50 Printer status printing
+3, 51 Rolling pattern
+[Notes] • After processing this command, the printer performs a software reset.
+• Clear the receive buffer and print buffer.
+• Reset all settings in RAM after power on, and data stored in NV will not be
+reset.
+@@PAGE 77@@
+ESC POS Programming Manual
+72
+ESC c 5 n
+[Name] Enable/disable panel buttons
+[Format] ASCII ESC c 5 n
+Hex 1B 63 35 n
+Decimal 27 99 53 n
+[Range] 0 ≤ n ≤ 255
+[Default] n = 0
+[Description]Enables or disables the panel buttons.
+• When the LSB of n is 0, all buttons are enabled.
+• When the LSB of n is 1, all buttons are disabled.
+[Notes] • If panel buttons are disabled, the function of the panel button, such as feeding, will
+be executed when the panel button is turned on.
+• When the printer cover is open, there are buttons that are always enabled or
+disabled regardless of this command. The buttons are different, depending on the
+printer model.
+ESC = n
+[Name] Select peripheral device
+[Format] ASCII ESC = n
+Hex 1B 3D n
+Decimal 27 61 n
+[Range] 0 ≤ n ≤ 255
+[Default] n = 1
+[Description]Selects the device to which the host computer transmits data, using n as follows:
+n Function
+1, 3 Enables printer.
+2 Disables printer.
+[Notes] • When the printer is disabled, it ignores all received data and commands with
+the exception of ESC = and real-time commands (DLE EOT, DLE ENQ).
+• If ASB is enabled when the printer is disabled by this command, the printer
+transmits the ASB status message whenever the status changes.
+@@PAGE 78@@
+ESC POS Programming Manual
+73
+DLE DC4 (fn = 1) m t
+[Name] Generate pulse in real-time
+[Format] ASCII DLE DC4 fn m t
+Hex 10 14 fn m t
+Decimal 16 20 fn m t
+[Range] fn = 1
+m = 0, 1
+1≤ t ≤ 8
+[Description] Outputs the pulse specified by t to connector pin m as follows in real time:
+m Connector pin
+0 Drawer kick-out connector pin 2
+1 Drawer kick-out connector pin 5
+The pulse ON time is [t × 100 ms] and the OFF time is [t × 100 ms]
+[Notes] • Note the following when using this command:
+• If another command (such as graphics data or defined data) has a code string in a
+parameter that is the same as this command, the printer starts processing this
+command. Users need to consider this situation;
+Example: Graphic data may contain a code string in a parameter that is the same as
+this command
+• Do not embed this command within the code string of another command
+Example: The graphic data may contain this command
+@@PAGE 79@@
+ESC POS Programming Manual
+74
+DLE DC4（fn=8）d1...d7
+[Name] Clear buffer (s)
+[Format] ASCII DLE DC4 fn d1 ... d7
+Hex 10 14 08 d1 ... d7
+Decimal 16 20 8 d1 ... d7
+[Range] fn = 8
+d1 = 1, d2 = 3, d3 = 20, d4 = 1, d5 = 6, d6 = 2, d7 = 8
+[Description]• Clears all data stored in the receive buffer and the print buffer and transmits Clear
+response.
+• If a recoverable error occurs, recover from the error.[Notes] • Do not use this command in a system in which the printer is used with the OPOS
+driver and Java POS driver that are provided by Seiko Epson Corporation.
+• Note the following when using this command
+• If another command (such as graphics data or defined data) has a code string in a
+parameter that is the same as this command, the printer starts processing this
+command. Users need to consider this situation;
+Example: Graphic data may contain a code string in a parameter that is the same as
+this command
+• Do not embed this command within the code string of another command
+Example: The graphic data may contain this command
+• If this command is sent while another command is processing, processing of the
+other command is canceled.
+GS :
+[Name] Start/end macro definition
+[Format] ASCII GS ：
+Hex 1d 3a
+Decimal 29 58
+[Description]Start/end macro definition
+[Notes] • The maximum number of data to be defined is 2048 bytes.
+@@PAGE 80@@
+ESC POS Programming Manual
+75
+GS ^ r t m
+[Name] Execute macro
+[Format] ASCII GS ^ r t m
+Hex 1D 5E r t m
+Decimal 9 94 r t m
+[Range] 1 ≤ r ≤ 255
+0 ≤ t ≤ 255
+m = 0, 1
+[Description]Using the mode specified by m as follows:
+m Operation
+0 The macro executes r times continuously at the interval specified by t.
+1
+The printer waits for the period specified by t, flashes the LED, and then
+waits for the paper feed button to be pressed. After this button is pressed,
+the printer executes the macro once.
+The printer repeats this operation r times.
