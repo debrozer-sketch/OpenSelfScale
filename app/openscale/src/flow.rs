@@ -95,10 +95,12 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             let pages_total = tiles::items_pages(items_all.borrow().len());
             let page = page.min(pages_total - 1);
             let back = catalog_back.get();
-            let (skip, take) = if page == 0 {
+            let (skip, take) = if back {
+                (if page == 0 { 0 } else { 26 + (page - 1) * 25 }, 25)
+            } else if page == 0 {
                 (0, 26)
             } else {
-                (26 + (page - 1) * 25, if back { 25 } else { 26 })
+                (26 + (page - 1) * 25, 26)
             };
             let tiles: Vec<PluTile> = items_all
                 .borrow()
@@ -110,7 +112,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             ui.set_items(slint::ModelRc::new(slint::VecModel::from(tiles)));
             ui.set_items_page_no(page as i32);
             ui.set_items_pages_total(pages_total as i32);
-            ui.set_items_cell_offset(if page == 0 || !back { 0 } else { 1 });
+            ui.set_items_cell_offset(if back { 1 } else { 0 });
             kiosk.borrow_mut().item_page = page;
         }
     };
@@ -481,8 +483,13 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             let Some(ui) = ui_handle.upgrade() else { return };
             match ui.get_screen() {
                 2 => {
-                    let page = kiosk.borrow().item_page.saturating_sub(1);
-                    show_items(page);
+                    let page = kiosk.borrow().item_page;
+                    if page == 0 {
+                        let dept_page = kiosk.borrow().dept_page;
+                        show_dept(dept_page);
+                    } else {
+                        show_items(page.saturating_sub(1));
+                    }
                 }
                 0 => {
                     let page = kiosk.borrow().dept_page.saturating_sub(1);
