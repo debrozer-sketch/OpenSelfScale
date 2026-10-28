@@ -1414,7 +1414,8 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
-pub fn grid_probe_bytes() -> Vec<u8> {
+fn grid_probe_bytes(spec: &crate::label::LabelSpec, item: &datastore::PluItem) -> Vec<u8> {
+    use crate::label::MM_TO_DOTS;
     const W: usize = 448;
     const H: usize = 320;
     let mut job = LabelJob::begin((W as u16, H as u16));
@@ -1429,17 +1430,62 @@ pub fn grid_probe_bytes() -> Vec<u8> {
             let _ = job.field(2, mm * 8 + 2, FieldStyle::FontB, &mm.to_string());
         }
     }
-    let _ = job.field(4, 12 * 8, FieldStyle::FontB, "24");
-    let _ = job.field(28 * 8, 12 * 8, FieldStyle::FontB, "48");
-    let _ = job.barcode_ean13(16, 20 * 8, "210000000001", 2, 0x18);
-    let _ = job.barcode_ean13(28 * 8, 20 * 8, "210000000001", 2, 0x30);
+    let date = "28.10.2026";
+    let time = "12:00";
+    let fit_w = (spec.width_mm as f64 - 4.0).min(PRINTABLE_WIDTH_MM);
+    for f in &spec.fields {
+        if f.kind == crate::label::LabelKind::Barcode {
+            let payload = ean13_payload(item, 1350);
+            let _ = job.barcode_ean13(
+                (f.x_mm * MM_TO_DOTS as f64).round() as u16,
+                ((f.y_mm + 6.0) * MM_TO_DOTS as f64).round() as u16,
+                &payload,
+                if f.size2 { 4 } else { 2 },
+                0x30,
+            );
+            continue;
+        }
+        let Some(text) = spec_field_text(f, item, 1350, 64800, date, time, fit_w) else {
+            continue;
+        };
+        let mut font_a = f.font_a;
+        let mut size2 = f.size2;
+        if f.kind == crate::label::LabelKind::Name {
+            (font_a, size2) = name_font_fit(f, &item.namefirst, fit_w);
+        }
+        let style = match (font_a, size2) {
+            (true, false) => FieldStyle::Normal,
+            (false, false) => FieldStyle::FontB,
+            (true, true) => FieldStyle::DoubleH,
+            (false, true) => FieldStyle::Dbl,
+        };
+        let _ = job.field(
+            (f.x_mm * MM_TO_DOTS as f64).round() as u16,
+            (f.y_mm * MM_TO_DOTS as f64).round() as u16,
+            style,
+            &text,
+        );
+    }
     job.finish()
 }
 pub fn print_ruler_probe(cfg: &crate::config::Config) -> Result<(), PrintError> {
     if !cfg.printer.enabled {
         return Err(PrintError::PrinterDisabled);
     }
-    let bytes = grid_probe_bytes();
+    let conn = datastore::open(&cfg.db_path).map_err(PrintError::Store)?;
+    let spec = pick_layout(&conn, None)
+        .ok_or_else(|| PrintError::Io(std::io::Error::other("нет раскладки")))?;
+    let item = datastore::PluItem {
+        plu: "2100001".into(),
+        price: 47999,
+        card_price: None,
+        itemcode: "1".into(),
+        namefirst: "БАКЛАЖАНЫ ИМПОРТ КГ".into(),
+        namesecond: String::new(),
+        groupcode: "1".into(),
+        shelflife: String::new(),
+    };
+    let bytes = grid_probe_bytes(&spec, &item);
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
