@@ -62,6 +62,20 @@ fn font_by_height(h: f64) -> (&'static FontTable, i32) {
         (&FONT_B, 1)
     }
 }
+pub fn ruler_probe_bitmap() -> Bitmap {
+    let mut bmp = Bitmap::new(448, 320);
+    let m = MARGIN_DOTS;
+    for (i, y_mm) in [0u32, 10, 20, 30].iter().enumerate() {
+        let y0 = (y_mm * 8) as i32;
+        for y in y0..y0 + 16 {
+            for x in m + 64..bmp.w as i32 - m {
+                bmp.set(x, y);
+            }
+        }
+        bmp.text(&FONT_A, &i.to_string(), m + 2, y0, 1, true);
+    }
+    bmp
+}
 pub fn probe_bitmap(
     spec: &crate::label::LabelSpec,
     item: &datastore::PluItem,
