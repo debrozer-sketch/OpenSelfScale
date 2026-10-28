@@ -106,6 +106,7 @@ button:disabled { cursor:default; opacity:.45; }
 .print .field-tag { display:none!important; }
 .field-text { position:absolute; inset:0; overflow:visible; white-space:nowrap; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; transform-origin:top left; }
 .unprintable { position:absolute; top:0; bottom:0; background:repeating-linear-gradient(45deg,rgb(220 38 38 / 10%) 0 5px,transparent 5px 10px); border-left:1px dashed rgb(220 38 38 / 45%); pointer-events:none; z-index:1; }
+.unprintable.hband { border-left:none; border-top:1px dashed rgb(220 38 38 / 45%); }
 .field-text .char-cell { position:absolute; top:0; display:flex; align-items:center; justify-content:center; line-height:1; }
 .barcode { position:absolute; inset:0; overflow:visible; }
 .barcode i { position:absolute; top:0; background:#14181c; }

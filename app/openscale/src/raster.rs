@@ -187,7 +187,7 @@ mod tests {
         let bytes = raster_bytes(&bmp);
         assert_eq!(&bytes[..2], &[escpos::ESC, b'@']);
         assert!(bytes.windows(8).any(|w| w == &[escpos::GS, b'v', b'0', 0x00, 56, 0, 40, 0]));
-        assert_eq!(bytes.len(), 2 + 8 * (8 + 56 * 40) + 2);
+        assert_eq!(bytes.len(), 4 + 8 * (8 + 56 * 40) + 2);
     }
 }
 
