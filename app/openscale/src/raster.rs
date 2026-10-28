@@ -164,6 +164,23 @@ pub fn raster_bytes_bands(bmp: &Bitmap, band_rows: usize) -> Vec<u8> {
     out.extend_from_slice(&[escpos::GS, 0x0C]);
     out
 }
+pub fn raster_bytes_pagemode(bmp: &Bitmap) -> Vec<u8> {
+    let mut job = escpos::LabelJob::begin((bmp.w as u16, bmp.h as u16));
+    let w = bmp.w;
+    for band_y in (0..bmp.h).step_by(24) {
+        let mut data = vec![0u8; w * 3];
+        for col in 0..w {
+            for k in 0..24 {
+                let y = band_y + k;
+                if y < bmp.h && bmp.rows[y * w + col] == 1 {
+                    data[col * 3 + k / 8] |= 0x80 >> (k % 8);
+                }
+            }
+        }
+        job.bit_image(0, band_y as u16, w as u16, &data);
+    }
+    job.finish()
+}
 pub fn raster_bytes_single(bmp: &Bitmap) -> Vec<u8> {
     raster_bytes_bands(bmp, bmp.h)
 }

@@ -106,6 +106,16 @@ impl LabelJob {
         self.buf.extend_from_slice(&encoded);
         Ok(self)
     }
+    pub fn bit_image(&mut self, x: u16, y: u16, cols: u16, data: &[u8]) -> &mut Self {
+        let [xl, xh] = le16(x);
+        self.buf.extend_from_slice(&[ESC, b'$', xl, xh]);
+        let [yl, yh] = le16(y);
+        self.buf.extend_from_slice(&[GS, b'$', yl, yh]);
+        self.buf.extend_from_slice(&[ESC, b'*', 33]);
+        self.buf.extend_from_slice(&le16(cols));
+        self.buf.extend_from_slice(data);
+        self
+    }
     pub fn barcode_ean13(
         &mut self,
         x: u16,
