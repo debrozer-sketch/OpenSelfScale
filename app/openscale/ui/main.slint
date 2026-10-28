@@ -856,7 +856,7 @@ export component MainWindow inherits Window {
             background: #FFFFFF;
             popup-panel-ta := TouchArea { }
             Rectangle {
-                x: root.card-show-name ? 24px : 220px;
+                x: 24px;
                 y: 24px;
                 width: 280px;
                 height: 280px;
@@ -882,48 +882,21 @@ export component MainWindow inherits Window {
                 color: #1A1E24;
             }
             Text {
-                x: 328px; y: 100px;
+                x: 328px; y: root.card-show-name ? 100px : 24px;
                 width: 368px; height: 32px;
-                visible: root.card-show-name;
                 text: "Цена: " + root.popup-plu.price;
                 font-size: 22px;
                 vertical-alignment: center;
                 color: #1A1E24;
             }
-            if root.popup-plu.card-price != "" && root.card-show-name : Text {
-                x: 328px; y: 136px;
+            if root.popup-plu.card-price != "" : Text {
+                x: 328px; y: root.card-show-name ? 136px : 60px;
                 width: 368px; height: 32px;
                 text: "По скидочной карте: " + root.popup-plu.card-price;
                 font-size: 18px;
                 font-weight: 700;
                 vertical-alignment: center;
                 color: #2FA36B;
-            }
-            if !root.card-show-name && (root.popup-plu.price != "" || root.popup-plu.card-price != "") : Rectangle {
-                x: 428px; y: 236px;
-                width: 244px; height: root.popup-plu.card-price != "" ? 68px : 44px;
-                border-radius: 10px;
-                background: rgba(255, 255, 255, 0.88);
-                if root.card-show-name == false : Text {
-                    x: 12px; y: 0px;
-                    width: parent.width - 24px;
-                    height: 44px;
-                    text: root.popup-plu.price;
-                    font-size: 24px;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                    color: #1A1E24;
-                }
-                if root.popup-plu.card-price != "" : Text {
-                    x: 12px; y: 40px;
-                    width: parent.width - 24px;
-                    height: 26px;
-                    text: "по карте " + root.popup-plu.card-price;
-                    font-size: 16px;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                    color: #2FA36B;
-                }
             }
             if !root.popup-empty : Text {
                 x: 24px; y: 312px;

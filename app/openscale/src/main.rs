@@ -300,6 +300,11 @@ fn run_kiosk(cfg: config::Config) {
         palette,
         palette_names,
     };
+    {
+        let ui = ui.as_weak().upgrade().expect("UI init");
+        ui.set_card_show_name(ctx.trade.card_show_name.get());
+        ui.set_catalog_back_btn(ctx.trade.catalog_back.get());
+    }
     let flow_handles = flow::install(&ctx);
     settings::install(&ctx, &flow_handles);
     match datastore::open(&cfg.db_path) {
