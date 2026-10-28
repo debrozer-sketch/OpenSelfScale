@@ -1436,9 +1436,10 @@ fn grid_probe_bytes(spec: &crate::label::LabelSpec, item: &datastore::PluItem) -
     for f in &spec.fields {
         if f.kind == crate::label::LabelKind::Barcode {
             let payload = ean13_payload(item, 1350);
+            let bars_top = ((f.y_mm + BARCODE_HEIGHT_MM * if f.size2 { 2.0 } else { 1.0 }) * MM_TO_DOTS as f64).round() as u16;
             let _ = job.barcode_ean13(
                 (f.x_mm * MM_TO_DOTS as f64).round() as u16,
-                ((f.y_mm + 6.0) * MM_TO_DOTS as f64).round() as u16,
+                bars_top,
                 &payload,
                 if f.size2 { 4 } else { 2 },
                 0x30,
@@ -1456,8 +1457,8 @@ fn grid_probe_bytes(spec: &crate::label::LabelSpec, item: &datastore::PluItem) -
         let style = match (font_a, size2) {
             (true, false) => FieldStyle::Normal,
             (false, false) => FieldStyle::FontB,
-            (true, true) => FieldStyle::DoubleH,
-            (false, true) => FieldStyle::Dbl,
+            (true, true) => FieldStyle::Dbl,
+            (false, true) => FieldStyle::DblB,
         };
         let _ = job.field(
             (f.x_mm * MM_TO_DOTS as f64).round() as u16,
