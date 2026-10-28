@@ -1465,7 +1465,7 @@ pub fn grid_probe_bytes() -> Vec<u8> {
         }
         job.raw(&[escpos::ESC, b'*', 33, 0xC0, 0x01]);
         job.raw(&data);
-        job.raw(&[0x0A]);
+        job.raw(&[escpos::ESC, b'J', 24]);
     }
     job.raw(&[escpos::ESC, b'3', 0x00]);
     for mm in [10u16, 20, 30, 40, 50] {
