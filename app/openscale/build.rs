@@ -18,7 +18,7 @@ fn table(
     for ch in chars {
         let (m, cov) = font.rasterize(ch, px);
         let mut cell = vec![0u8; (advance * h) as usize];
-        let top = baseline as i32 - m.ymin as i32;
+        let top = baseline as i32 - (m.bounds.ymin + m.bounds.height).round() as i32;
         let x0 = (advance as i32 - m.width as i32) / 2;
         for ry in 0..m.height {
             for rx in 0..m.width {

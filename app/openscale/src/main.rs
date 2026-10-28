@@ -78,11 +78,21 @@ fn main() {
             }
         }
         Mode::RasterProbe => {
-            let bytes = raster::raster_bytes(&raster::alphabet_probe_bitmap());
+            let bytes = raster::raster_bytes_single(&raster::alphabet_probe_bitmap());
             match print::send_raw_probe(&cfg, &bytes) {
                 Ok(()) => println!("raster-probe: напечатано"),
                 Err(e) => {
                     eprintln!("raster-probe: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Mode::RasterSolid => {
+            let bytes = raster::raster_bytes(&raster::solid_probe_bitmap());
+            match print::send_raw_probe(&cfg, &bytes) {
+                Ok(()) => println!("raster-solid: напечатано"),
+                Err(e) => {
+                    eprintln!("raster-solid: {e}");
                     std::process::exit(1);
                 }
             }

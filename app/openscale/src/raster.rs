@@ -93,6 +93,13 @@ pub fn probe_bitmap(
     }
     bmp
 }
+pub fn solid_probe_bitmap() -> Bitmap {
+    let mut bmp = Bitmap::new(448, 40);
+    for px in bmp.rows.iter_mut() {
+        *px = 1;
+    }
+    bmp
+}
 pub fn alphabet_probe_bitmap() -> Bitmap {
     let mut bmp = Bitmap::new(448, 128);
     let rows = ["АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ", "абвгдежзийклмнопрстуфхцчшщъыьэюя"];
@@ -102,8 +109,11 @@ pub fn alphabet_probe_bitmap() -> Bitmap {
     bmp
 }
 pub fn raster_bytes(bmp: &Bitmap) -> Vec<u8> {
+    raster_bytes_bands(bmp, 40)
+}
+pub fn raster_bytes_bands(bmp: &Bitmap, band_rows: usize) -> Vec<u8> {
     let mut out = vec![escpos::ESC, b'@'];
-    for band in bmp.rows.chunks(bmp.w * 40) {
+    for band in bmp.rows.chunks(bmp.w * band_rows) {
         let rows = (band.len() / bmp.w) as u16;
         out.extend_from_slice(&[escpos::GS, b'v', b'0', 0x00]);
         out.extend_from_slice(&((bmp.w / 8) as u16).to_le_bytes());
@@ -118,6 +128,9 @@ pub fn raster_bytes(bmp: &Bitmap) -> Vec<u8> {
     }
     out.extend_from_slice(&[escpos::GS, 0x0C]);
     out
+}
+pub fn raster_bytes_single(bmp: &Bitmap) -> Vec<u8> {
+    raster_bytes_bands(bmp, bmp.h)
 }
 
 #[cfg(test)]
@@ -154,5 +167,21 @@ mod tests {
         assert_eq!(&bytes[..2], &[escpos::ESC, b'@']);
         assert!(bytes.windows(8).any(|w| w == &[escpos::GS, b'v', b'0', 0x00, 56, 0, 40, 0]));
         assert_eq!(bytes.len(), 2 + 8 * (8 + 56 * 40) + 2);
+    }
+}
+
+#[cfg(test)]
+mod ascii_debug {
+    use super::*;
+    #[test]
+    fn dump_first_row() {
+        let bmp = alphabet_probe_bitmap();
+        for y in 0..40 {
+            let mut line = String::new();
+            for x in 0..200 {
+                line.push(if bmp.rows[y * bmp.w + x] == 1 { '#' } else { '.' });
+            }
+            println!("{line}");
+        }
     }
 }

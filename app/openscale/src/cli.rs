@@ -15,6 +15,7 @@ pub enum Mode {
     GroupAssign(String, String),
     LabelProbe,
     RasterProbe,
+    RasterSolid,
 }
 pub struct Cli {
     pub mode: Mode,
@@ -92,6 +93,7 @@ pub fn parse_cli() -> Cli {
             }
             "--label-probe" => cli.mode = Mode::LabelProbe,
             "--raster-probe" => cli.mode = Mode::RasterProbe,
+            "--raster-solid" => cli.mode = Mode::RasterSolid,
             "--version" => {
                 println!("OpenScale kiosk {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
