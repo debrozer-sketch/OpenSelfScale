@@ -1418,15 +1418,15 @@ pub fn grid_probe_bytes() -> Vec<u8> {
     const W: usize = 448;
     const H: usize = 320;
     let mut job = LabelJob::begin((W as u16, H as u16));
-    for yi in 0..19u16 {
-        for xi in 0..27u16 {
-            let _ = job.field(16 + xi * 16, 16 + yi * 16, FieldStyle::FontB, "+");
+    for yi in 0..20u16 {
+        for xi in 0..28u16 {
+            let _ = job.field(xi * 16, yi * 16, FieldStyle::FontB, "+");
         }
     }
     for mm in [10u16, 20, 30, 40, 50] {
-        let _ = job.field(16 + mm * 8 + 2, 18, FieldStyle::FontB, &mm.to_string());
+        let _ = job.field(mm * 8 + 2, 2, FieldStyle::FontB, &mm.to_string());
         if mm <= 30 {
-            let _ = job.field(18, 16 + mm * 8 + 2, FieldStyle::FontB, &mm.to_string());
+            let _ = job.field(2, mm * 8 + 2, FieldStyle::FontB, &mm.to_string());
         }
     }
     job.finish()
