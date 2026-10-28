@@ -74,13 +74,13 @@ function perChar(field: LabelField, text: string) {
   return text.split("").map((c, i) => ({ c, x: i * cw, w: cw, ch }));
 }
 
-function effectiveFont(field: LabelField, layout: Layout) {
+function effectiveFont(field: LabelField, layout: Layout): { font: "A" | "B"; size: 1 | 2 } {
   if (field.kind !== "name") return { font: field.font, size: field.size };
   const fits = (font: "A" | "B", size: 1 | 2) =>
     field.x + SAMPLES.name.length * (font === "A" ? 1.5 : 1.125) * (size === 2 ? 2 : 1) <= printableWidth(layout);
   if (fits(field.font, field.size)) return { font: field.font, size: field.size };
   if (field.size === 2 && fits(field.font, 1)) return { font: field.font, size: 1 };
-  return { font: "B", size: 1 as const };
+  return { font: "B", size: 1 };
 }
 const withFont = (field: LabelField, layout: Layout): LabelField => field.kind === "name" ? { ...field, ...effectiveFont(field, layout) } : field;
 
