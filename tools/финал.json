@@ -1,0 +1,43 @@
+{
+  "format": 1,
+  "name": "58x40",
+  "width_mm": 58,
+  "height_mm": 40,
+  "fields": [
+    {
+      "kind": "name",
+      "x": 0.5,
+      "y": 4.5,
+      "font": "A",
+      "size": 2
+    },
+    {
+      "kind": "barcode",
+      "x": 2,
+      "y": 15.5,
+      "font": "A",
+      "size": 1
+    },
+    {
+      "kind": "weight",
+      "x": 30,
+      "y": 15,
+      "font": "A",
+      "size": 1
+    },
+    {
+      "kind": "price",
+      "x": 30,
+      "y": 25,
+      "font": "A",
+      "size": 1
+    },
+    {
+      "kind": "sum",
+      "x": 30,
+      "y": 30,
+      "font": "A",
+      "size": 1
+    }
+  ]
+}

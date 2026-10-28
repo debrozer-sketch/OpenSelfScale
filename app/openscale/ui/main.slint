@@ -2511,6 +2511,42 @@ export component MainWindow inherits Window {
                         y: r.y * root.labels-preview-scale * 1px;
                         width: r.w * root.labels-preview-scale * 1px;
                         height: r.h * root.labels-preview-scale * 1px;
+                        Text {
+                            x: 0;
+                            width: parent.width;
+                            height: parent.height;
+                            text: r.text;
+                            font-size: 36px;
+                            color: #000000;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            wrap: no-wrap;
+                            visible: r.kind == 3;
+                        }
+                    }
+                    for r in root.labels-preview-rows : Rectangle {
+                        x: r.x * root.labels-preview-scale * 1px;
+                        y: r.y * root.labels-preview-scale * 1px;
+                        width: r.w * root.labels-preview-scale * 1px;
+                        height: r.h * root.labels-preview-scale * 1px;
+                        Text {
+                            x: 0;
+                            width: parent.width;
+                            height: parent.height;
+                            text: r.text;
+                            font-size: 26px;
+                            color: #000000;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            wrap: no-wrap;
+                            visible: r.kind == 4;
+                        }
+                    }
+                    for r in root.labels-preview-rows : Rectangle {
+                        x: r.x * root.labels-preview-scale * 1px;
+                        y: r.y * root.labels-preview-scale * 1px;
+                        width: r.w * root.labels-preview-scale * 1px;
+                        height: r.h * root.labels-preview-scale * 1px;
                         visible: r.kind == 1;
                         background: #000000;
                     }

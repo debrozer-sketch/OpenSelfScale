@@ -144,6 +144,29 @@ fn spec_field_text(
     let fits = f.x_mm + full.chars().count() as f64 * cell <= width_mm;
     Some(if fits { full } else { value })
 }
+fn name_font_fit(f: &crate::label::LabelField, name: &str, printable_w: f64) -> (bool, bool) {
+    let fits = |fa: bool, s2: bool| {
+        let cell = (if fa { FONT_A_CELL_MM } else { FONT_B_CELL_MM }) * if s2 { 2.0 } else { 1.0 };
+        f.x_mm + name.chars().count() as f64 * cell <= printable_w
+    };
+    let (mut fa, mut s2) = (f.font_a, f.size2);
+    if fits(fa, s2) {
+        return (fa, s2);
+    }
+    if s2 {
+        s2 = false;
+        if fits(fa, s2) {
+            return (fa, s2);
+        }
+    }
+    if fa {
+        fa = false;
+        if fits(fa, s2) {
+            return (fa, s2);
+        }
+    }
+    (false, false)
+}
 pub fn preview_items(
     spec: &crate::label::LabelSpec,
     item: &PluItem,
@@ -155,9 +178,16 @@ pub fn preview_items(
     use crate::label::LabelKind;
     let mut out = Vec::new();
     for f in &spec.fields {
-        let mut cell = if f.font_a { FONT_A_CELL_MM } else { FONT_B_CELL_MM };
-        let mut height = if f.font_a { FONT_A_HEIGHT_MM } else { FONT_B_HEIGHT_MM };
-        if f.size2 {
+        let fit_w = (spec.width_mm as f64).min(PRINTABLE_WIDTH_MM);
+        let mut font_a = f.font_a;
+        let mut size2 = f.size2;
+        if f.kind == LabelKind::Name {
+            let name = item.namefirst.clone();
+            (font_a, size2) = name_font_fit(f, &name, fit_w);
+        }
+        let mut cell = if font_a { FONT_A_CELL_MM } else { FONT_B_CELL_MM };
+        let mut height = if font_a { FONT_A_HEIGHT_MM } else { FONT_B_HEIGHT_MM };
+        if size2 {
             cell *= 2.0;
             height *= 2.0;
         }
@@ -190,7 +220,6 @@ pub fn preview_items(
             }
             continue;
         }
-        let fit_w = (spec.width_mm as f64).min(PRINTABLE_WIDTH_MM);
         let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time, fit_w) else {
             continue;
         };
@@ -264,7 +293,13 @@ pub fn build_label_from_spec(
         (spec.height_mm * MM_TO_DOTS) as u16,
     ));
     for f in &spec.fields {
-        let style = match (f.font_a, f.size2) {
+        let fit_w = (spec.width_mm as f64).min(PRINTABLE_WIDTH_MM);
+        let mut font_a = f.font_a;
+        let mut size2 = f.size2;
+        if f.kind == LabelKind::Name {
+            (font_a, size2) = name_font_fit(f, &item.namefirst, fit_w);
+        }
+        let style = match (font_a, size2) {
             (true, false) => FieldStyle::Normal,
             (false, false) => FieldStyle::FontB,
             (true, true) => FieldStyle::Dbl,
@@ -273,10 +308,10 @@ pub fn build_label_from_spec(
         let x = (f.x_mm * MM_TO_DOTS as f64).round() as u16;
         let y = (f.y_mm * MM_TO_DOTS as f64).round() as u16;
         if f.kind == LabelKind::Barcode {
-            job.barcode_ean13(x, y, &ean13_payload(item, weight_g), if f.size2 { 4 } else { 2 })?;
+            let bars_top = ((f.y_mm + BARCODE_HEIGHT_MM * if f.size2 { 2.0 } else { 1.0 }) * MM_TO_DOTS as f64).round() as u16;
+            job.barcode_ean13(x, bars_top, &ean13_payload(item, weight_g), if f.size2 { 4 } else { 2 })?;
             continue;
         }
-        let fit_w = (spec.width_mm as f64).min(PRINTABLE_WIDTH_MM);
         let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time, fit_w) else {
             continue;
         };

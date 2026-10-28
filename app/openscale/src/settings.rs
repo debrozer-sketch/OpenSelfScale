@@ -1711,10 +1711,13 @@ fn show_preview(
             text: p.text.into(),
             kind: if p.barcode {
                 1
-            } else if p.h_mm >= 2.5 {
-                0
             } else {
-                2
+                match (p.h_mm * 1000.0).round() as i32 {
+                    6000 => 3,
+                    4250 => 4,
+                    3000 => 0,
+                    _ => 2,
+                }
             },
         })
         .collect();
