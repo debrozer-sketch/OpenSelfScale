@@ -21,6 +21,8 @@ pub struct ConfigFile {
     #[serde(default)]
     pub catalog_back_btn: Option<bool>,
     #[serde(default)]
+    pub item_cols: Option<i64>,
+    #[serde(default)]
     pub depts: Vec<DeptEntry>,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -70,6 +72,7 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
     let minw = cal("min_weight_g").unwrap_or(10);
     let cardname = cal("card_show_name").unwrap_or(1);
     let catback = cal("catalog_back_btn").unwrap_or(1);
+    let itemcols = cal("item_cols").unwrap_or(9);
     let depts: Vec<DeptEntry> = datastore::depts_list(&conn)
         .map_err(|e| format!("отделы: {e}"))?
         .into_iter()
@@ -88,6 +91,7 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
         min_weight_g: Some(minw.clamp(10, 1000)),
         card_show_name: Some(cardname != 0),
         catalog_back_btn: Some(catback != 0),
+        item_cols: Some(itemcols.clamp(4, 12)),
         depts,
     };
     let dir = export_dir(cfg);
@@ -217,6 +221,9 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
     if let Some(v) = f.catalog_back_btn {
         datastore::set_calibration(&tx, "catalog_back_btn", i64::from(v)).map_err(|e| e.to_string())?;
     }
+    if let Some(v) = f.item_cols {
+        datastore::set_calibration(&tx, "item_cols", v.clamp(4, 12)).map_err(|e| e.to_string())?;
+    }
     if !f.depts.is_empty() {
         let entries: Vec<(String, Option<String>, Option<String>)> = f
             .depts
@@ -294,6 +301,7 @@ mod tests {
             min_weight_g: Some(20),
             card_show_name: Some(false),
             catalog_back_btn: Some(false),
+            item_cols: Some(8),
             depts: vec![
                 DeptEntry::Name("ОВОЩИ".into()),
                 DeptEntry::Detailed {
@@ -342,6 +350,7 @@ mod tests {
             min_weight_g: Some(0),
             card_show_name: None,
             catalog_back_btn: None,
+            item_cols: None,
             depts: vec![DeptEntry::Name("А".into())],
         };
         let p = preview(&f);

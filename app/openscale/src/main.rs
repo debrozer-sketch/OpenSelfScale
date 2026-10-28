@@ -251,9 +251,15 @@ fn run_kiosk(cfg: config::Config) {
     let trade = {
         let db = datastore::open(&cfg.db_path).ok();
         let cal = |key: &str| db.as_ref().and_then(|c| cal_value(c, key));
+        let max_dept_cols = ((ui.get_screen_w() - 8.0) / 203.0) as i64;
+        let max_dept_cols = max_dept_cols.clamp(1, 10);
         crate::context::TradeSettings {
             cols: std::rc::Rc::new(std::cell::Cell::new(
-                cal("dept_cols").map(|v| v.clamp(1, 5) as usize).unwrap_or(2).max(1),
+                cal("dept_cols")
+                    .map(|v| v.clamp(1, max_dept_cols) as usize)
+                    .unwrap_or(2)
+                    .clamp(1, max_dept_cols as usize)
+                    .max(1),
             )),
             sort_alpha: std::rc::Rc::new(std::cell::Cell::new(cal("dept_sort_alpha").unwrap_or(1) != 0)),
             rounding: std::rc::Rc::new(std::cell::Cell::new(cal("price_rounding").unwrap_or(0).clamp(0, 2))),
@@ -265,6 +271,9 @@ fn run_kiosk(cfg: config::Config) {
             )),
             catalog_back: std::rc::Rc::new(std::cell::Cell::new(
                 cal("catalog_back_btn").map(|v| v != 0).unwrap_or(true),
+            )),
+            item_cols: std::rc::Rc::new(std::cell::Cell::new(
+                cal("item_cols").map(|v| v.clamp(4, 12) as usize).unwrap_or(9).max(2),
             )),
         }
     };

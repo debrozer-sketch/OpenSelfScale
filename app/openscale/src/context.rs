@@ -17,6 +17,7 @@ pub struct TradeSettings {
     pub min_weight_g: Rc<std::cell::Cell<f64>>,
     pub card_show_name: Rc<std::cell::Cell<bool>>,
     pub catalog_back: Rc<std::cell::Cell<bool>>,
+    pub item_cols: Rc<std::cell::Cell<usize>>,
 }
 pub struct AppContext {
     pub ui: Weak<MainWindow>,

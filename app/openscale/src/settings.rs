@@ -41,6 +41,7 @@ fn refresh_setting_labels(
         ui.set_card_show_name(trade.card_show_name.get());
         ui.set_goods_backbtn(if trade.catalog_back.get() { "ВКЛ" } else { "ВЫКЛ" }.into());
         ui.set_catalog_back_btn(trade.catalog_back.get());
+        ui.set_goods_itemscols(format!("{} столбцов", trade.item_cols.get()).into());
         ui.set_trade_rounding(
             match trade.rounding.get() {
                 1 => "до 10 коп",
@@ -794,7 +795,14 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     kiosk.borrow_mut().admin_stage = 3;
                 }
                 "cols" => {
-                    let next = trade.cols.get().max(1) % 5 + 1;
+                    let max_cols = (((ui_handle
+                        .upgrade()
+                        .map(|u| u.get_screen_w())
+                        .unwrap_or(1024.0)
+                        - 8.0)
+                        / 203.0) as usize)
+                        .clamp(1, 10);
+                    let next = trade.cols.get().clamp(1, max_cols.max(1)) % max_cols.max(1) + 1;
                     let relayout = relayout.clone();
                     let trade = trade.clone();
                     let ui_handle = ui_handle.clone();
@@ -844,6 +852,21 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             "меню: кнопка «назад» в каталоге: {}",
                             if v != 0 { "вкл" } else { "выкл" }
                         );
+                    });
+                }
+                "itemscols" => {
+                    let next = {
+                        let cur = trade.item_cols.get().clamp(4, 12);
+                        if cur >= 12 { 4 } else { cur + 1 }
+                    };
+                    let relayout = relayout.clone();
+                    let trade = trade.clone();
+                    let ui_handle = ui_handle.clone();
+                    save_setting(&cfg.db_path, "item_cols", next as i64, |v| {
+                        trade.item_cols.set(v.clamp(4, 12) as usize);
+                        relayout();
+                        refresh_setting_labels(&ui_handle, &trade, &idle_secs);
+                        log::info!("меню: столбцов с товарами: {v}");
                     });
                 }
                 "rounding" => {

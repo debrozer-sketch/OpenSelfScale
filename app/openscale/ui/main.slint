@@ -120,20 +120,22 @@ component DeptTile inherits Rectangle {
 component PluCard inherits Rectangle {
     in property <int> idx;
     in property <int> cell-offset: 0;
+    in property <int> cols: 9;
+    in property <length> col-w: 108px;
     in property <PluTile> p;
     in property <bool> active: true;
     in property <bool> card-show-name: true;
     callback tapped;
-    width: 108px;
+    width: root.col-w;
     height: 178px;
-    x: 8px + Math.mod(self.idx + self.cell-offset, 9) * 112px;
-    y: 56px + Math.floor((self.idx + self.cell-offset) / 9) * 182px;
+    x: 8px + Math.mod(self.idx + self.cell-offset, self.cols) * (root.col-w + 8px);
+    y: 56px + Math.floor((self.idx + self.cell-offset) / self.cols) * 182px;
     border-radius: 12px;
     background: !root.active ? #EDEFF2 : ta.pressed ? #E4E8ED : #FFFFFF;
     Rectangle {
         x: 2px;
         y: root.card-show-name ? 2px : 21px;
-        width: 104px;
+        width: parent.width - 4px;
         height: 104px;
         border-radius: 10px;
         clip: true;
@@ -250,6 +252,8 @@ export component MainWindow inherits Window {
     in property <int> items-page-no: 0;
     in property <int> items-cell-offset: 0;
     in property <int> items-pages-total: 1;
+    in property <int> items-cols: 9;
+    in property <length> items-col-w: 108px;
     in property <int> dept-pages-total: 1;
     in property <PluTile> popup-plu;
     in property <bool> popup-open: false;
@@ -328,6 +332,7 @@ export component MainWindow inherits Window {
     in property <string> goods-idle: "30 с";
     in property <string> goods-cardname: "ВКЛ";
     in property <string> goods-backbtn: "ВКЛ";
+    in property <string> goods-itemscols: "9 столбцов";
     in property <bool> card-show-name: true;
     in property <bool> catalog-back-btn: true;
     in property <int> header-page: 0;
@@ -583,7 +588,7 @@ export component MainWindow inherits Window {
             Text {
                 width: parent.width;
                 height: parent.height;
-                text: "Категории";
+                text: "НАЗАД";
                 font-size: 15px;
                 font-weight: 700;
                 overflow: elide;
@@ -637,15 +642,17 @@ export component MainWindow inherits Window {
         for p[i] in root.items : PluCard {
             idx: i;
             cell-offset: root.items-cell-offset;
+            cols: root.items-cols;
+            col-w: root.items-col-w;
             p: p;
             active: root.can-tap;
             card-show-name: root.card-show-name;
             tapped => { root.plu-tapped(p.id); }
         }
         if root.items-page-no < root.items-pages-total - 1 : Rectangle {
-            x: 8px + Math.mod(root.items.length + root.items-cell-offset, 9) * 112px;
-            y: 56px + Math.floor((root.items.length + root.items-cell-offset) / 9) * 182px;
-            width: 108px;
+            x: 8px + Math.mod(root.items.length + root.items-cell-offset, root.items-cols) * (root.items-col-w + 8px);
+            y: 56px + Math.floor((root.items.length + root.items-cell-offset) / root.items-cols) * 182px;
+            width: root.items-col-w;
             height: 178px;
             border-radius: 12px;
             border-width: 2px;
@@ -1782,6 +1789,7 @@ export component MainWindow inherits Window {
                 { label: "Возврат на главный экран", id: "idletimeout", admin: true },
                 { label: "Название в карточке", id: "cardname", admin: true },
                 { label: "Кнопка «← Назад» в каталоге", id: "backbtn", admin: true },
+                { label: "Столбцов с товарами", id: "itemscols", admin: true },
                 { label: "Экспорт конфигурации", id: "export", admin: true },
                 { label: "Импорт конфигурации", id: "import", admin: true },
             ];
@@ -1855,6 +1863,17 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.goods-backbtn;
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: #4A5460;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+                if r.id == "itemscols" : Text {
+                    x: parent.width - 230px;
+                    width: 190px;
+                    height: parent.height;
+                    text: root.goods-itemscols;
                     font-size: 26px;
                     font-weight: 700;
                     color: #4A5460;

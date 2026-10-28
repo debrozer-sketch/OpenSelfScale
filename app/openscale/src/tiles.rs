@@ -25,8 +25,13 @@ fn load_img_cached(path: &Path) -> Option<slint::Image> {
 pub fn clear_img_cache() {
     IMG_CACHE.with(|c| c.borrow_mut().clear());
 }
-pub fn items_pages(total: usize) -> usize {
-    if total <= 26 { 1 } else { 1 + (total - 26).div_ceil(25) }
+pub fn items_pages(total: usize, cap: usize) -> usize {
+    let cap = cap.max(3);
+    if total <= cap - 1 {
+        1
+    } else {
+        1 + (total - (cap - 1)).div_ceil(cap - 2)
+    }
 }
 pub fn tile_of(p: &datastore::PluEntry, img_dir: &Path) -> crate::PluTile {
     let dir = img_dir.join("plu");
@@ -151,11 +156,13 @@ mod tests {
     }
     #[test]
     fn grid_pagination_matches_spec() {
-        assert_eq!(items_pages(0), 1);
-        assert_eq!(items_pages(26), 1);
-        assert_eq!(items_pages(27), 2);
-        assert_eq!(items_pages(51), 2);
-        assert_eq!(items_pages(52), 3);
+    assert_eq!(items_pages(0, 27), 1);
+    assert_eq!(items_pages(26, 27), 1);
+    assert_eq!(items_pages(27, 27), 2);
+    assert_eq!(items_pages(51, 27), 2);
+    assert_eq!(items_pages(52, 27), 3);
+    assert_eq!(items_pages(17, 18), 1);
+    assert_eq!(items_pages(18, 18), 2);
     }
     #[test]
     fn hl_parts_cuts_by_chars_not_bytes() {
