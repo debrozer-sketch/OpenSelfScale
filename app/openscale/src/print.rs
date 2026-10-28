@@ -178,7 +178,7 @@ pub fn preview_items(
     use crate::label::LabelKind;
     let mut out = Vec::new();
     for f in &spec.fields {
-        let fit_w = (spec.width_mm as f64).min(PRINTABLE_WIDTH_MM);
+        let fit_w = (spec.width_mm as f64 - 4.0).min(PRINTABLE_WIDTH_MM);
         let mut font_a = f.font_a;
         let mut size2 = f.size2;
         if f.kind == LabelKind::Name {
@@ -293,7 +293,7 @@ pub fn build_label_from_spec(
         (spec.height_mm * MM_TO_DOTS) as u16,
     ));
     for f in &spec.fields {
-        let fit_w = (spec.width_mm as f64).min(PRINTABLE_WIDTH_MM);
+        let fit_w = (spec.width_mm as f64 - 4.0).min(PRINTABLE_WIDTH_MM);
         let mut font_a = f.font_a;
         let mut size2 = f.size2;
         if f.kind == LabelKind::Name {
@@ -1429,6 +1429,10 @@ pub fn grid_probe_bytes() -> Vec<u8> {
             let _ = job.field(2, mm * 8 + 2, FieldStyle::FontB, &mm.to_string());
         }
     }
+    let _ = job.field(4, 12 * 8, FieldStyle::FontB, "24");
+    let _ = job.field(32 * 8, 12 * 8, FieldStyle::FontB, "48");
+    let _ = job.barcode_ean13(16, 20 * 8, "210000000001", 2, 0x18);
+    let _ = job.barcode_ean13(32 * 8, 20 * 8, "210000000001", 2, 0x30);
     job.finish()
 }
 pub fn print_ruler_probe(cfg: &crate::config::Config) -> Result<(), PrintError> {

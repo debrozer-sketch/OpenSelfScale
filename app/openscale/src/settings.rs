@@ -1704,8 +1704,8 @@ fn show_preview(
     let rows: Vec<crate::LabelPreviewRow> = preview
         .into_iter()
         .map(|p| crate::LabelPreviewRow {
-            x: p.x_mm as f32,
-            y: p.y_mm as f32,
+            x: (p.x_mm + 2.0) as f32,
+            y: (p.y_mm + 2.0) as f32,
             w: p.w_mm as f32,
             h: p.h_mm as f32,
             text: p.text.into(),
