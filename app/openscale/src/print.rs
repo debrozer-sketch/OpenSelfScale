@@ -77,7 +77,7 @@ pub fn build_label(
     job.field(layout.weight.0, layout.weight.1, FieldStyle::FontB, &kg)?
         .field(layout.price.0, layout.price.1, FieldStyle::FontB, &price_r)?
         .field(layout.sum.0, layout.sum.1, FieldStyle::DoubleH, &sum_r)?
-        .barcode_ean13(layout.barcode.0, layout.barcode.1, &ean13_payload(item, weight_g), 2)?;
+        .barcode_ean13(layout.barcode.0, layout.barcode.1, &ean13_payload(item, weight_g), 2, 0x30)?;
     Ok(job.finish())
 }
 fn money(kop: i64) -> String {
@@ -309,7 +309,7 @@ pub fn build_label_from_spec(
         let y = (f.y_mm * MM_TO_DOTS as f64).round() as u16;
         if f.kind == LabelKind::Barcode {
             let bars_top = ((f.y_mm + BARCODE_HEIGHT_MM * if f.size2 { 2.0 } else { 1.0 }) * MM_TO_DOTS as f64).round() as u16;
-            job.barcode_ean13(x, bars_top, &ean13_payload(item, weight_g), if f.size2 { 4 } else { 2 })?;
+            job.barcode_ean13(x, bars_top, &ean13_payload(item, weight_g), if f.size2 { 4 } else { 2 }, 0x30)?;
             continue;
         }
         let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time, fit_w) else {
@@ -1414,39 +1414,54 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
-pub fn print_raster_probe(
-    cfg: &crate::config::Config,
-    spec: &crate::label::LabelSpec,
-    item: &datastore::PluItem,
-    weight_g: u32,
-    sum_kop: i64,
-    date: &str,
-    time: &str,
-) -> Result<(), PrintError> {
-    if !cfg.printer.enabled {
-        return Err(PrintError::PrinterDisabled);
+pub fn grid_probe_bytes() -> Vec<u8> {
+    const W: usize = 448;
+    const H: usize = 320;
+    let mut grid = vec![0u8; W / 8 * H];
+    let mut set = |x: usize, y: usize| grid[y * (W / 8) + x / 8] |= 0x80 >> (x % 8);
+    for k in 0..=18usize {
+        let y = 16 + k * 16;
+        if y >= H {
+            break;
+        }
+        for x in 16..W - 16 {
+            set(x, y);
+            if k % 5 == 0 && y + 1 < H {
+                set(x, y + 1);
+            }
+        }
     }
-    let bmp = crate::raster::probe_bitmap(spec, item, weight_g, sum_kop, date, time);
-    let bytes = crate::raster::raster_bytes(&bmp);
-    request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
-    Ok(())
+    for k in 0..=26usize {
+        let x = 16 + k * 16;
+        if x >= W - 16 {
+            break;
+        }
+        for y in 16..H - 16 {
+            set(x, y);
+            if k % 5 == 0 && x + 1 < W {
+                set(x + 1, y);
+            }
+        }
+    }
+    let mut job = LabelJob::begin((W as u16, H as u16));
+    job.raw(&[escpos::ESC, b'$', 0, 0]);
+    job.raw(&[escpos::GS, b'$', 0, 0]);
+    job.raw(&[escpos::GS, b'v', b'0', 0x00, (W / 8) as u8, 0, 0x40, 0x01]);
+    job.raw(&grid);
+    for mm in [10u16, 20, 30, 40, 50] {
+        let _ = job.field(16 + mm * 8 + 2, 18, FieldStyle::FontB, &mm.to_string());
+        if mm <= 30 {
+            let _ = job.field(18, 16 + mm * 8 + 2, FieldStyle::FontB, &mm.to_string());
+        }
+    }
+    job.finish()
 }
-pub fn send_raw_probe(cfg: &crate::config::Config, bytes: &[u8]) -> Result<(), PrintError> {
+pub fn print_ruler_probe(cfg: &crate::config::Config) -> Result<(), PrintError> {
     if !cfg.printer.enabled {
         return Err(PrintError::PrinterDisabled);
     }
-    let port = serialport::new(&cfg.printer.port, cfg.printer.baud)
-        .timeout(std::time::Duration::from_millis(1500))
-        .open()
-        .map_err(|e| PrintError::Io(std::io::Error::other(e.to_string())))?;
-    let mut port = port;
-    for chunk in bytes.chunks(2048) {
-        port.write_all(chunk)
-            .map_err(|e| PrintError::Io(std::io::Error::other(e.to_string())))?;
-        port.flush()
-            .map_err(|e| PrintError::Io(std::io::Error::other(e.to_string())))?;
-        std::thread::sleep(Duration::from_millis(300));
-    }
+    let bytes = grid_probe_bytes();
+    request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
 pub fn print_for_plu(

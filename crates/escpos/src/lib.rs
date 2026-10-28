@@ -106,22 +106,13 @@ impl LabelJob {
         self.buf.extend_from_slice(&encoded);
         Ok(self)
     }
-    pub fn bit_image(&mut self, x: u16, y: u16, cols: u16, data: &[u8]) -> &mut Self {
-        let [xl, xh] = le16(x);
-        self.buf.extend_from_slice(&[ESC, b'$', xl, xh]);
-        let [yl, yh] = le16(y);
-        self.buf.extend_from_slice(&[GS, b'$', yl, yh]);
-        self.buf.extend_from_slice(&[ESC, b'*', 33]);
-        self.buf.extend_from_slice(&le16(cols));
-        self.buf.extend_from_slice(data);
-        self
-    }
     pub fn barcode_ean13(
         &mut self,
         x: u16,
         y: u16,
         digits: &str,
         module_dots: u8,
+        height_dots: u8,
     ) -> Result<&mut Self, EscPosError> {
         if digits.len() != 12 || !digits.bytes().all(|b| b.is_ascii_digit()) {
             return Err(EscPosError::InvalidBarcode(digits.into()));
@@ -131,7 +122,7 @@ impl LabelJob {
         let [yl, yh] = le16(y);
         self.buf.extend_from_slice(&[GS, b'$', yl, yh]);
         self.buf.extend_from_slice(&[GS, b'w', module_dots]);
-        self.buf.extend_from_slice(&[GS, b'h', 0x30]);
+        self.buf.extend_from_slice(&[GS, b'h', height_dots]);
         self.buf.extend_from_slice(&[GS, b'H', 0x02]); 
         self.buf.extend_from_slice(&[GS, b'k', 0x02]);
         self.buf.extend_from_slice(digits.as_bytes());
@@ -341,7 +332,7 @@ mod tests {
     #[test]
     fn barcode_matches_dump() {
         let mut job = LabelJob::begin((448, 232));
-        job.barcode_ean13(0, 0, "210213601350", 2).unwrap();
+        job.barcode_ean13(0, 0, "210213601350", 2, 0x30).unwrap();
         let out = job.finish();
         let probe = window(
             &out,
@@ -352,8 +343,8 @@ mod tests {
     #[test]
     fn barcode_rejects_bad_input() {
         let mut job = LabelJob::begin((448, 232));
-        assert!(job.barcode_ean13(0, 0, "123", 2).is_err());
-        assert!(job.barcode_ean13(0, 0, "21021360135a", 2).is_err());
+    assert!(job.barcode_ean13(0, 0, "123", 2, 0x30).is_err());
+    assert!(job.barcode_ean13(0, 0, "21021360135a", 2, 0x30).is_err());
     }
     #[test]
     fn cp866_unknown_char_becomes_question() {

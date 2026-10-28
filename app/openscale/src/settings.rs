@@ -1562,44 +1562,16 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let cfg = cfg.clone();
         move || {
             if let Some(ui) = ui_handle.upgrade() {
-                ui.set_labels_status("Печатаю растровый макет с сеткой…".into());
+                ui.set_labels_status("Печатаю сетку координат…".into());
             }
             let cfg = cfg.clone();
             let ui_handle = ui_handle.clone();
             std::thread::spawn(move || {
-                let conn = datastore::open(&cfg.db_path);
-                let res = match conn {
-                    Ok(conn) => {
-                        let spec = crate::print::pick_layout(&conn, None);
-                        let demo = datastore::PluItem {
-                            plu: "2100001".into(),
-                            price: 47999,
-                            card_price: None,
-                            itemcode: "1".into(),
-                            namefirst: "БАКЛАЖАНЫ ИМПОРТ КГ".into(),
-                            namesecond: String::new(),
-                            groupcode: "1".into(),
-                            shelflife: String::new(),
-                        };
-                        match spec {
-                            Some(spec) => crate::print::print_raster_probe(
-                                &cfg,
-                                &spec,
-                                &demo,
-                                1350,
-                                64800,
-                                "28.10.2026",
-                                "12:00",
-                            ),
-                            None => Err(std::io::Error::other("нет активной раскладки").into()),
-                        }
-                    }
-                    Err(e) => Err(std::io::Error::other(e.to_string()).into()),
-                };
+                let res = crate::print::print_ruler_probe(&cfg);
                 let text = match res {
                     Ok(()) => {
-                        log::info!("меню: этикетки: растровый макет напечатан");
-                        "Растровый макет напечатан: сверьте сетку и значения".to_string()
+                        log::info!("меню: этикетки: сетка координат напечатана");
+                        "Сетка координат напечатана".to_string()
                     }
                     Err(e) => {
                         log::warn!("меню: этикетки: линейка: {e}");

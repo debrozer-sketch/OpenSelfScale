@@ -11,7 +11,6 @@ mod flow;
 mod label;
 mod net;
 mod print;
-mod raster;
 mod session;
 mod settings;
 mod setup;
@@ -73,26 +72,6 @@ fn main() {
                 Ok(report) => println!("{report}"),
                 Err(e) => {
                     eprintln!("label-probe: {e}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        Mode::RasterProbe => {
-            let bytes = raster::raster_bytes_single(&raster::ruler_probe_bitmap());
-            match print::send_raw_probe(&cfg, &bytes) {
-                Ok(()) => println!("raster-probe: напечатано"),
-                Err(e) => {
-                    eprintln!("raster-probe: {e}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        Mode::RasterSolid => {
-            let bytes = raster::raster_bytes(&raster::solid_probe_bitmap());
-            match print::send_raw_probe(&cfg, &bytes) {
-                Ok(()) => println!("raster-solid: напечатано"),
-                Err(e) => {
-                    eprintln!("raster-solid: {e}");
                     std::process::exit(1);
                 }
             }
