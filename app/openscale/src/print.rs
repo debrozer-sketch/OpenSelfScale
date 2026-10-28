@@ -1409,17 +1409,15 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     Ok(())
 }
 pub fn ruler_probe_bytes() -> Vec<u8> {
+    let cols = ["А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "К", "Л", "М"];
     let mut job = LabelJob::begin((448, 640));
-    for y in (0..=50).step_by(5) {
-        for x in (0..=55).step_by(5) {
-            let _ = job.field((x * 8) as u16, (y * 8) as u16, FieldStyle::Normal, "+");
+    for (ci, letter) in cols.iter().enumerate() {
+        let x = (ci as u16) * 40;
+        let _ = job.field(x + 2, 2, FieldStyle::FontB, letter);
+        for row in 1..=11u16 {
+            let y = (row - 1) * 40;
+            let _ = job.field(x + 2, y + 44, FieldStyle::FontB, &format!("{letter}{row}"));
         }
-    }
-    for x in (5..=55).step_by(5) {
-        let _ = job.field((x * 8 + 2) as u16, 4, FieldStyle::FontB, &x.to_string());
-    }
-    for y in (5..=50).step_by(5) {
-        let _ = job.field(4, (y * 8 + 4) as u16, FieldStyle::FontB, &y.to_string());
     }
     let barcode = |job: &mut LabelJob, x_dots: u16, h_dots: u8| {
         let y_dots: u16 = 58 * 8;
@@ -1432,7 +1430,8 @@ pub fn ruler_probe_bytes() -> Vec<u8> {
         job.raw(&seq);
     };
     barcode(&mut job, 16, 24);
-    barcode(&mut job, 240, 48);    job.raw(&[escpos::ESC, b'3', 0x00]);
+    barcode(&mut job, 240, 48);
+    job.raw(&[escpos::ESC, b'3', 0x00]);
     let _ = job.field(16, 74 * 8, FieldStyle::Normal, "X");
     job.raw(&[escpos::ESC, b'3', 0x18]);
     let _ = job.field(96, 74 * 8, FieldStyle::Normal, "X");
