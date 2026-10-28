@@ -1417,57 +1417,12 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
 pub fn grid_probe_bytes() -> Vec<u8> {
     const W: usize = 448;
     const H: usize = 320;
-    let mut grid = vec![0u8; W / 8 * H];
-    let mut set = |x: usize, y: usize| grid[y * (W / 8) + x / 8] |= 0x80 >> (x % 8);
-    for k in 0..=18usize {
-        let y = 16 + k * 16;
-        if y >= H {
-            break;
-        }
-        for x in 16..W - 16 {
-            set(x, y);
-            if k % 5 == 0 && y + 1 < H {
-                set(x, y + 1);
-            }
+    let mut job = LabelJob::begin((W as u16, H as u16));
+    for yi in 0..19u16 {
+        for xi in 0..27u16 {
+            let _ = job.field(16 + xi * 16, 16 + yi * 16, FieldStyle::FontB, "+");
         }
     }
-    for k in 0..=26usize {
-        let x = 16 + k * 16;
-        if x >= W - 16 {
-            break;
-        }
-        for y in 16..H - 16 {
-            set(x, y);
-            if k % 5 == 0 && x + 1 < W {
-                set(x + 1, y);
-            }
-        }
-    }
-    let mut job = LabelJob::begin((W as u16, 336));
-    job.raw(&[escpos::ESC, b'$', 0, 0]);
-    job.raw(&[escpos::GS, b'$', 0, 0]);
-    job.raw(&[escpos::ESC, b'3', 24]);
-    let cols = W as usize;
-    for band_y in (0..336usize).step_by(24) {
-        let mut data = vec![0u8; cols * 3];
-        for col in 0..cols {
-            for j in 0..3usize {
-                for b in 0..8usize {
-                    let row = band_y + j * 8 + b;
-                    if row >= 320 {
-                        continue;
-                    }
-                    if grid[row * (W / 8) + col / 8] & (0x80 >> (col % 8)) != 0 {
-                        data[col * 3 + j] |= 0x80 >> b;
-                    }
-                }
-            }
-        }
-        job.raw(&[escpos::ESC, b'*', 33, 0xC0, 0x01]);
-        job.raw(&data);
-        job.raw(&[escpos::ESC, b'J', 24]);
-    }
-    job.raw(&[escpos::ESC, b'3', 0x00]);
     for mm in [10u16, 20, 30, 40, 50] {
         let _ = job.field(16 + mm * 8 + 2, 18, FieldStyle::FontB, &mm.to_string());
         if mm <= 30 {
