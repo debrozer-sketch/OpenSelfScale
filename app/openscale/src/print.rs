@@ -133,7 +133,10 @@ fn spec_field_text(
     if caption.is_empty() {
         return Some(value);
     }
-    let cell = if f.font_a { FONT_A_CELL_MM } else { FONT_B_CELL_MM };
+    let mut cell = if f.font_a { FONT_A_CELL_MM } else { FONT_B_CELL_MM };
+    if f.size2 {
+        cell *= 2.0;
+    }
     let full = format!("{caption} {value}");
     let fits = f.x_mm + full.chars().count() as f64 * cell <= width_mm;
     Some(if fits { full } else { value })
@@ -234,12 +237,11 @@ pub fn build_label_from_spec(
         (spec.height_mm * MM_TO_DOTS) as u16,
     ));
     for f in &spec.fields {
-        let style = if f.kind == LabelKind::Sum && f.size2 {
-            FieldStyle::Dbl
-        } else if f.font_a {
-            FieldStyle::Normal
-        } else {
-            FieldStyle::FontB
+        let style = match (f.font_a, f.size2) {
+            (true, false) => FieldStyle::Normal,
+            (false, false) => FieldStyle::FontB,
+            (true, true) => FieldStyle::Dbl,
+            (false, true) => FieldStyle::DblB,
         };
         let x = (f.x_mm * MM_TO_DOTS as f64).round() as u16;
         let y = (f.y_mm * MM_TO_DOTS as f64).round() as u16;

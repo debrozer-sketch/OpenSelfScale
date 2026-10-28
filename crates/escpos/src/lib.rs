@@ -22,6 +22,7 @@ pub enum FieldStyle {
     FontB,
     DoubleH,
     Dbl,
+    DblB,
 }
 impl FieldStyle {
     fn bytes(self) -> [u8; 2] {
@@ -30,6 +31,7 @@ impl FieldStyle {
             FieldStyle::FontB => [0x01, 0x00],
             FieldStyle::DoubleH => [0x00, 0x01],
             FieldStyle::Dbl => [0x20, 0x11],
+            FieldStyle::DblB => [0x21, 0x11],
         }
     }
 }
@@ -279,6 +281,13 @@ mod tests {
         job.field(10, 20, FieldStyle::Dbl, "СУММА").unwrap();
         let out = job.finish();
         assert!(window(&out, &[ESC, b'!', 0x20, GS, b'!', 0x11]).is_some());
+    }
+    #[test]
+    fn field_dbl_b_keeps_font_b_with_double_scale() {
+        let mut job = LabelJob::begin((448, 232));
+        job.field(10, 20, FieldStyle::DblB, "НАЗВАНИЕ").unwrap();
+        let out = job.finish();
+        assert!(window(&out, &[ESC, b'!', 0x21, GS, b'!', 0x11]).is_some());
     }
     #[test]
     fn field_normal_keeps_plain_style_bytes() {
