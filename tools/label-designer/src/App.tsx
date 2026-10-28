@@ -9,9 +9,12 @@ const LABELS: Record<Kind, string> = {
   sum: "Сумма", date: "Дата", time: "Время", shelflife: "Срок годности", cardprice: "Цена по карте", text: "Произвольный текст",
 };
 const SAMPLES: Record<Kind, string> = {
-  name: "ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ", plu: "PLU 2502192", barcode: "210213601350", weight: "1,350 кг",
-  price: "199,99 ₽/кг", sum: "269,99 ₽", date: "19.10.26", time: "18:40:00", shelflife: "Годен до 20.09.2026",
-  cardprice: "Со скидкой: 249,99 ₽", text: "ТЕКСТ",
+  name: "ВИНОГРАД КИШМИШ КГ", plu: "PLU 2502192", barcode: "210213601350", weight: "1,350",
+  price: "479,99", sum: "269,99", date: "19.10.26", time: "18:40:00", shelflife: "Годен до 20.09.2026",
+  cardprice: "249,99", text: "ТЕКСТ",
+};
+const CAPTIONS: Partial<Record<Kind, string>> = {
+  weight: "ВЕС:", price: "ЦЕНА:", sum: "СУММА:", date: "ДАТА:", time: "ВРЕМЯ:", cardprice: "ПО КАРТЕ:",
 };
 const KINDS = Object.keys(LABELS) as Kind[];
 const REQUIRED: Kind[] = ["name", "weight", "sum", "barcode"];
@@ -33,6 +36,16 @@ function fieldSize(field: LabelField) {
   const multiplier = field.kind === "sum" ? field.size * 2 : field.size;
   const text = field.kind === "text" ? field.text || "" : SAMPLES[field.kind];
   return { w: field.w || Math.max(2, text.length * cw * multiplier), h: field.h || ch * multiplier };
+}
+
+const cellWidth = (field: LabelField) => (field.font === "A" ? 1.5 : 1.125);
+
+function fieldText(field: LabelField, layout: Layout) {
+  const value = field.kind === "text" ? field.text || "" : SAMPLES[field.kind];
+  const caption = CAPTIONS[field.kind];
+  if (!caption) return value;
+  const full = `${caption} ${value}`;
+  return field.x + full.length * cellWidth(field) <= layout.width_mm ? full : value;
 }
 
 function Icon({ name, size = 16 }: { name: string; size?: number }) {
@@ -69,11 +82,27 @@ export default function App() {
   const dragRef = useRef<{ id: string; x: number; y: number; startX: number; startY: number; before: Layout } | null>(null);
 
   const selected = layout.fields.find(f => f.id === selectedId) || null;
-  const issues = useMemo(() => {
+  const errors = useMemo(() => {
     const result: string[] = [];
     if (!layout.name.trim()) result.push("Не указано имя раскладки");
     REQUIRED.forEach(k => { if (!layout.fields.some(f => f.kind === k)) result.push(`Нет обязательного поля: ${LABELS[k]}`); });
-    layout.fields.forEach(f => { const s = fieldSize(f); if (f.x < 0 || f.y < 0 || f.x + s.w > layout.width_mm || f.y + s.h > layout.height_mm) result.push(`${LABELS[f.kind]} выходит за границы`); });
+    layout.fields.forEach(f => {
+      const s = fieldSize(f);
+      if (f.y < 0 || f.y + s.h > layout.height_mm) result.push(`${LABELS[f.kind]} выходит по вертикали`);
+      if (f.x + fieldText(f, layout).length * cellWidth(f) > layout.width_mm) result.push(`${LABELS[f.kind]}: текст обрежется на печати`);
+    });
+    return result;
+  }, [layout]);
+  const warnings = useMemo(() => {
+    const result: string[] = [];
+    layout.fields.forEach(f => {
+      const caption = CAPTIONS[f.kind];
+      if (!caption) return;
+      const value = SAMPLES[f.kind];
+      const full = `${caption} ${value}`;
+      if (f.x + full.length * cellWidth(f) > layout.width_mm && f.x + value.length * cellWidth(f) <= layout.width_mm)
+        result.push(`${LABELS[f.kind]}: подпись «${caption}» не поместится — напечатается без неё`);
+    });
     return result;
   }, [layout]);
   const missing = REQUIRED.filter(k => !layout.fields.some(f => f.kind === k));
@@ -87,7 +116,7 @@ export default function App() {
   const duplicateSelected = () => { if (!selected) return; const copy = { ...selected, id: uid(), x: snap(selected.x + 2), y: snap(selected.y + 2) }; commit({ ...layout, fields: [...layout.fields, copy] }, "Создана копия поля"); setSelectedId(copy.id); };
   const reorder = (index: number, dir: -1 | 1) => { const to = index + dir; if (to < 0 || to >= layout.fields.length) return; const fields = [...layout.fields]; [fields[index], fields[to]] = [fields[to], fields[index]]; commit({ ...layout, fields }, "Порядок печати изменен"); };
   const download = () => {
-    if (issues.length) { setStatus(`Исправьте замечания: ${issues.length}`); return; }
+    if (errors.length) { setStatus(`Исправьте ошибки: ${errors.length}`); return; }
     const output = { ...layout, fields: layout.fields.map(({ id: _id, ...f }) => f) };
     const url = URL.createObjectURL(new Blob([JSON.stringify(output, null, 2)], { type: "application/json" }));
     const a = document.createElement("a"); a.href = url; a.download = `label-${layout.name.replace(/\s+/g, "_")}.json`; a.click(); URL.revokeObjectURL(url); setStatus("JSON скачан");
@@ -104,8 +133,8 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-group"><div className="brand">OpenScale <span>этикетки</span></div><div className="menu-wrap"><button className="button" aria-expanded={fileOpen} onClick={() => setFileOpen(v => !v)}>Файл <span className="caret" /></button>{fileOpen && <div className="file-menu" role="menu"><button role="menuitem" onClick={newLayout}>Создать с нуля</button><button role="menuitem" onClick={() => fileRef.current?.click()}>Открыть файл JSON...</button><button role="menuitem" onClick={() => navigator.clipboard.writeText(JSON.stringify(layout, null, 2)).then(() => setStatus("JSON скопирован"))}>Копировать JSON</button><div className="menu-separator" /><button role="menuitem" onClick={() => setStatus("Выберите объект слева или на макете, затем измените его свойства справа")}>Справка</button></div>}</div><button className="button ghost" onClick={undo} disabled={!history.length}><Icon name="undo" /> Отменить</button></div>
-        <div className="document-title"><span className={issues.length ? "status-dot bad" : "status-dot"} />{layout.name || "Без имени"}</div>
-        <div className="topbar-group"><span className={issues.length ? "validation bad" : "validation"}>{issues.length ? `${issues.length} замечаний` : "Готово к печати"}</span><button className="button primary" onClick={download}><Icon name="download" /> Скачать JSON</button></div>
+        <div className="document-title"><span className={errors.length ? "status-dot bad" : "status-dot"} />{layout.name || "Без имени"}</div>
+        <div className="topbar-group"><span className={errors.length ? "validation bad" : warnings.length ? "validation warn" : "validation"}>{errors.length ? `${errors.length} ошибок` : warnings.length ? `${warnings.length} предупреждений` : "Готово к печати"}</span><button className="button primary" onClick={download}><Icon name="download" /> Скачать JSON</button></div>
       </header>
       <nav className="mobile-nav" aria-label="Области редактора">{(["structure", "preview", "properties"] as const).map((key, i) => <button key={key} aria-pressed={mobilePanel === key} onClick={() => setMobilePanel(key)}>{["Структура", "Превью", "Свойства"][i]}</button>)}</nav>
       <main className="workspace">
@@ -113,12 +142,12 @@ export default function App() {
           <section className="panel-section document-section"><div className="section-title"><span>Документ</span><span className="measure">мм</span></div><label className="field-control"><span>Имя раскладки</span><input value={layout.name} onChange={e => commit({ ...layout, name: e.target.value })} /></label><div className="field-grid"><NumberField label="Ширина" value={layout.width_mm} min={20} max={80} onChange={v => commit({ ...layout, width_mm: v })} /><NumberField label="Высота" value={layout.height_mm} min={20} onChange={v => commit({ ...layout, height_mm: v })} /></div><div className="preset-row" aria-label="Стандартные форматы">{PRESETS.map(p => <button key={p.name} className={p.w === layout.width_mm && p.h === layout.height_mm ? "active" : ""} title={`${p.name}: ${p.w} x ${p.h} мм`} onClick={() => commit({ ...layout, width_mm: p.w, height_mm: p.h, name: `${p.w}x${p.h}` })}>{p.w}x{p.h}</button>)}</div></section>
           <section className="layers-section"><div className="layers-head"><div><h2><Icon name="layers" /> Объекты</h2><p>Порядок печати сверху вниз</p></div><div className="add-wrap"><button className="icon-button" aria-label="Добавить поле" aria-expanded={addOpen} onClick={() => setAddOpen(v => !v)}><Icon name="plus" /></button>{addOpen && <div className="add-menu">{KINDS.map(k => <button key={k} onClick={() => addField(k)}><span>{LABELS[k]}</span>{layout.fields.some(f => f.kind === k) && <small>есть</small>}</button>)}</div>}</div></div>
             {missing.length > 0 && <div className="required-note"><Icon name="warning" /><div><strong>Не хватает обязательных полей</strong><div>{missing.map(k => <button key={k} onClick={() => addField(k)}>+ {LABELS[k]}</button>)}</div></div></div>}
-            <ol className="layer-list">{layout.fields.map((f, index) => { const s = fieldSize(f); const bad = f.x < 0 || f.y < 0 || f.x + s.w > layout.width_mm || f.y + s.h > layout.height_mm; return <li key={f.id} className={selectedId === f.id ? "selected" : ""}><span className="grip"><Icon name="grip" /></span><button className="layer-main" onClick={() => { setSelectedId(f.id); setMobilePanel("properties"); }}><span className="layer-index">{index + 1}</span><span><strong>{LABELS[f.kind]}</strong><small>Шрифт {f.font} · {f.size}x · X {f.x}, Y {f.y}</small></span></button>{bad && <span className="error-mark" title="Поле выходит за границы">!</span>}<button className="chevron-button" aria-label={`Открыть свойства: ${LABELS[f.kind]}`} onClick={() => { setSelectedId(f.id); setMobilePanel("properties"); }}><Icon name="chevron" /></button></li>; })}</ol>
+            <ol className="layer-list">{layout.fields.map((f, index) => { const s = fieldSize(f); const cut = f.x + fieldText(f, layout).length * cellWidth(f) > layout.width_mm || f.y < 0 || f.y + s.h > layout.height_mm; const caption = CAPTIONS[f.kind]; const noCaption = !!caption && !cut && f.x + `${caption} ${SAMPLES[f.kind]}`.length * cellWidth(f) > layout.width_mm; return <li key={f.id} className={selectedId === f.id ? "selected" : ""}><span className="grip"><Icon name="grip" /></span><button className="layer-main" onClick={() => { setSelectedId(f.id); setMobilePanel("properties"); }}><span className="layer-index">{index + 1}</span><span><strong>{LABELS[f.kind]}</strong><small>Шрифт {f.font} · {f.size}x · X {f.x}, Y {f.y}</small></span></button>{cut && <span className="error-mark" title="Текст обрежется на печати">!</span>}{noCaption && <span className="warn-mark" title="Подпись не поместится — напечатается без неё">!</span>}<button className="chevron-button" aria-label={`Открыть свойства: ${LABELS[f.kind]}`} onClick={() => { setSelectedId(f.id); setMobilePanel("properties"); }}><Icon name="chevron" /></button></li>; })}</ol>
             {!layout.fields.length && <div className="empty-list">На этикетке пока нет объектов.<button onClick={() => setAddOpen(true)}>Добавить поле</button></div>}
           </section><footer className="panel-foot"><span>{layout.fields.length} полей</span><span>{status}</span></footer>
         </aside>
         <section className={`preview-panel ${mobilePanel === "preview" ? "mobile-visible" : ""}`} aria-label="Превью этикетки"><div className="preview-toolbar"><div className="segmented"><button aria-pressed={view === "edit"} onClick={() => setView("edit")}>Разметка и сетка</button><button aria-pressed={view === "print"} onClick={() => setView("print")}>Как на печати</button></div><div className="zoom-control"><span>Масштаб</span>{(["auto", 4, 6, 8] as const).map(z => <button key={z} aria-pressed={zoom === z} onClick={() => setZoom(z)}>{z === "auto" ? "Авто" : `${z}x`}</button>)}</div></div>
-          <div className={`stage ${view === "print" ? "print" : ""}`} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}><div className="paper-wrap"><div className="paper-label">{layout.width_mm} x {layout.height_mm} мм · {layout.name || "без имени"}</div><div className="label-canvas" style={{ width: layout.width_mm * canvasScale, height: layout.height_mm * canvasScale, backgroundSize: `${5 * canvasScale}px ${5 * canvasScale}px` }} onClick={e => { if (e.target === e.currentTarget) setSelectedId(null); }}>{layout.fields.map(f => { const size = fieldSize(f); const isSelected = selectedId === f.id; const isBad = f.x < 0 || f.y < 0 || f.x + size.w > layout.width_mm || f.y + size.h > layout.height_mm; return <button key={f.id} className={`canvas-field ${isSelected ? "selected" : ""} ${isBad ? "bad" : ""}`} style={{ left: f.x * canvasScale, top: f.y * canvasScale, width: size.w * canvasScale, height: size.h * canvasScale }} onPointerDown={e => pointerDown(e, f)} aria-label={`${LABELS[f.kind]}, X ${f.x}, Y ${f.y}`}><span className="field-tag">{LABELS[f.kind]}</span>{f.kind === "barcode" ? <span className="barcode"><i /><small>{SAMPLES.barcode}</small></span> : <span className="field-text" style={{ fontSize: Math.max(7, size.h * canvasScale * .68), fontWeight: f.kind === "sum" ? 800 : 600 }}>{f.kind === "text" ? f.text : SAMPLES[f.kind]}</span>}{isSelected && view === "edit" && <><i className="handle nw"/><i className="handle ne"/><i className="handle sw"/><i className="handle se"/></>}</button>; })}</div></div></div>
+          <div className={`stage ${view === "print" ? "print" : ""}`} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}><div className="paper-wrap"><div className="paper-label">{layout.width_mm} x {layout.height_mm} мм · {layout.name || "без имени"}</div><div className="label-canvas" style={{ width: layout.width_mm * canvasScale, height: layout.height_mm * canvasScale, backgroundSize: `${5 * canvasScale}px ${5 * canvasScale}px` }} onClick={e => { if (e.target === e.currentTarget) setSelectedId(null); }}>{layout.fields.map(f => { const size = fieldSize(f); const isSelected = selectedId === f.id; const isBad = f.x + fieldText(f, layout).length * cellWidth(f) > layout.width_mm || f.y < 0 || f.y + size.h > layout.height_mm; return <button key={f.id} className={`canvas-field ${isSelected ? "selected" : ""} ${isBad ? "bad" : ""}`} style={{ left: f.x * canvasScale, top: f.y * canvasScale, width: size.w * canvasScale, height: size.h * canvasScale }} onPointerDown={e => pointerDown(e, f)} aria-label={`${LABELS[f.kind]}, X ${f.x}, Y ${f.y}`}><span className="field-tag">{LABELS[f.kind]}</span>{f.kind === "barcode" ? <span className="barcode"><i /><small>{SAMPLES.barcode}</small></span> : <span className="field-text" style={{ fontSize: Math.max(7, size.h * canvasScale * .68), fontWeight: f.kind === "sum" ? 800 : 600 }}>{fieldText(f, layout)}</span>}{isSelected && view === "edit" && <><i className="handle nw"/><i className="handle ne"/><i className="handle sw"/><i className="handle se"/></>}</button>; })}</div></div></div>
           <footer className="stage-footer"><span>{selected ? `Выбрано: ${LABELS[selected.kind]}` : "Выберите объект на макете или в структуре"}</span><span>Перетаскивание: шаг 0,5 мм</span></footer></section>
         <aside className={`right-panel ${mobilePanel === "properties" ? "mobile-visible" : ""}`} aria-label="Свойства выбранного объекта"><div className="inspector-head"><div><span>Свойства</span><h2>{selected ? LABELS[selected.kind] : "Ничего не выбрано"}</h2></div>{selected && <span className="object-number">#{layout.fields.findIndex(f => f.id === selected.id) + 1}</span>}</div>
           {selected ? <div className="inspector-scroll">{selected.kind === "text" && <section className="property-section"><h3>Содержание</h3><label className="field-control"><span>Текст на этикетке <small>{selected.text?.length || 0} / 48</small></span><input maxLength={48} value={selected.text || ""} onChange={e => patchSelected({ text: e.target.value })} /></label></section>}

@@ -32,6 +32,7 @@ button:disabled { cursor:default; opacity:.45; }
 .status-dot.bad { background:var(--danger); }
 .validation { font-size:12px; color:var(--ok); font-weight:600; white-space:nowrap; }
 .validation.bad { color:var(--danger); }
+.validation.warn { color:#B7791F; }
 .workspace { flex:1; min-height:0; display:grid; grid-template-columns:294px minmax(360px,1fr) 326px; }
 .left-panel,.right-panel { min-width:0; background:var(--surface); display:flex; flex-direction:column; z-index:2; }
 .left-panel { border-right:1px solid var(--border); }
@@ -71,6 +72,7 @@ button:disabled { cursor:default; opacity:.45; }
 .layer-index { width:17px; color:var(--soft); font-size:11px; text-align:right; }
 .chevron-button { width:27px; height:27px; border-color:transparent; background:transparent; color:var(--soft); }
 .error-mark { width:18px; height:18px; display:grid; place-items:center; border-radius:50%; background:var(--danger-soft); color:var(--danger); font-size:11px; font-weight:800; }
+.warn-mark { width:18px; height:18px; display:grid; place-items:center; border-radius:50%; background:#FDF3D7; color:#B7791F; font-size:11px; font-weight:800; }
 .empty-list,.inspector-empty { padding:30px 22px; text-align:center; color:var(--muted); }
 .empty-list button { border:0; background:none; color:var(--accent); text-decoration:underline; }
 .panel-foot,.stage-footer { min-height:31px; padding:6px 12px; display:flex; justify-content:space-between; gap:8px; border-top:1px solid var(--border); color:var(--soft); background:var(--subtle); font-size:10.5px; }

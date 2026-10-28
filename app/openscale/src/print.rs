@@ -127,7 +127,6 @@ fn spec_field_text(
         LabelKind::Sum => "СУММА:",
         LabelKind::Date => "ДАТА:",
         LabelKind::Time => "ВРЕМЯ:",
-        LabelKind::Shelflife => "ГОДЕН:",
         LabelKind::Cardprice => "ПО КАРТЕ:",
         _ => "",
     };
