@@ -1418,7 +1418,7 @@ pub fn grid_probe_bytes() -> Vec<u8> {
     const W: usize = 448;
     const H: usize = 320;
     let mut job = LabelJob::begin((W as u16, H as u16));
-    for yi in 0..20u16 {
+    for yi in 0..19u16 {
         for xi in 0..28u16 {
             let _ = job.field(xi * 16, yi * 16, FieldStyle::FontB, "+");
         }
@@ -1430,9 +1430,9 @@ pub fn grid_probe_bytes() -> Vec<u8> {
         }
     }
     let _ = job.field(4, 12 * 8, FieldStyle::FontB, "24");
-    let _ = job.field(32 * 8, 12 * 8, FieldStyle::FontB, "48");
+    let _ = job.field(28 * 8, 12 * 8, FieldStyle::FontB, "48");
     let _ = job.barcode_ean13(16, 20 * 8, "210000000001", 2, 0x18);
-    let _ = job.barcode_ean13(32 * 8, 20 * 8, "210000000001", 2, 0x30);
+    let _ = job.barcode_ean13(28 * 8, 20 * 8, "210000000001", 2, 0x30);
     job.finish()
 }
 pub fn print_ruler_probe(cfg: &crate::config::Config) -> Result<(), PrintError> {
