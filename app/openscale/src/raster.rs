@@ -112,8 +112,14 @@ pub fn raster_bytes(bmp: &Bitmap) -> Vec<u8> {
     raster_bytes_bands(bmp, 40)
 }
 pub fn raster_bytes_bands(bmp: &Bitmap, band_rows: usize) -> Vec<u8> {
+    let mut flat = vec![0u8; bmp.w * bmp.h];
+    for y in 0..bmp.h {
+        for x in 0..bmp.w {
+            flat[y * bmp.w + x] = bmp.rows[(bmp.h - 1 - y) * bmp.w + (bmp.w - 1 - x)];
+        }
+    }
     let mut out = vec![escpos::ESC, b'@'];
-    for band in bmp.rows.chunks(bmp.w * band_rows) {
+    for band in flat.chunks(bmp.w * band_rows) {
         let rows = (band.len() / bmp.w) as u16;
         out.extend_from_slice(&[escpos::GS, b'v', b'0', 0x00]);
         out.extend_from_slice(&((bmp.w / 8) as u16).to_le_bytes());
