@@ -11,6 +11,7 @@ mod flow;
 mod label;
 mod net;
 mod print;
+mod raster;
 mod session;
 mod settings;
 mod setup;

@@ -924,8 +924,14 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                     let port = p.port_mut();
                     ensure_ready(port)?;
                     drain_port_rx(port);
-                    port.write_all(&bytes).map_err(Fail::io)?;
-                    port.flush().map_err(Fail::io)?;
+                    let paced = bytes.len() > 4096;
+                    for chunk in bytes.chunks(2048) {
+                        port.write_all(chunk).map_err(Fail::io)?;
+                        port.flush().map_err(Fail::io)?;
+                        if paced {
+                            std::thread::sleep(Duration::from_millis(300));
+                        }
+                    }
                     log::info!("принтер: тестовая этикетка напечатана");
                     std::thread::sleep(Duration::from_millis(800));
                     let s = read_l4(port, 2);
@@ -1408,41 +1414,20 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
-pub fn ruler_probe_bytes() -> Vec<u8> {
-    let cols = ["А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "К", "Л", "М"];
-    let mut job = LabelJob::begin((448, 640));
-    for (ci, letter) in cols.iter().enumerate() {
-        let x = (ci as u16) * 40;
-        let _ = job.field(x + 2, 2, FieldStyle::FontB, letter);
-        for row in 1..=11u16 {
-            let y = (row - 1) * 40;
-            let _ = job.field(x + 2, y + 44, FieldStyle::FontB, &format!("{letter}{row}"));
-        }
-    }
-    let barcode = |job: &mut LabelJob, x_dots: u16, h_dots: u8| {
-        let y_dots: u16 = 58 * 8;
-        let mut seq = vec![escpos::ESC, b'$', x_dots as u8, (x_dots >> 8) as u8];
-        seq.extend_from_slice(&[escpos::GS, b'$', y_dots as u8, (y_dots >> 8) as u8]);
-        seq.extend_from_slice(&[escpos::GS, b'w', 0x02, escpos::GS, b'h', h_dots, escpos::GS, b'H', 0x00]);
-        seq.extend_from_slice(&[escpos::GS, b'k', 0x02]);
-        seq.extend_from_slice(b"210000000001");
-        seq.push(0x00);
-        job.raw(&seq);
-    };
-    barcode(&mut job, 16, 24);
-    barcode(&mut job, 240, 48);
-    job.raw(&[escpos::ESC, b'3', 0x00]);
-    let _ = job.field(16, 74 * 8, FieldStyle::Normal, "X");
-    job.raw(&[escpos::ESC, b'3', 0x18]);
-    let _ = job.field(96, 74 * 8, FieldStyle::Normal, "X");
-    job.raw(&[escpos::ESC, b'3', 0x00]);
-    job.finish()
-}
-pub fn print_ruler_probe(cfg: &crate::config::Config) -> Result<(), PrintError> {
+pub fn print_raster_probe(
+    cfg: &crate::config::Config,
+    spec: &crate::label::LabelSpec,
+    item: &datastore::PluItem,
+    weight_g: u32,
+    sum_kop: i64,
+    date: &str,
+    time: &str,
+) -> Result<(), PrintError> {
     if !cfg.printer.enabled {
         return Err(PrintError::PrinterDisabled);
     }
-    let bytes = ruler_probe_bytes();
+    let bmp = crate::raster::probe_bitmap(spec, item, weight_g, sum_kop, date, time);
+    let bytes = crate::raster::raster_bytes(&bmp);
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
