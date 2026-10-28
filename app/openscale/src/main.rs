@@ -78,7 +78,31 @@ fn main() {
             }
         }
         Mode::RasterProbe => {
-            let bytes = raster::raster_bytes_single(&raster::alphabet_probe_bitmap());
+            let spec = crate::label::LabelSpec {
+                name: "probe".into(),
+                width_mm: 58,
+                height_mm: 40,
+                fields: vec![
+                    crate::label::LabelField { kind: crate::label::LabelKind::Name, x_mm: 0.5, y_mm: 4.5, font_a: true, size2: false, text: String::new() },
+                    crate::label::LabelField { kind: crate::label::LabelKind::Weight, x_mm: 30.0, y_mm: 15.0, font_a: true, size2: false, text: String::new() },
+                    crate::label::LabelField { kind: crate::label::LabelKind::Price, x_mm: 30.0, y_mm: 25.0, font_a: true, size2: false, text: String::new() },
+                    crate::label::LabelField { kind: crate::label::LabelKind::Sum, x_mm: 30.0, y_mm: 30.0, font_a: true, size2: false, text: String::new() },
+                    crate::label::LabelField { kind: crate::label::LabelKind::Date, x_mm: 2.0, y_mm: 36.0, font_a: false, size2: false, text: String::new() },
+                    crate::label::LabelField { kind: crate::label::LabelKind::Time, x_mm: 30.0, y_mm: 36.0, font_a: false, size2: false, text: String::new() },
+                    crate::label::LabelField { kind: crate::label::LabelKind::Barcode, x_mm: 2.0, y_mm: 15.5, font_a: true, size2: false, text: String::new() },
+                ],
+            };
+            let demo = datastore::PluItem {
+                plu: "2100001".into(),
+                price: 47999,
+                card_price: None,
+                itemcode: "1".into(),
+                namefirst: "БАКЛАЖАНЫ ИМПОРТ КГ".into(),
+                namesecond: String::new(),
+                groupcode: "1".into(),
+                shelflife: String::new(),
+            };
+            let bytes = raster::raster_bytes_single(&raster::probe_bitmap(&spec, &demo, 1350, 64800, "28.10.2026", "12:00"));
             match print::send_raw_probe(&cfg, &bytes) {
                 Ok(()) => println!("raster-probe: напечатано"),
                 Err(e) => {

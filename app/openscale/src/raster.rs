@@ -71,6 +71,19 @@ pub fn probe_bitmap(
     time: &str,
 ) -> Bitmap {
     let mut bmp = Bitmap::new(448, (spec.height_mm * 8) as usize);
+    for x in 0..bmp.w {
+        bmp.set(x as i32, 0);
+        bmp.set(x as i32, bmp.h as i32 - 1);
+    }
+    for y in 0..bmp.h {
+        bmp.set(0, y as i32);
+        bmp.set(bmp.w as i32 - 1, y as i32);
+    }
+    for y in (5..(spec.height_mm)).step_by(5) {
+        for x in 0..bmp.w {
+            bmp.set(x as i32, (y * 8) as i32);
+        }
+    }
     let cols = ["А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "К", "Л", "М"];
     for (ci, letter) in cols.iter().enumerate() {
         for row in 1..=11u16 {
