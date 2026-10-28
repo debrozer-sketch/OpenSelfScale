@@ -1431,6 +1431,24 @@ pub fn print_raster_probe(
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
+pub fn send_raw_probe(cfg: &crate::config::Config, bytes: &[u8]) -> Result<(), PrintError> {
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
+    let port = serialport::new(&cfg.printer.port, cfg.printer.baud)
+        .timeout(std::time::Duration::from_millis(1500))
+        .open()
+        .map_err(|e| PrintError::Io(std::io::Error::other(e.to_string())))?;
+    let mut port = port;
+    for chunk in bytes.chunks(2048) {
+        port.write_all(chunk)
+            .map_err(|e| PrintError::Io(std::io::Error::other(e.to_string())))?;
+        port.flush()
+            .map_err(|e| PrintError::Io(std::io::Error::other(e.to_string())))?;
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    Ok(())
+}
 pub fn print_for_plu(
     cfg: &crate::config::Config,
     weight_g: u32,

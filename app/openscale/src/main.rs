@@ -77,6 +77,16 @@ fn main() {
                 }
             }
         }
+        Mode::RasterProbe => {
+            let bytes = raster::raster_bytes(&raster::alphabet_probe_bitmap());
+            match print::send_raw_probe(&cfg, &bytes) {
+                Ok(()) => println!("raster-probe: напечатано"),
+                Err(e) => {
+                    eprintln!("raster-probe: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Mode::Weight => {
             let src = weight::WeightSource::spawn(&cfg.scales);
             let deadline = Instant::now() + Duration::from_secs(15);

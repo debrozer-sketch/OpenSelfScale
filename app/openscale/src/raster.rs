@@ -22,7 +22,7 @@ impl Bitmap {
             }
         }
     }
-    pub fn cell(&mut self, font: &FontTable, ch: char, x: i32, y: i32, scale: i32) {
+    pub fn cell(&mut self, font: &FontTable, ch: char, x: i32, y: i32, scale: i32, bold: bool) {
         let Some(idx) = font.chars.iter().position(|c| *c == ch) else {
             return;
         };
@@ -35,15 +35,18 @@ impl Bitmap {
                 for sy in 0..scale {
                     for sx in 0..scale {
                         self.set(x + rx as i32 * scale + sx, y + ry as i32 * scale + sy);
+                        if bold {
+                            self.set(x + rx as i32 * scale + sx + scale, y + ry as i32 * scale + sy);
+                        }
                     }
                 }
             }
         }
     }
-    pub fn text(&mut self, font: &FontTable, s: &str, x: i32, y: i32, scale: i32) {
+    pub fn text(&mut self, font: &FontTable, s: &str, x: i32, y: i32, scale: i32, bold: bool) {
         let mut cx = x;
         for ch in s.chars() {
-            self.cell(font, ch, cx, y, scale);
+            self.cell(font, ch, cx, y, scale, bold);
             cx += font.advance as i32 * scale;
         }
     }
@@ -73,7 +76,7 @@ pub fn probe_bitmap(
         for row in 1..=11u16 {
             let x = (ci as u16 * 5 * 8 + 1) as i32;
             let y = ((row - 1) as u16 * 5 * 8 + 1) as i32;
-            bmp.text(&FONT_B, &format!("{letter}{row}"), x, y, 1);
+            bmp.text(&FONT_B, &format!("{letter}{row}"), x, y, 1, true);
         }
     }
     let items = crate::print::preview_items(spec, item, weight_g, sum_kop, date, time);
@@ -86,8 +89,28 @@ pub fn probe_bitmap(
         }
         let Some(ch) = it.text.chars().next() else { continue };
         let (font, scale) = font_by_height(it.h_mm);
-        bmp.cell(font, ch, x, y, scale);
+        bmp.cell(font, ch, x, y, scale, true);
     }
+    bmp
+}
+pub fn alphabet_probe_bitmap() -> Bitmap {
+    let mut bmp = Bitmap::new(448, 480);
+    let rows = [
+        "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ",
+        "абвгдежзийклмнопрстуфхцчшщъыьэюя",
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.,:-/",
+    ];
+    for (i, s) in rows.iter().enumerate() {
+        bmp.text(&FONT_A, s, 2, 16 + i as i32 * 40, 1, true);
+    }
+    bmp.text(&FONT_B, "мелкий B: абвгд 0123456789", 2, 160, 1, true);
+    let digits = "2100000000013";
+    for (start, len) in crate::print::ean13_bar_runs(digits) {
+        bmp.fill(16 + start as i32 * 2, 200, len as i32 * 2, 48);
+    }
+    bmp.text(&FONT_A, digits, 16, 256, 1, true);
+    bmp.text(&FONT_A, "АБВ 012", 2, 310, 2, true);
+    bmp.text(&FONT_B, "B2x абв 012", 2, 380, 2, true);
     bmp
 }
 pub fn raster_bytes(bmp: &Bitmap) -> Vec<u8> {
