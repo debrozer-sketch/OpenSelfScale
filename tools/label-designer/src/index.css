@@ -60,6 +60,11 @@ button:disabled { cursor:default; opacity:.45; }
 .required-note>svg { flex:none; margin-top:1px; }
 .required-note strong { font-size:12px; }
 .required-note button { padding:3px 6px 3px 0; border:0; background:transparent; color:#6b4500; text-decoration:underline; cursor:pointer; font-size:11px; }
+.issue-list { display:flex; flex-direction:column; gap:4px; margin:0 10px 10px; }
+.issue-note { display:flex; gap:7px; align-items:flex-start; text-align:left; width:100%; padding:7px 9px; border-radius:5px; border:1px solid; font-size:11.5px; line-height:1.35; cursor:pointer; }
+.issue-note svg { flex:none; margin-top:1px; }
+.issue-note.error { border-color:rgb(220 38 38 / 30%); background:#FDECEC; color:var(--danger); }
+.issue-note.warning { border-color:#F0DCA8; background:#FDF3D7; color:#B7791F; }
 .layer-list { list-style:none; margin:0; padding:0 8px 12px; }
 .layer-list li { min-height:49px; display:flex; align-items:center; border-bottom:1px solid var(--border); transition:background .12s,box-shadow .12s; }
 .layer-list li:first-child { border-top:1px solid var(--border); }

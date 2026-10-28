@@ -82,29 +82,25 @@ export default function App() {
   const dragRef = useRef<{ id: string; x: number; y: number; startX: number; startY: number; before: Layout } | null>(null);
 
   const selected = layout.fields.find(f => f.id === selectedId) || null;
-  const errors = useMemo(() => {
-    const result: string[] = [];
-    if (!layout.name.trim()) result.push("Не указано имя раскладки");
-    REQUIRED.forEach(k => { if (!layout.fields.some(f => f.kind === k)) result.push(`Нет обязательного поля: ${LABELS[k]}`); });
+  const issues = useMemo(() => {
+    const result: { id: string | null; level: "error" | "warning"; msg: string }[] = [];
+    if (!layout.name.trim()) result.push({ id: null, level: "error", msg: "Не указано имя раскладки" });
+    REQUIRED.forEach(k => { if (!layout.fields.some(f => f.kind === k)) result.push({ id: null, level: "error", msg: `Нет обязательного поля: ${LABELS[k]}` }); });
     layout.fields.forEach(f => {
       const s = fieldSize(f);
-      if (f.y < 0 || f.y + s.h > layout.height_mm) result.push(`${LABELS[f.kind]} выходит по вертикали`);
-      if (f.x + fieldText(f, layout).length * cellWidth(f) > layout.width_mm) result.push(`${LABELS[f.kind]}: текст обрежется на печати`);
-    });
-    return result;
-  }, [layout]);
-  const warnings = useMemo(() => {
-    const result: string[] = [];
-    layout.fields.forEach(f => {
+      if (f.y < 0 || f.y + s.h > layout.height_mm) result.push({ id: f.id, level: "error", msg: `${LABELS[f.kind]} выходит по вертикали` });
+      if (f.x + fieldText(f, layout).length * cellWidth(f) > layout.width_mm) result.push({ id: f.id, level: "error", msg: `${LABELS[f.kind]}: текст обрежется на печати` });
       const caption = CAPTIONS[f.kind];
-      if (!caption) return;
-      const value = SAMPLES[f.kind];
-      const full = `${caption} ${value}`;
-      if (f.x + full.length * cellWidth(f) > layout.width_mm && f.x + value.length * cellWidth(f) <= layout.width_mm)
-        result.push(`${LABELS[f.kind]}: подпись «${caption}» не поместится — напечатается без неё`);
+      if (caption) {
+        const full = `${caption} ${SAMPLES[f.kind]}`;
+        if (f.x + full.length * cellWidth(f) > layout.width_mm && f.x + SAMPLES[f.kind].length * cellWidth(f) <= layout.width_mm)
+          result.push({ id: f.id, level: "warning", msg: `${LABELS[f.kind]}: подпись «${caption}» не поместится — напечатается без неё` });
+      }
     });
     return result;
   }, [layout]);
+  const errors = issues.filter(i => i.level === "error");
+  const warnings = issues.filter(i => i.level === "warning");
   const missing = REQUIRED.filter(k => !layout.fields.some(f => f.kind === k));
 
   useEffect(() => { localStorage.setItem("openscale.labeldesigner.draft.v2", JSON.stringify(layout)); }, [layout]);
@@ -142,6 +138,7 @@ export default function App() {
           <section className="panel-section document-section"><div className="section-title"><span>Документ</span><span className="measure">мм</span></div><label className="field-control"><span>Имя раскладки</span><input value={layout.name} onChange={e => commit({ ...layout, name: e.target.value })} /></label><div className="field-grid"><NumberField label="Ширина" value={layout.width_mm} min={20} max={80} onChange={v => commit({ ...layout, width_mm: v })} /><NumberField label="Высота" value={layout.height_mm} min={20} onChange={v => commit({ ...layout, height_mm: v })} /></div><div className="preset-row" aria-label="Стандартные форматы">{PRESETS.map(p => <button key={p.name} className={p.w === layout.width_mm && p.h === layout.height_mm ? "active" : ""} title={`${p.name}: ${p.w} x ${p.h} мм`} onClick={() => commit({ ...layout, width_mm: p.w, height_mm: p.h, name: `${p.w}x${p.h}` })}>{p.w}x{p.h}</button>)}</div></section>
           <section className="layers-section"><div className="layers-head"><div><h2><Icon name="layers" /> Объекты</h2><p>Порядок печати сверху вниз</p></div><div className="add-wrap"><button className="icon-button" aria-label="Добавить поле" aria-expanded={addOpen} onClick={() => setAddOpen(v => !v)}><Icon name="plus" /></button>{addOpen && <div className="add-menu">{KINDS.map(k => <button key={k} onClick={() => addField(k)}><span>{LABELS[k]}</span>{layout.fields.some(f => f.kind === k) && <small>есть</small>}</button>)}</div>}</div></div>
             {missing.length > 0 && <div className="required-note"><Icon name="warning" /><div><strong>Не хватает обязательных полей</strong><div>{missing.map(k => <button key={k} onClick={() => addField(k)}>+ {LABELS[k]}</button>)}</div></div></div>}
+            {issues.length > 0 && <div className="issue-list">{issues.map((it, i) => <button key={i} className={`issue-note ${it.level}`} onClick={() => { if (it.id) { setSelectedId(it.id); setMobilePanel("properties"); } }}><Icon name="warning" /><span>{it.msg}</span></button>)}</div>}
             <ol className="layer-list">{layout.fields.map((f, index) => { const s = fieldSize(f); const cut = f.x + fieldText(f, layout).length * cellWidth(f) > layout.width_mm || f.y < 0 || f.y + s.h > layout.height_mm; const caption = CAPTIONS[f.kind]; const noCaption = !!caption && !cut && f.x + `${caption} ${SAMPLES[f.kind]}`.length * cellWidth(f) > layout.width_mm; return <li key={f.id} className={selectedId === f.id ? "selected" : ""}><span className="grip"><Icon name="grip" /></span><button className="layer-main" onClick={() => { setSelectedId(f.id); setMobilePanel("properties"); }}><span className="layer-index">{index + 1}</span><span><strong>{LABELS[f.kind]}</strong><small>Шрифт {f.font} · {f.size}x · X {f.x}, Y {f.y}</small></span></button>{cut && <span className="error-mark" title="Текст обрежется на печати">!</span>}{noCaption && <span className="warn-mark" title="Подпись не поместится — напечатается без неё">!</span>}<button className="chevron-button" aria-label={`Открыть свойства: ${LABELS[f.kind]}`} onClick={() => { setSelectedId(f.id); setMobilePanel("properties"); }}><Icon name="chevron" /></button></li>; })}</ol>
             {!layout.fields.length && <div className="empty-list">На этикетке пока нет объектов.<button onClick={() => setAddOpen(true)}>Добавить поле</button></div>}
           </section><footer className="panel-foot"><span>{layout.fields.length} полей</span><span>{status}</span></footer>
