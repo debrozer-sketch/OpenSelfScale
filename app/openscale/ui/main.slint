@@ -2070,92 +2070,100 @@ export component MainWindow inherits Window {
                 vertical-alignment: center;
                 overflow: elide;
             }
-            if root.labels-files.length > 0 : Text {
-                x: 16px;
-                y: 130px;
-                width: parent.width - 32px;
-                height: 34px;
-                text: "Файлы для импорта";
-                font-size: 20px;
-                font-weight: 700;
-                color: #4A5460;
-                vertical-alignment: center;
-            }
-            for name[i] in root.labels-files : Rectangle {
-                x: 8px;
-                y: 168px + i * 72px;
-                width: parent.width - 16px;
-                height: 62px;
-                border-radius: 12px;
-                border-width: 2px;
-                border-color: #C9CFD7;
-                background: lbl-f-ta.pressed ? #E4E8ED : #FFFFFF;
-                Text {
-                    x: 24px;
-                    width: parent.width - 48px;
-                    height: parent.height;
-                    text: name;
-                    font-size: 22px;
+            Flickable {
+                x: 0;
+                y: 124px;
+                width: parent.width;
+                height: parent.height - 124px;
+                viewport-width: parent.width;
+                viewport-height: 16px + (root.labels-files.length > 0 ? 42px + root.labels-files.length * 72px : 0px) + (root.labels-rows.length > 0 ? 42px + root.labels-rows.length * 72px : 0px);
+                if root.labels-files.length > 0 : Text {
+                    x: 16px;
+                    y: 6px;
+                    width: parent.width - 32px;
+                    height: 34px;
+                    text: "Файлы для импорта";
+                    font-size: 20px;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: #4A5460;
                     vertical-alignment: center;
-                    overflow: elide;
                 }
-                lbl-f-ta := TouchArea { clicked => { root.labels-import-tap(i); } }
-            }
-            if root.labels-rows.length > 0 : Text {
-                x: 16px;
-                y: root.labels-files.length > 0 ? 168px + root.labels-files.length * 72px + 8px : 130px;
-                width: parent.width - 32px;
-                height: 34px;
-                text: "Загруженные раскладки · нажмите, чтобы удалить";
-                font-size: 20px;
-                font-weight: 700;
-                color: #4A5460;
-                vertical-alignment: center;
-            }
-            for row[i] in root.labels-rows : Rectangle {
-                x: 8px;
-                y: (root.labels-files.length > 0 ? 168px + root.labels-files.length * 72px + 46px : 168px) + i * 72px;
-                width: parent.width - 16px;
-                height: 62px;
-                border-radius: 12px;
-                border-width: 2px;
-                border-color: #C9CFD7;
-                background: lbl-r-ta.pressed ? #EAF2EC : #FFFFFF;
-                Text {
-                    x: 24px;
-                    width: parent.width - 96px;
-                    height: parent.height;
-                    text: row;
-                    font-size: 22px;
+                for name[i] in root.labels-files : Rectangle {
+                    x: 8px;
+                    y: 44px + i * 72px;
+                    width: parent.width - 16px;
+                    height: 62px;
+                    border-radius: 12px;
+                    border-width: 2px;
+                    border-color: #C9CFD7;
+                    background: lbl-f-ta.pressed ? #E4E8ED : #FFFFFF;
+                    Text {
+                        x: 24px;
+                        width: parent.width - 48px;
+                        height: parent.height;
+                        text: name;
+                        font-size: 22px;
+                        font-weight: 700;
+                        color: #1A1E24;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    lbl-f-ta := TouchArea { clicked => { root.labels-import-tap(i); } }
+                }
+                if root.labels-rows.length > 0 : Text {
+                    x: 16px;
+                    y: root.labels-files.length > 0 ? 44px + root.labels-files.length * 72px + 8px : 6px;
+                    width: parent.width - 32px;
+                    height: 34px;
+                    text: "Загруженные раскладки · нажмите, чтобы удалить";
+                    font-size: 20px;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: #4A5460;
                     vertical-alignment: center;
-                    overflow: elide;
                 }
-                lbl-r-ta := TouchArea { clicked => { root.labels-tap(i); } }
-                Rectangle {
-                    x: parent.width - 64px;
-                    y: 9px;
-                    width: 44px;
-                    height: 44px;
-                    border-radius: 10px;
-                    background: lbl-del-ta.pressed ? #F2B8B5 : #F6DEDD;
-                    Text { text: "✕"; font-size: 22px; font-weight: 700; color: #7A2E2E; }
-                    lbl-del-ta := TouchArea { clicked => { root.labels-delete-tap(i); } }
+                for row[i] in root.labels-rows : Rectangle {
+                    x: 8px;
+                    y: (root.labels-files.length > 0 ? 44px + root.labels-files.length * 72px + 46px : 44px) + i * 72px;
+                    width: parent.width - 16px;
+                    height: 62px;
+                    border-radius: 12px;
+                    border-width: 2px;
+                    border-color: #C9CFD7;
+                    background: lbl-r-ta.pressed ? #EAF2EC : #FFFFFF;
+                    Text {
+                        x: 24px;
+                        width: parent.width - 96px;
+                        height: parent.height;
+                        text: row;
+                        font-size: 22px;
+                        font-weight: 700;
+                        color: #1A1E24;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    lbl-r-ta := TouchArea { clicked => { root.labels-tap(i); } }
+                    Rectangle {
+                        x: parent.width - 64px;
+                        y: 9px;
+                        width: 44px;
+                        height: 44px;
+                        border-radius: 10px;
+                        background: lbl-del-ta.pressed ? #F2B8B5 : #F6DEDD;
+                        Text { text: "✕"; font-size: 22px; font-weight: 700; color: #7A2E2E; }
+                        lbl-del-ta := TouchArea { clicked => { root.labels-delete-tap(i); } }
+                    }
                 }
-            }
-            if root.labels-rows.length == 0 && root.labels-files.length == 0 : Text {
-                x: 16px;
-                y: 150px;
-                width: parent.width - 32px;
-                height: 80px;
-                text: "Раскладок нет.\nСоберите раскладку в конструкторе и положите label-*.json в каталог обмена.";
-                font-size: 22px;
-                color: #4A5460;
-                horizontal-alignment: center;
-                wrap: word-wrap;
+                if root.labels-rows.length == 0 && root.labels-files.length == 0 : Text {
+                    x: 16px;
+                    y: 20px;
+                    width: parent.width - 32px;
+                    height: 80px;
+                    text: "Раскладок нет.\nСоберите раскладку в конструкторе и положите label-*.json в каталог обмена.";
+                    font-size: 22px;
+                    color: #4A5460;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
             }
         }
         if root.screen == 17 : Rectangle {
