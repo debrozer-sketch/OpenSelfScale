@@ -90,6 +90,8 @@ pub const FONT_B_HEIGHT_MM: f64 = 2.125;
 pub const BARCODE_WIDTH_MM: f64 = 23.75;
 pub const BARCODE_HEIGHT_MM: f64 = 6.0;
 pub const BARCODE_HRI_HEIGHT_MM: f64 = 3.0;
+pub const PRINT_WIDTH_DOTS: u16 = 448;
+pub const PRINTABLE_WIDTH_MM: f64 = 55.88;
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreviewItem {
     pub x_mm: f64,
@@ -188,8 +190,8 @@ pub fn preview_items(
             }
             continue;
         }
-        let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time, spec.width_mm as f64)
-        else {
+        let fit_w = (spec.width_mm as f64).min(PRINTABLE_WIDTH_MM);
+        let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time, fit_w) else {
             continue;
         };
         for (i, ch) in text.chars().enumerate() {
@@ -258,7 +260,7 @@ pub fn build_label_from_spec(
         rounding,
     );
     let mut job = LabelJob::begin((
-        (spec.width_mm * MM_TO_DOTS) as u16,
+        ((spec.width_mm * MM_TO_DOTS) as u16).min(PRINT_WIDTH_DOTS),
         (spec.height_mm * MM_TO_DOTS) as u16,
     ));
     for f in &spec.fields {
@@ -274,15 +276,8 @@ pub fn build_label_from_spec(
             job.barcode_ean13(x, y, &ean13_payload(item, weight_g), if f.size2 { 4 } else { 2 })?;
             continue;
         }
-        let Some(text) = spec_field_text(
-            f,
-            item,
-            weight_g,
-            sum_kop,
-            date,
-            time,
-            spec.width_mm as f64,
-        ) else {
+        let fit_w = (spec.width_mm as f64).min(PRINTABLE_WIDTH_MM);
+        let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time, fit_w) else {
             continue;
         };
         job.field(x, y, style, &text)?;
@@ -1523,7 +1518,7 @@ mod tests {
     #[test]
     fn spec_label_area_and_field_positions() {
         let bytes = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
-        assert!(bytes.windows(10).any(|w| w == &[escpos::ESC, b'W', 0, 0, 0, 0, 0xD0, 0x01, 0x40, 0x01][..]), "ESC W 464x320");
+        assert!(bytes.windows(10).any(|w| w == &[escpos::ESC, b'W', 0, 0, 0, 0, 0xC0, 0x01, 0x40, 0x01][..]), "ESC W 448x320");
         assert!(bytes.windows(4).any(|w| w == &[escpos::ESC, b'$', 0x10, 0x00][..]), "ESC $ x=16");
         assert!(bytes.windows(4).any(|w| w == &[escpos::GS, b'$', 0x08, 0x00][..]), "GS $ y=8");
     }
