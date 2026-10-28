@@ -105,9 +105,10 @@ fn spec_field_text(
     sum_kop: i64,
     date: &str,
     time: &str,
+    width_mm: f64,
 ) -> Option<String> {
     use crate::label::LabelKind;
-    Some(match f.kind {
+    let value = match f.kind {
         LabelKind::Name => item.namefirst.clone(),
         LabelKind::Plu => format!("PLU {}", item.plu),
         LabelKind::Weight => format!("{},{:03}", weight_g / 1000, weight_g % 1000),
@@ -119,7 +120,24 @@ fn spec_field_text(
         LabelKind::Cardprice => money(item.card_price?),
         LabelKind::Text => f.text.clone(),
         LabelKind::Barcode => return None,
-    })
+    };
+    let caption = match f.kind {
+        LabelKind::Weight => "ВЕС:",
+        LabelKind::Price => "ЦЕНА:",
+        LabelKind::Sum => "СУММА:",
+        LabelKind::Date => "ДАТА:",
+        LabelKind::Time => "ВРЕМЯ:",
+        LabelKind::Shelflife => "ГОДЕН:",
+        LabelKind::Cardprice => "ПО КАРТЕ:",
+        _ => "",
+    };
+    if caption.is_empty() {
+        return Some(value);
+    }
+    let cell = if f.font_a { FONT_A_CELL_MM } else { FONT_B_CELL_MM };
+    let full = format!("{caption} {value}");
+    let fits = f.x_mm + full.chars().count() as f64 * cell <= width_mm;
+    Some(if fits { full } else { value })
 }
 pub fn preview_items(
     spec: &crate::label::LabelSpec,
@@ -132,18 +150,8 @@ pub fn preview_items(
     use crate::label::LabelKind;
     let mut out = Vec::new();
     for f in &spec.fields {
-        let (cell, height) = if f.font_a {
-            (FONT_A_CELL_MM, FONT_A_HEIGHT_MM)
-        } else {
-            (FONT_B_CELL_MM, FONT_B_HEIGHT_MM)
-        };
-        let (cell, height) = if f.kind == LabelKind::Sum && f.size2 {
-            (cell * 2.0, height * 2.0)
-        } else if f.size2 {
-            (cell, height * 2.0)
-        } else {
-            (cell, height)
-        };
+        let height = if f.font_a { FONT_A_HEIGHT_MM } else { FONT_B_HEIGHT_MM };
+        let height = if f.size2 { height * 2.0 } else { height };
         if f.kind == LabelKind::Barcode {
             out.push(PreviewItem {
                 x_mm: f.x_mm,
@@ -155,19 +163,18 @@ pub fn preview_items(
             });
             continue;
         }
-        let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time) else {
+        let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time, spec.width_mm as f64)
+        else {
             continue;
         };
-        for (i, ch) in text.chars().enumerate() {
-            out.push(PreviewItem {
-                x_mm: f.x_mm + i as f64 * cell,
-                y_mm: f.y_mm,
-                w_mm: cell,
-                h_mm: height,
-                text: ch.to_string(),
-                barcode: false,
-            });
-        }
+        out.push(PreviewItem {
+            x_mm: f.x_mm,
+            y_mm: f.y_mm,
+            w_mm: spec.width_mm as f64 - f.x_mm,
+            h_mm: height,
+            text,
+            barcode: false,
+        });
     }
     out
 }
@@ -237,46 +244,22 @@ pub fn build_label_from_spec(
         };
         let x = (f.x_mm * MM_TO_DOTS as f64).round() as u16;
         let y = (f.y_mm * MM_TO_DOTS as f64).round() as u16;
-        match f.kind {
-            LabelKind::Name => {
-                job.field(x, y, style, &item.namefirst)?;
-            }
-            LabelKind::Plu => {
-                job.field(x, y, style, &format!("PLU {}", item.plu))?;
-            }
-            LabelKind::Weight => {
-                job.field(x, y, style, &format!("{},{:03}", weight_g / 1000, weight_g % 1000))?;
-            }
-            LabelKind::Price => {
-                job.field(x, y, style, &money(item.price))?;
-            }
-            LabelKind::Sum => {
-                job.field(x, y, style, &money(sum_kop))?;
-            }
-            LabelKind::Date => {
-                job.field(x, y, style, date)?;
-            }
-            LabelKind::Time => {
-                job.field(x, y, style, time)?;
-            }
-            LabelKind::Shelflife => {
-                let text = shelflife_label(&item.shelflife);
-                if let Some(text) = text {
-                    job.field(x, y, style, &text)?;
-                }
-            }
-            LabelKind::Cardprice => {
-                if let Some(card) = item.card_price {
-                    job.field(x, y, style, &money(card))?;
-                }
-            }
-            LabelKind::Text => {
-                job.field(x, y, style, &f.text)?;
-            }
-            LabelKind::Barcode => {
-                job.barcode_ean13(x, y, &ean13_payload(item, weight_g))?;
-            }
+        if f.kind == LabelKind::Barcode {
+            job.barcode_ean13(x, y, &ean13_payload(item, weight_g))?;
+            continue;
         }
+        let Some(text) = spec_field_text(
+            f,
+            item,
+            weight_g,
+            sum_kop,
+            date,
+            time,
+            spec.width_mm as f64,
+        ) else {
+            continue;
+        };
+        job.field(x, y, style, &text)?;
     }
     Ok(job.finish())
 }
@@ -1557,15 +1540,13 @@ mod tests {
         let barcode = items.iter().find(|i| i.barcode).unwrap();
         assert_eq!((barcode.x_mm, barcode.y_mm), (2.0, 5.0));
         assert_eq!((barcode.w_mm, barcode.h_mm), (24.0, 6.0));
-        let name: Vec<_> = items.iter().filter(|i| !i.barcode && i.text == "В").collect();
-        assert_eq!(name.len(), 1);
-        let first = items.iter().find(|i| i.text == "В").unwrap();
-        assert_eq!((first.x_mm, first.y_mm), (2.0, 1.0));
-        assert_eq!((first.w_mm, first.h_mm), (1.5, 3.0));
-        let second = items.iter().filter(|i| !i.barcode).nth(1).unwrap();
-        assert_eq!(second.x_mm, 3.5);
-        let total_chars: usize = items.iter().filter(|i| !i.barcode).map(|i| i.text.chars().count()).sum();
-        assert_eq!(total_chars, items.iter().filter(|i| !i.barcode).count());
+        let fields: Vec<_> = items.iter().filter(|i| !i.barcode).collect();
+        assert!(fields.iter().any(|i| i.text.contains("ВИНОГРАД")));
+        let name = fields.iter().find(|i| i.text.contains("ВИНОГРАД")).unwrap();
+        assert_eq!((name.x_mm, name.y_mm), (2.0, 1.0));
+        assert_eq!((name.w_mm, name.h_mm), (56.0, 3.0));
+        assert!(fields.iter().any(|i| i.text.contains("1,350")));
+        assert!(fields.iter().any(|i| i.text.contains("269,99")));
     }
     #[test]
     fn pick_by_length_window() {

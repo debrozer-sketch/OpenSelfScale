@@ -1689,6 +1689,17 @@ fn show_preview(
     let (date, time) = crate::print::now_stamp();
     let sum_kop = crate::session::round_sum(crate::session::sum_kopecks(item.price, 1000), 0);
     let preview = crate::print::preview_items(&spec, &item, 1000, sum_kop, &date, &time);
+    let text_rows = preview.iter().filter(|p| !p.barcode).count();
+    let sample: String = preview
+        .iter()
+        .filter(|p| !p.barcode)
+        .take(5)
+        .map(|p| p.text.clone())
+        .collect();
+    log::info!(
+        "меню: этикетки: превью «{}»: строк {text_rows}, текст «{sample}»",
+        spec.name
+    );
     let Some(ui) = ui_handle.upgrade() else { return false };
     let rows: Vec<crate::LabelPreviewRow> = preview
         .into_iter()
@@ -1698,11 +1709,18 @@ fn show_preview(
             w: p.w_mm as f32,
             h: p.h_mm as f32,
             text: p.text.into(),
-            kind: if p.barcode { 1 } else { 0 },
+            kind: if p.barcode {
+                1
+            } else if p.h_mm >= 2.5 {
+                0
+            } else {
+                2
+            },
         })
         .collect();
     ui.set_labels_preview_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
     ui.set_labels_preview_name(spec.name.as_str().into());
+    ui.set_labels_preview_h(spec.height_mm as f32);
     ui.set_labels_preview_open(true);
     true
 }

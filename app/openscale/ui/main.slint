@@ -353,6 +353,7 @@ export component MainWindow inherits Window {
     in property <bool> labels-preview-open: false;
     in property <bool> labels-preview-importable: false;
     in property <float> labels-preview-scale: 8.0;
+    in property <float> labels-preview-h: 38.0;
     in property <[LabelPreviewRow]> labels-preview-rows;
     in property <string> labels-preview-name;
     callback labels-tap(int);
@@ -2463,9 +2464,9 @@ export component MainWindow inherits Window {
                 background: #00000060;
                 Rectangle {
                     x: (parent.width - root.labels-preview-scale * 58px) / 2;
-                    y: (parent.height - root.labels-preview-scale * 38px - 72px) / 2;
+                    y: (parent.height - root.labels-preview-scale * root.labels-preview-h * 1px - 72px) / 2;
                     width: root.labels-preview-scale * 58px;
-                    height: root.labels-preview-scale * 38px;
+                    height: root.labels-preview-scale * root.labels-preview-h * 1px;
                     background: #FFFFFF;
                     border-width: 2px;
                     border-color: #1A1E24;
@@ -2474,33 +2475,55 @@ export component MainWindow inherits Window {
                         y: r.y * root.labels-preview-scale * 1px;
                         width: r.w * root.labels-preview-scale * 1px;
                         height: r.h * root.labels-preview-scale * 1px;
-                        if r.kind == 1 : Rectangle {
+                        Text {
+                            x: 0;
                             width: parent.width;
                             height: parent.height;
-                            property <[length]> bars: [
-                                parent.width * 0.04, parent.width * 0.012, parent.width * 0.02, parent.width * 0.012,
-                                parent.width * 0.04, parent.width * 0.02, parent.width * 0.012, parent.width * 0.04,
-                                parent.width * 0.012, parent.width * 0.02, parent.width * 0.012, parent.width * 0.02,
-                                parent.width * 0.04, parent.width * 0.012, parent.width * 0.02, parent.width * 0.04,
-                                parent.width * 0.012, parent.width * 0.012, parent.width * 0.02, parent.width * 0.04,
-                            ];
-                            for w[j] in bars : Rectangle {
-                                x: (parent.width - parent.bars.length * parent.width * 0.05) / 2 + j * parent.width * 0.05;
-                                width: w;
-                                height: parent.height * 0.82;
-                                background: #000000;
-                            }
-                        }
-                        if r.kind == 0 : Text {
-                            x: -parent.width * 0.3;
-                            width: parent.width * 1.6;
-                            height: parent.height;
                             text: r.text;
-                            font-size: r.h * root.labels-preview-scale * 0.92px;
+                            font-size: 20px;
                             color: #000000;
-                            horizontal-alignment: center;
+                            horizontal-alignment: left;
                             vertical-alignment: center;
                             wrap: no-wrap;
+                            visible: r.kind == 0;
+                        }
+                    }
+                    for r in root.labels-preview-rows : Rectangle {
+                        x: r.x * root.labels-preview-scale * 1px;
+                        y: r.y * root.labels-preview-scale * 1px;
+                        width: r.w * root.labels-preview-scale * 1px;
+                        height: r.h * root.labels-preview-scale * 1px;
+                        Text {
+                            x: 0;
+                            width: parent.width;
+                            height: parent.height;
+                            text: r.text;
+                            font-size: 14px;
+                            color: #000000;
+                            horizontal-alignment: left;
+                            vertical-alignment: center;
+                            wrap: no-wrap;
+                            visible: r.kind == 2;
+                        }
+                    }
+                    for r in root.labels-preview-rows : Rectangle {
+                        x: r.x * root.labels-preview-scale * 1px;
+                        y: r.y * root.labels-preview-scale * 1px;
+                        width: r.w * root.labels-preview-scale * 1px;
+                        height: r.h * root.labels-preview-scale * 1px;
+                        visible: r.kind == 1;
+                        property <[length]> bars: [
+                            self.width * 0.04, self.width * 0.012, self.width * 0.02, self.width * 0.012,
+                            self.width * 0.04, self.width * 0.02, self.width * 0.012, self.width * 0.04,
+                            self.width * 0.012, self.width * 0.02, self.width * 0.012, self.width * 0.02,
+                            self.width * 0.04, self.width * 0.012, self.width * 0.02, self.width * 0.04,
+                            self.width * 0.012, self.width * 0.012, self.width * 0.02, self.width * 0.04,
+                        ];
+                        for w[j] in bars : Rectangle {
+                            x: (parent.width - parent.bars.length * parent.width * 0.05) / 2 + j * parent.width * 0.05;
+                            width: w;
+                            height: parent.height * 0.82;
+                            background: #000000;
                         }
                     }
                 }
