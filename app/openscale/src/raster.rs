@@ -94,23 +94,11 @@ pub fn probe_bitmap(
     bmp
 }
 pub fn alphabet_probe_bitmap() -> Bitmap {
-    let mut bmp = Bitmap::new(448, 480);
-    let rows = [
-        "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ",
-        "абвгдежзийклмнопрстуфхцчшщъыьэюя",
-        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.,:-/",
-    ];
+    let mut bmp = Bitmap::new(448, 128);
+    let rows = ["АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ", "абвгдежзийклмнопрстуфхцчшщъыьэюя"];
     for (i, s) in rows.iter().enumerate() {
-        bmp.text(&FONT_A, s, 2, 16 + i as i32 * 40, 1, true);
+        bmp.text(&FONT_A, s, 2, 16 + i as i32 * 48, 1, true);
     }
-    bmp.text(&FONT_B, "мелкий B: абвгд 0123456789", 2, 160, 1, true);
-    let digits = "2100000000013";
-    for (start, len) in crate::print::ean13_bar_runs(digits) {
-        bmp.fill(16 + start as i32 * 2, 200, len as i32 * 2, 48);
-    }
-    bmp.text(&FONT_A, digits, 16, 256, 1, true);
-    bmp.text(&FONT_A, "АБВ 012", 2, 310, 2, true);
-    bmp.text(&FONT_B, "B2x абв 012", 2, 380, 2, true);
     bmp
 }
 pub fn raster_bytes(bmp: &Bitmap) -> Vec<u8> {
