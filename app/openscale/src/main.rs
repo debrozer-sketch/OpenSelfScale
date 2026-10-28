@@ -82,11 +82,7 @@ fn main() {
                 name: "probe".into(),
                 width_mm: 58,
                 height_mm: 40,
-                fields: vec![
-                    crate::label::LabelField { kind: crate::label::LabelKind::Name, x_mm: 0.5, y_mm: 4.5, font_a: true, size2: false, text: String::new() },
-                    crate::label::LabelField { kind: crate::label::LabelKind::Weight, x_mm: 2.0, y_mm: 15.0, font_a: true, size2: false, text: String::new() },
-                    crate::label::LabelField { kind: crate::label::LabelKind::Price, x_mm: 2.0, y_mm: 25.0, font_a: true, size2: false, text: String::new() },
-                ],
+                fields: vec![],
             };
             let demo = datastore::PluItem {
                 plu: "2100001".into(),
