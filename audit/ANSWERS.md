@@ -41,4 +41,4 @@
 CString в weight.rs, pending-фикс в flow.rs, catch_unwind в spawn_daemon).
 Всё остальное — как в патче. Тесты workspace зелёные (escpos 10/10, kiosk
 26/26), clippy 0 предупреждений, релиз-сборка задеплоена на стенд
-(172.18.105.72), сервис active.
+(192.0.2.30), сервис active.

@@ -167,7 +167,7 @@ pending, catch_unwind — не задвоены). Взято целиком:
   print_op), weight.rs CString, flow.rs pending, catch_unwind.
 
 Проверка: cargo test --workspace зелёный (escpos 10/10, kiosk 26/26),
-clippy 0 warnings, zigbuild release OK, деплой на стенд (172.18.105.72)
+clippy 0 warnings, zigbuild release OK, деплой на стенд (192.0.2.30)
 выполнен, сервис active. Стенд-чеклист аудитора (6-8 печатей с трассой,
 авария без ленты + восстановление, debug_dump) — следующий шаг.
 

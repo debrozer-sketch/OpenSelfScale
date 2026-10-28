@@ -1,6 +1,6 @@
 # Старое ПО SelfServiceScales — полный разбор (боевой бэкап, 2026-10-15)
 
-Источник: побайтовый бэкап боевых весов 192.168.41.129 (Ubuntu 16.04) в
+Источник: побайтовый бэкап боевых весов 192.0.2.50 (Ubuntu 16.04) в
 `audit/prod-backup/`. Бинарник из бэкапа идентичен ранее изученному
 (MD5 071657EB5BA8385B416AC5D7F3BA0ADA) — дизасм в temp/slim/disasm.txt
 актуален. Локальная распаковка: temp/slim/prod/.
@@ -8,7 +8,7 @@
 ## 1. Как устроено на боевых
 
 - Автостарт: Upstart-джоб (`~/scales.conf`, start on runlevel 23, respawn) →
-  `startx` → `~/.xsessionrc`: xset off/dpms, **x11vnc -forever -passwd REMOVED**,
+  `startx` → `~/.xsessionrc`: xset off/dpms, **x11vnc -forever -passwd <пароль>**,
   `~/start.sh` = бесконечный цикл `./SelfServiceScales` в `~/sss/`.
 - Каталог `~/sss`: бинарник (271 КБ, Qt5 QML), `SelfServiceScales.conf`,
   шаблоны `label.xml`/`layout.xml`/`plu.xml`, каталог `img/` (картинки
@@ -98,7 +98,7 @@ time (x208 y282), shelflife (x290 y265), weight (x380 y265), пары
 NV-памяти принтера, FS q грузится loadLogos при старте из qrc-PNG).
 
 Это эталон для редактора этикеток и для LIVE_LAYOUT нового ПО: боевые
-этикетки заметно отличаются от дампа 172.32.0.5 (448×232). Шаблон должен
+этикетки заметно отличаются от дампа 192.0.2.10 (448×232). Шаблон должен
 приезжать с центра — подтверждено прод-данными.
 
 ## 7. Что нового ПО ещё не делает (сводная, см. ROADMAP §1)

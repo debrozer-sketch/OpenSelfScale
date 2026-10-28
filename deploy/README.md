@@ -5,8 +5,9 @@
 ## Файлы
 
 - `deploy/preseed.cfg` — сценарий установки (wipe /dev/sda, ESP+swap+root ext4,
-  статический IP 172.32.0.5, hostname `scales`, openssh-server, root-пароль
-  подставляется из .env при сборке).
+  статический IP 192.0.2.10, hostname `scales`, openssh-server, root-пароль
+  подставляется из .env при сборке). IP весов правится под объект перед
+  сборкой initrd; в репозитории — документированный адрес 192.0.2.10.
 - `deploy/make_initrd.py` — зашивает preseed в initrd установщика
   (второй gzip-cpio сегмент; ядро читает конкатенацию, d-i при
   `auto=true priority=critical` берёт /preseed.cfg). Результат:
@@ -36,7 +37,7 @@ python scale_ssh.py --sudo "kexec -l /home/administrator/install/vmlinuz \
   --command-line='auto=true priority=critical console=tty0' && kexec -e"
 
 # 5. SSH отвалится (установщик забрал консоль). Ждать 10-20 минут,
-#    затем: ssh root@172.32.0.5 (тот же пароль, что и раньше).
+#    затем: ssh root@192.0.2.10 (тот же пароль, что и раньше).
 #    Проверка: cat /etc/os-release, df -h, ls /home/administrator/sss (нет!)
 ```
 
@@ -54,7 +55,7 @@ python scale_ssh.py --sudo "kexec -l /home/administrator/install/vmlinuz \
   питанием: загрузчик старой системы уничтожен, дальше только PXE-путь
   (уровень 2 из docs/RECOVERY.md) или флешка.
 
-## Зеркало пакетов для установки (172.32.0.2:8000)
+## Зеркало пакетов для установки (192.0.2.20:8000)
 
 Установщик и apt весов берут пакеты с HTTP-зеркала на рабочем ПК
 (каталог с deploy/xorg/*deb + Packages.xz; поднимается python -m http.server 8000).
@@ -70,7 +71,7 @@ Debian-машине или python-скрипт). Перед переустано
 
 `openscale-vnc.service` слушает 5900 без `-localhost`: экран киоска нужен
 удалённо (торговый зал без монитора за стеклом). Порт не наружу —
-только внутри доверенного сегмента 172.18.x.x за jump-хостом. Держать
+только внутри доверенного сегмента 192.0.2.30.x.x за jump-хостом. Держать
 порт открытым наружу или в сегменте с посторонними машинами нельзя;
 в этом случае добавить `-localhost yes` в ExecStart.
 
