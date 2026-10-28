@@ -272,6 +272,7 @@ export component MainWindow inherits Window {
     callback plu-tapped(string);
     callback more();
     callback back();
+    callback catalog-back();
     callback dept-next();
     callback dept-prev();
     callback up();
@@ -508,19 +509,81 @@ export component MainWindow inherits Window {
         x: 0; y: 160px;
         width: root.width;
         height: root.height - 160px;
-        for d[i] in root.header-depts : Rectangle {
-            x: 8px + i * 114px;
+        if !root.catalog-back-btn : Rectangle {
+            x: 0; y: 0;
+            width: 8px + root.header-depts.length * 114px + 140px;
+            height: 56px;
+            for d[i] in root.header-depts : Rectangle {
+                x: 8px + i * 114px;
+                y: 8px;
+                width: 110px;
+                height: 40px;
+                border-radius: 12px;
+                background: d.name == root.screen-title ? #DDE3EA
+                         : hd-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    x: 4px;
+                    width: parent.width - 8px;
+                    height: parent.height;
+                    text: d.name;
+                    font-size: 15px;
+                    font-weight: 700;
+                    overflow: elide;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    color: #1A1E24;
+                }
+                hd-ta := TouchArea {
+                    clicked => { root.dept-tapped(d.name); }
+                }
+            }
+            if root.header-page > 0 : Rectangle {
+                x: 8px + root.header-depts.length * 114px;
+                y: 8px;
+                width: 62px;
+                height: 40px;
+                border-radius: 12px;
+                background: dept-prev-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    text: "НАЗАД";
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: #4A5460;
+                }
+                dept-prev-ta := TouchArea {
+                    clicked => { root.dept-prev(); }
+                }
+            }
+            if root.header-page < root.dept-pages-total - 1 : Rectangle {
+                x: 8px + root.header-depts.length * 114px
+                    + (root.page-no > 0 ? 66px : 0px);
+                y: 8px;
+                width: 62px;
+                height: 40px;
+                border-radius: 12px;
+                background: dept-next-ta.pressed ? #E4E8ED : #FFFFFF;
+                Text {
+                    text: "ДАЛЕЕ";
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: #4A5460;
+                }
+                dept-next-ta := TouchArea {
+                    clicked => { root.dept-next(); }
+                }
+            }
+        }
+        if root.catalog-back-btn : Rectangle {
+            x: 8px;
             y: 8px;
             width: 110px;
             height: 40px;
             border-radius: 12px;
-            background: d.name == root.screen-title ? #DDE3EA
-                     : hd-ta.pressed ? #E4E8ED : #FFFFFF;
+            background: cat-back-ta.pressed ? #E4E8ED : #FFFFFF;
             Text {
-                x: 4px;
-                width: parent.width - 8px;
+                width: parent.width;
                 height: parent.height;
-                text: d.name;
+                text: "Категории";
                 font-size: 15px;
                 font-weight: 700;
                 overflow: elide;
@@ -528,43 +591,8 @@ export component MainWindow inherits Window {
                 vertical-alignment: center;
                 color: #1A1E24;
             }
-            hd-ta := TouchArea {
-                clicked => { root.dept-tapped(d.name); }
-            }
-        }
-        if root.header-page > 0 : Rectangle {
-            x: 8px + root.header-depts.length * 114px;
-            y: 8px;
-            width: 62px;
-            height: 40px;
-            border-radius: 12px;
-            background: dept-prev-ta.pressed ? #E4E8ED : #FFFFFF;
-            Text {
-                text: "НАЗАД";
-                font-size: 13px;
-                font-weight: 700;
-                color: #4A5460;
-            }
-            dept-prev-ta := TouchArea {
-                clicked => { root.dept-prev(); }
-            }
-        }
-        if root.header-page < root.dept-pages-total - 1 : Rectangle {
-            x: 8px + root.header-depts.length * 114px
-                + (root.page-no > 0 ? 66px : 0px);
-            y: 8px;
-            width: 62px;
-            height: 40px;
-            border-radius: 12px;
-            background: dept-next-ta.pressed ? #E4E8ED : #FFFFFF;
-            Text {
-                text: "ДАЛЕЕ";
-                font-size: 13px;
-                font-weight: 700;
-                color: #4A5460;
-            }
-            dept-next-ta := TouchArea {
-                clicked => { root.dept-next(); }
+            cat-back-ta := TouchArea {
+                clicked => { root.catalog-back(); }
             }
         }
         Rectangle {
@@ -587,7 +615,7 @@ export component MainWindow inherits Window {
                 clicked => { root.search-open(); }
             }
         }
-        if root.catalog-back-btn : Rectangle {
+        if root.items-page-no > 0 && root.catalog-back-btn : Rectangle {
             x: 8px;
             y: 56px;
             width: 108px;
