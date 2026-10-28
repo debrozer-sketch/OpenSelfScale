@@ -132,14 +132,15 @@ export default function App() {
     if (!layout.name.trim()) result.push({ id: null, level: "error", msg: "Не указано имя раскладки" });
     REQUIRED.forEach(k => { if (!layout.fields.some(f => f.kind === k)) result.push({ id: null, level: "error", msg: `Нет обязательного поля: ${LABELS[k]}` }); });
     layout.fields.forEach(f => {
-      const s = fieldSize(f);
-      if (f.y < MARGIN_MM || f.y + s.h > layout.height_mm - MARGIN_MM) result.push({ id: f.id, level: "error", msg: `${LABELS[f.kind]} выходит по вертикали` });
-      if (f.x + fieldText(f, layout).length * cellWidth(f) > printableWidth(layout)) result.push({ id: f.id, level: "error", msg: `${LABELS[f.kind]}: текст обрежется на печати` });
+      const eff = withFont(f, layout);
+      const s = fieldSize(eff);
+      if (f.y < 0 || f.y + s.h > layout.height_mm - 2 * MARGIN_MM) result.push({ id: f.id, level: "error", msg: `${LABELS[f.kind]}: выходит за нижнее поле` });
+      if (f.x + fieldText(f, layout).length * cellWidth(eff) > printableWidth(layout)) result.push({ id: f.id, level: "error", msg: `${LABELS[f.kind]}: текст обрежется на печати` });
       const caption = CAPTIONS[f.kind];
       if (caption) {
         const full = `${caption} ${SAMPLES[f.kind]}`;
-        if (f.x + full.length * cellWidth(f) > printableWidth(layout) && f.x + SAMPLES[f.kind].length * cellWidth(f) <= printableWidth(layout))
-          result.push({ id: f.id, level: "warning", msg: `${LABELS[f.kind]}: подпись «${caption}» не поместится — напечатается без неё` });
+        if (f.x + full.length * cellWidth(eff) > printableWidth(layout) && f.x + SAMPLES[f.kind].length * cellWidth(eff) <= printableWidth(layout))
+          result.push({ id: f.id, level: "warning", msg: `${LABELS[f.kind]}: подпись <${caption}> не поместится - напечатается без неё` });
       }
     });
     return result;
