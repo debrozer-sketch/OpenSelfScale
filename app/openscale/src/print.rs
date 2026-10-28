@@ -1419,7 +1419,7 @@ pub fn grid_probe_bytes() -> Vec<u8> {
     const H: usize = 320;
     let mut job = LabelJob::begin((W as u16, H as u16));
     for yi in 0..19u16 {
-        for xi in 0..28u16 {
+        for xi in 0..27u16 {
             let _ = job.field(xi * 16, yi * 16, FieldStyle::FontB, "+");
         }
     }
