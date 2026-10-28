@@ -1443,11 +1443,31 @@ pub fn grid_probe_bytes() -> Vec<u8> {
             }
         }
     }
-    let mut job = LabelJob::begin((W as u16, H as u16));
+    let mut job = LabelJob::begin((W as u16, 336));
     job.raw(&[escpos::ESC, b'$', 0, 0]);
     job.raw(&[escpos::GS, b'$', 0, 0]);
-    job.raw(&[escpos::GS, b'v', b'0', 0x00, (W / 8) as u8, 0, 0x40, 0x01]);
-    job.raw(&grid);
+    job.raw(&[escpos::ESC, b'3', 24]);
+    let cols = W as usize;
+    for band_y in (0..336usize).step_by(24) {
+        let mut data = vec![0u8; cols * 3];
+        for col in 0..cols {
+            for j in 0..3usize {
+                for b in 0..8usize {
+                    let row = band_y + j * 8 + b;
+                    if row >= 320 {
+                        continue;
+                    }
+                    if grid[row * (W / 8) + col / 8] & (0x80 >> (col % 8)) != 0 {
+                        data[col * 3 + j] |= 0x80 >> b;
+                    }
+                }
+            }
+        }
+        job.raw(&[escpos::ESC, b'*', 33, 0xC0, 0x01]);
+        job.raw(&data);
+        job.raw(&[0x0A]);
+    }
+    job.raw(&[escpos::ESC, b'3', 0x00]);
     for mm in [10u16, 20, 30, 40, 50] {
         let _ = job.field(16 + mm * 8 + 2, 18, FieldStyle::FontB, &mm.to_string());
         if mm <= 30 {
