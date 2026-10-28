@@ -71,31 +71,32 @@ pub fn probe_bitmap(
     time: &str,
 ) -> Bitmap {
     let mut bmp = Bitmap::new(448, (spec.height_mm * 8) as usize);
-    for x in 0..bmp.w {
-        bmp.set(x as i32, 0);
-        bmp.set(x as i32, bmp.h as i32 - 1);
+    let m = MARGIN_DOTS;
+    for x in m..bmp.w as i32 - m {
+        bmp.set(x, m);
+        bmp.set(x, bmp.h as i32 - 1 - m);
     }
-    for y in 0..bmp.h {
-        bmp.set(0, y as i32);
-        bmp.set(bmp.w as i32 - 1, y as i32);
+    for y in m..bmp.h as i32 - m {
+        bmp.set(m, y);
+        bmp.set(bmp.w as i32 - 1 - m, y);
     }
-    for y in (5..(spec.height_mm)).step_by(5) {
-        for x in 0..bmp.w {
-            bmp.set(x as i32, (y * 8) as i32);
+    for y in (5..(spec.height_mm - 2)).step_by(5) {
+        for x in m..bmp.w as i32 - m {
+            bmp.set(x, m + (y * 8) as i32);
         }
     }
-    let cols = ["А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "К", "Л", "М"];
+    let cols = ["А", "Б", "В", "Г", "Д", "Е", "Ж", "З", "И", "К"];
     for (ci, letter) in cols.iter().enumerate() {
-        for row in 1..=11u16 {
-            let x = (ci as u16 * 5 * 8 + 1) as i32;
-            let y = ((row - 1) as u16 * 5 * 8 + 1) as i32;
+        for row in 1..=9u16 {
+            let x = m + (ci as u16 * 5 * 8 + 1) as i32;
+            let y = m + ((row - 1) as u16 * 5 * 8 + 1) as i32;
             bmp.text(&FONT_B, &format!("{letter}{row}"), x, y, 1, true);
         }
     }
     let items = crate::print::preview_items(spec, item, weight_g, sum_kop, date, time);
     for it in &items {
-        let x = (it.x_mm * 8.0) as i32;
-        let y = (it.y_mm * 8.0) as i32;
+        let x = (it.x_mm * 8.0) as i32 + m;
+        let y = (it.y_mm * 8.0) as i32 + m;
         if it.barcode {
             bmp.fill(x, y, (it.w_mm * 8.0) as i32, (it.h_mm * 8.0) as i32);
             continue;
@@ -124,6 +125,7 @@ pub fn alphabet_probe_bitmap() -> Bitmap {
 pub fn raster_bytes(bmp: &Bitmap) -> Vec<u8> {
     raster_bytes_bands(bmp, 40)
 }
+pub const MARGIN_DOTS: i32 = 16;
 pub fn raster_bytes_bands(bmp: &Bitmap, band_rows: usize) -> Vec<u8> {
     let mut flat = vec![0u8; bmp.w * bmp.h];
     for y in 0..bmp.h {
@@ -131,7 +133,7 @@ pub fn raster_bytes_bands(bmp: &Bitmap, band_rows: usize) -> Vec<u8> {
             flat[y * bmp.w + x] = bmp.rows[(bmp.h - 1 - y) * bmp.w + (bmp.w - 1 - x)];
         }
     }
-    let mut out = vec![escpos::ESC, b'@'];
+    let mut out = vec![escpos::GS, 0x0C, escpos::ESC, b'@'];
     for band in flat.chunks(bmp.w * band_rows) {
         let rows = (band.len() / bmp.w) as u16;
         out.extend_from_slice(&[escpos::GS, b'v', b'0', 0x00]);
