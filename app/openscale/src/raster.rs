@@ -147,7 +147,7 @@ pub fn raster_bytes_bands(bmp: &Bitmap, band_rows: usize) -> Vec<u8> {
             flat[y * bmp.w + x] = bmp.rows[(bmp.h - 1 - y) * bmp.w + (bmp.w - 1 - x)];
         }
     }
-    let mut out = vec![escpos::GS, 0x0C, escpos::ESC, b'@'];
+    let mut out = vec![escpos::ESC, b'@', escpos::ESC, b'L', escpos::FF];
     for band in flat.chunks(bmp.w * band_rows) {
         let rows = (band.len() / bmp.w) as u16;
         out.extend_from_slice(&[escpos::GS, b'v', b'0', 0x00]);

@@ -78,7 +78,7 @@ fn main() {
             }
         }
         Mode::RasterProbe => {
-            let bytes = raster::raster_bytes_pagemode(&raster::ruler_probe_bitmap());
+            let bytes = raster::raster_bytes_single(&raster::ruler_probe_bitmap());
             match print::send_raw_probe(&cfg, &bytes) {
                 Ok(()) => println!("raster-probe: напечатано"),
                 Err(e) => {
