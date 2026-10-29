@@ -30,6 +30,7 @@ pub const SCREENS: &[Screen] = &[
     Screen { stage: 20, slint: 19, title: "НАСТРОЙКА ВЕСОВ", parent: EXIT, back: false },
     Screen { stage: 21, slint: 20, title: "ЭТИКЕТКИ", parent: EXIT, back: true },
     Screen { stage: 22, slint: 23, title: "ЖУРНАЛ ДЕЙСТВИЙ", parent: 14, back: true },
+    Screen { stage: 23, slint: 24, title: "СОСТОЯНИЕ", parent: 2, back: true },
     Screen { stage: 30, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
     Screen { stage: 31, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
     Screen { stage: 32, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
@@ -82,6 +83,7 @@ mod tests {
     fn known_screens_resolve() {
         assert_eq!(screen_slint(3), 4);
         assert_eq!(screen_slint(22), 23);
+        assert_eq!(screen_slint(23), 24);
         assert_eq!(screen_title(22), "ЖУРНАЛ ДЕЙСТВИЙ");
         assert_eq!(screen_title(3), "НАСТРОЙКИ · ОТДЕЛЫ");
         assert_eq!(screen_parent(3), 11);

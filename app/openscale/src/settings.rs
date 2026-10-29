@@ -1007,6 +1007,35 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     refresh_action_log(&cfg, &ui_handle);
                     kiosk.borrow_mut().admin_stage = 22;
                 }
+                "status" => {
+                    let app_state = app_state.clone();
+                    let cfg_s = cfg.clone();
+                    let ui_handle = ui_handle.clone();
+                    let ui_panic = ui_handle.clone();
+                    spawn_menu_task(
+                        "состояние",
+                        move |msg| {
+                            if let Some(ui) = ui_panic.upgrade() {
+                                ui.set_status_rows(slint::ModelRc::new(slint::VecModel::from(
+                                    vec![slint::SharedString::from(format!(
+                                        "Не удалось собрать состояние: {msg}"
+                                    ))],
+                                )));
+                            }
+                        },
+                        move || {
+                            let rows = status_rows(&cfg_s, &app_state);
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ui) = ui_handle.upgrade() {
+                                    ui.set_status_rows(slint::ModelRc::new(
+                                        slint::VecModel::from(rows),
+                                    ));
+                                }
+                            });
+                        },
+                    );
+                    kiosk.borrow_mut().admin_stage = 23;
+                }
                 "changepin" => {
                     let mut k = kiosk.borrow_mut();
                     k.pin_pending.clear();
@@ -1869,6 +1898,57 @@ fn show_labels_popup(
             ui.set_labels_popup_open(true);
         }
     });
+}
+fn status_rows(
+    cfg: &crate::config::Config,
+    app_state: &std::sync::Arc<crate::weight::WeightSource>,
+) -> Vec<slint::SharedString> {
+    let snap = app_state.snapshot();
+    let scales = if snap.port_up {
+        format!("Весы: связь есть · вес {:.3} кг · {}", snap.mass_kg, if snap.stable { "стабильно" } else { "движение" })
+    } else {
+        "Весы: НЕТ СВЯЗИ".to_string()
+    };
+    let ph = crate::print::health();
+    let printer = if ph.fault {
+        "Принтер: АВАРИЯ".to_string()
+    } else {
+        let paper = if ph.paper_end {
+            "лента КОНЧИЛАСЬ"
+        } else if ph.paper_near_end {
+            "лента заканчивается"
+        } else {
+            "лента в порядке"
+        };
+        format!("Принтер: готов · {paper}")
+    };
+    let net_txt = {
+        let n = crate::net::read_cached();
+        if n.ip.is_empty() {
+            "Сеть: адрес не получен".to_string()
+        } else {
+            format!("Сеть: {} ({})", n.ip, if crate::net::read_mode() { "DHCP" } else { "статика" })
+        }
+    };
+    let (count, size) = match datastore::open(&cfg.db_path) {
+        Ok(conn) => {
+            let c: i64 = conn
+                .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+                .unwrap_or(0);
+            let sz = std::fs::metadata(&cfg.db_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
+            (c, sz)
+        }
+        Err(_) => (0, 0),
+    };
+    vec![
+        format!("Версия: {}", env!("CARGO_PKG_VERSION")).into(),
+        scales.into(),
+        printer.into(),
+        net_txt.into(),
+        format!("База: товаров {count}, размер {:.1} МБ", size as f64 / 1_048_576.0).into(),
+    ]
 }
 fn refresh_action_log(cfg: &crate::config::Config, ui_handle: &slint::Weak<MainWindow>) {
     let db_path = cfg.db_path.clone();

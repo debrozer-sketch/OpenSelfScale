@@ -439,6 +439,8 @@ export component MainWindow inherits Window {
     in property <string> report-period: "Сегодня";
     in property <string> report-kind: "Все события";
     in property <[string]> actionlog-rows;
+    in property <[string]> status-rows;
+    callback status-refresh();
     callback actionlog-refresh();
     in property <[string]> labels-rows;
     in property <[string]> labels-files;
@@ -1505,9 +1507,11 @@ export component MainWindow inherits Window {
             width: parent.width;
             height: parent.height - 84px;
             property <[MenuRow]> rows-staff: [
+                { label: "Состояние", id: "status", admin: false },
+                { label: "Обнулить весы", id: "zero", admin: false },
                 { label: "Протяжка этикетки", id: "feed", admin: false },
                 { label: "Тестовая печать", id: "testprint", admin: false },
-                { label: "Этикетки", id: "labels", admin: false },
+                { label: "Отчёты", id: "reports", admin: false },
                 { label: "Мой PIN", id: "changepin", admin: false },
             ];
             property <[MenuRow]> rows-admin-setup: [
@@ -2269,6 +2273,57 @@ export component MainWindow inherits Window {
                 }
             }
         }
+        if root.screen == 24 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+            Rectangle {
+                x: 8px; y: 8px;
+                width: 200px;
+                height: 52px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: Theme.border;
+                background: st-r-ta.pressed ? Theme.pressed : Theme.surface;
+                Text {
+                    text: "Обновить";
+                    font-size: Theme.font-body;
+                    font-weight: 700;
+                    color: Theme.ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                st-r-ta := TouchArea { clicked => { root.status-refresh(); } }
+            }
+            Flickable {
+                x: 8px; y: 68px;
+                width: parent.width - 16px;
+                height: parent.height - 76px;
+                viewport-width: self.width;
+                viewport-height: st-col.preferred-height;
+                st-col := VerticalLayout {
+                    spacing: 6px;
+                    for row in root.status-rows : Rectangle {
+                        height: 44px;
+                        border-radius: 10px;
+                        border-width: 2px;
+                        border-color: Theme.border;
+                        background: Theme.surface;
+                        Text {
+                            x: 16px;
+                            width: parent.width - 32px;
+                            height: parent.height;
+                            text: row;
+                            font-size: Theme.font-body;
+                            color: Theme.ink;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+
 
         if root.screen == 17 : Rectangle {
             x: 0; y: 84px;
