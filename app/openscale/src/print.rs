@@ -1490,19 +1490,18 @@ pub fn print_ruler_probe(cfg: &crate::config::Config) -> Result<(), PrintError> 
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
-pub fn print_for_plu(
+pub fn print_for_item(
     cfg: &crate::config::Config,
+    item: &PluItem,
     weight_g: u32,
-    plu: &str,
 ) -> Result<(), PrintError> {
     if !cfg.printer.enabled {
         return Err(PrintError::PrinterDisabled);
     }
-    let conn = datastore::open(&cfg.db_path)?;
-    let item = datastore::get_item(&conn, plu)?.ok_or_else(|| PrintError::PluNotFound(plu.into()))?;
     if weight_g > 99_999 {
         return Err(PrintError::WeightLimit(weight_g));
     }
+    let conn = datastore::open(&cfg.db_path)?;
     let rounding = datastore::get_calibration(&conn, "price_rounding")
         .ok()
         .flatten()
@@ -1514,7 +1513,7 @@ pub fn print_for_plu(
         .flatten()
         .map(|v| v as i32);
     let spec = pick_layout(&conn, measured);
-    let bytes = build_label_from_spec(&item, weight_g, &date, &time, rounding, spec.as_ref())?;
+    let bytes = build_label_from_spec(item, weight_g, &date, &time, rounding, spec.as_ref())?;
     let sum_kop = crate::session::round_sum(
         crate::session::sum_kopecks(item.price, weight_g),
         rounding,
@@ -1535,6 +1534,18 @@ pub fn print_for_plu(
     .map_err(std::io::Error::other)?;
     Ok(())
 }
+pub fn print_for_plu(
+    cfg: &crate::config::Config,
+    weight_g: u32,
+    plu: &str,
+) -> Result<(), PrintError> {
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
+    let conn = datastore::open(&cfg.db_path)?;
+    let item = datastore::get_item(&conn, plu)?.ok_or_else(|| PrintError::PluNotFound(plu.into()))?;
+    print_for_item(cfg, &item, weight_g)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1549,6 +1560,14 @@ mod tests {
             groupcode: "21".into(),
             shelflife: "20/09/2026 18:25:45".into(),
         }
+    }
+    #[test]
+    fn print_for_item_disabled_printer_does_not_touch_db() {
+        let mut cfg = crate::config::Config::default();
+        cfg.printer.enabled = false;
+        cfg.db_path = std::path::PathBuf::from("Z:/no/such-dir/db.sqlite");
+        let err = print_for_item(&cfg, &sample(), 1350).unwrap_err();
+        assert!(matches!(err, PrintError::PrinterDisabled));
     }
     #[test]
     fn label_contains_weight_price_sum_from_dump() {

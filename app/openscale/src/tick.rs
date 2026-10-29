@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use crate::context::AppContext;
 use crate::print;
-use crate::session::{DONE_TIMEOUT, ERROR_TIMEOUT, round_sum, sum_kopecks, sum_str, weight_state};
+use crate::session::{self, DONE_TIMEOUT, ERROR_TIMEOUT, round_sum, sum_kopecks, sum_str, weight_state};
 pub fn start(
     ctx: &AppContext,
     go_root: Rc<dyn Fn()>,
@@ -164,12 +164,15 @@ pub fn start(
                         let cfg = cfg.clone();
                         let tx = print_tx.clone();
                         let op = k.print_op;
-                        let plu =
-                            k.selected.as_ref().map(|p| p.plu.clone()).unwrap_or_default();
+                        let item = k.selected.as_ref().cloned();
+                        let plu = item.as_ref().map(|p| p.plu.clone()).unwrap_or_default();
                         log::info!("печать: PLU {plu}, {weight_g} г (операция #{op})");
                         std::thread::spawn(move || {
-                            let res = print::print_for_plu(&cfg, weight_g, &plu)
-                                .map_err(|e| format!("{e}"));
+                            let res = match item {
+                                Some(item) => print::print_for_item(&cfg, &item, weight_g)
+                                    .map_err(|e| format!("{e}")),
+                                None => Err("позиция не выбрана".into()),
+                            };
                             let _ = tx.send((op, res.map(|_| weight_g)));
                         });
                     }
@@ -356,7 +359,7 @@ pub fn start(
                             "{}: взвешиваем…",
                             k.selected
                                 .as_ref()
-                                .map(|p| p.name.clone())
+                                .map(|p| session::item_display_name(p))
                                 .unwrap_or_else(|| "Товар".into())
                         ),
                         1,
@@ -368,7 +371,7 @@ pub fn start(
                             (
                                 format!(
                                     "Печать: {} · {},{:03} кг · {}",
-                                    sel.name,
+                                    session::item_display_name(sel),
                                     w / 1000,
                                     w % 1000,
                                     sum

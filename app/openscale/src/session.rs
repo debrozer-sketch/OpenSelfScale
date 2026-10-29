@@ -27,9 +27,16 @@ pub fn weight_state(snap: &crate::weight::Snapshot, min_kg: f64) -> i32 {
         1
     }
 }
+pub fn item_display_name(item: &datastore::PluItem) -> String {
+    if item.namesecond.is_empty() {
+        item.namefirst.clone()
+    } else {
+        format!("{} {}", item.namefirst, item.namesecond)
+    }
+}
 pub struct Kiosk {
     pub phase: i32,
-    pub selected: Option<datastore::PluEntry>,
+    pub selected: Option<datastore::PluItem>,
     pub print_weight_g: Option<u32>,
     pub done_at: Option<Instant>,
     pub error_at: Option<Instant>,

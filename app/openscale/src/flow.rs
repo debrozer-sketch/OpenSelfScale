@@ -3,8 +3,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 use crate::context::AppContext;
-use crate::session::weight_state;
-use crate::tiles;
+use crate::session::weight_state;use crate::tiles;
 use crate::{DeptDef, MainWindow, PluTile};
 pub struct FlowHandles {
     pub go_root: Rc<dyn Fn()>,
@@ -52,6 +51,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let app_state = ctx.app_state.clone();
         let trade = ctx.trade.clone();
         let ui_handle = ui_handle.clone();
+        let cfg = ctx.cfg.clone();
         move || {
             let mut k = kiosk.borrow_mut();
             let Some(entry) = k.pending.clone() else { return };
@@ -60,8 +60,21 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             if ws != 2 {
                 return;
             }
+            let item = match datastore::open(&cfg.db_path)
+                .and_then(|conn| datastore::get_item(&conn, &entry.plu))
+            {
+                Ok(Some(item)) => item,
+                Ok(None) => {
+                    log::warn!("позиция PLU {} исчезла из БД — подтверждение отменено", entry.plu);
+                    return;
+                }
+                Err(e) => {
+                    log::warn!("позиция PLU {} недоступна: {e}", entry.plu);
+                    return;
+                }
+            };
             k.pending = None;
-            k.selected = Some(entry);
+            k.selected = Some(item);
             k.phase = 2;
             k.idle_since = None;
             if let Some(ui) = ui_handle.upgrade() {
