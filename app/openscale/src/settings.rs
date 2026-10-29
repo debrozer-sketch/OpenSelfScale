@@ -94,42 +94,21 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let ui_handle = ui_handle.clone();
         move || {
             let mut k = kiosk.borrow_mut();
-            match k.admin_stage {
-                4 => {
-                    k.admin_stage = 6;
-                    return;
-                }
-                7..=9 => {
-                    k.admin_stage = 14;
-                    k.pin_pending.clear();
-                    k.pin_new.clear();
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_pin_forced(false);
-                        ui.set_pin_error("".into());
+            let parent = crate::nav::screen_parent(k.admin_stage);
+            if parent != 0 {
+                match k.admin_stage {
+                    7..=9 => {
+                        k.pin_pending.clear();
+                        k.pin_new.clear();
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_pin_forced(false);
+                            ui.set_pin_error("".into());
+                        }
                     }
-                    return;
+                    _ => {}
                 }
-                3 | 12 | 13 | 14 => {
-                    k.admin_stage = 11;
-                    return;
-                }
-                10 => {
-                    k.admin_stage = 12;
-                    return;
-                }
-                15 => {
-                    k.admin_stage = 12;
-                    return;
-                }
-                16 => {
-                    k.admin_stage = 14;
-                    return;
-                }
-                17 => {
-                    k.admin_stage = 6;
-                    return;
-                }
-                _ => {}
+                k.admin_stage = parent;
+                return;
             }
             k.admin_open = false;
             k.admin_stage = 1;

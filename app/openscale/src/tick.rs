@@ -247,28 +247,17 @@ pub fn start(
                     *admin_fp.borrow_mut() = 0;
                 }
                 if k.admin_open {
-                    let screen = match k.admin_stage {
-                        1 => 5,
-                        2 => 6,
-                        3 => 4,
-                        4 => 7,
-                        5 => 8,
-                        6 => 9,
-                        7..=9 => 10,
-                        11 => 12,
-                        12 => 13,
-                        13 => 14,
-                        14 => 15,
-                        15 => 16,
-                        16 => 17,
-                        17 => 18,
-                        21 => 20,
-                        20 => 19,
-                        30..=35 => 5,
-                        _ => 7,
-                    };
+                    let screen = i32::from(crate::nav::screen_slint(k.admin_stage));
+                    let title = crate::nav::screen_title(k.admin_stage);
                     if ui.get_screen() != screen {
                         ui.set_screen(screen);
+                    }
+                    if ui.get_admin_title() != title {
+                        ui.set_admin_title(title.into());
+                    }
+                    let back = crate::nav::screen_has_back(k.admin_stage);
+                    if ui.get_admin_back_visible() != back {
+                        ui.set_admin_back_visible(back);
                     }
                     if (7..=9).contains(&k.admin_stage) {
                         let prompt = match k.admin_stage {

@@ -10,6 +10,7 @@ mod diag;
 mod flow;
 mod label;
 mod net;
+mod nav;
 mod print;
 mod session;
 mod settings;

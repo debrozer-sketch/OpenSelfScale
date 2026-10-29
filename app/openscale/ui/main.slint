@@ -333,6 +333,8 @@ export component MainWindow inherits Window {
     in property <string> status-text: "";
     in property <int> status-level: 0; 
     in property <int> screen: 0;
+    in property <string> admin-title: "МЕНЮ НАСТРОЕК";
+    in property <bool> admin-back-visible: false;
     in property <string> screen-title: "";
     in property <int> page-no: 0;
     in property <int> pages-total: 1;
@@ -1147,33 +1149,14 @@ export component MainWindow inherits Window {
                 x: 16px;
                 width: parent.width - 440px;
                 height: parent.height;
-                text: root.screen == 5 ? "ВХОД ПЕРСОНАЛА"
-                    : root.screen == 4 ? "НАСТРОЙКИ · ОТДЕЛЫ"
-                    : root.screen == 7 ? "ДИАГНОСТИКА"
-                    : root.screen == 8 ? "НАСТРОЙКИ · СЕТЬ"
-                    : root.screen == 9 ? "НАСТРОЙКИ · ОБОРУДОВАНИЕ"
-                    : root.screen == 10 ? "СМЕНА ПАРОЛЯ"
-                    : root.screen == 12 ? "НАСТРОЙКИ ВЕСОВ"
-                    : root.screen == 13 ? "НАСТРОЙКИ · ТОВАРЫ И ЭКРАН"
-                    : root.screen == 14 ? "НАСТРОЙКИ · ТОРГОВЫЕ ПРАВИЛА"
-                    : root.screen == 15 ? "НАСТРОЙКИ · ОБСЛУЖИВАНИЕ"
-                    : root.screen == 16 ? "НАСТРОЙКИ · ИМПОРТ"
-                    : root.screen == 17 ? "ОТЧЁТЫ"
-                    : root.screen == 18 ? "ПРИНТЕР · ДИАГНОСТИКА"
-                    : root.screen == 20 ? "ЭТИКЕТКИ"
-                    : root.screen == 19 ? "НАСТРОЙКА ВЕСОВ"
-                    : "МЕНЮ НАСТРОЕК";
+                text: root.admin-title;
                 font-size: Theme.font-h3;
                 font-weight: 700;
                 color: Theme.ink;
                 vertical-alignment: center;
                 overflow: elide;
             }
-            if (root.screen == 4 || root.screen == 8 || root.screen == 9
-                || root.screen == 12 || root.screen == 13
-                || root.screen == 14 || root.screen == 16 || root.screen == 17
-                || root.screen == 18 || root.screen == 20)
-                && !root.pin-forced : Rectangle {
+            if root.admin-back-visible && !root.pin-forced : Rectangle {
                 x: parent.width - 336px;
                 y: 8px;
                 width: 160px;
