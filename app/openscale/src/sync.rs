@@ -31,7 +31,11 @@ fn parse_canonical_json(text: &str) -> Result<(Vec<datastore::PluItem>, usize), 
     for v in values {
         match serde_json::from_value::<CanonItem>(v) {
             Ok(ci) => {
-                if ci.plu.trim().is_empty() || ci.name.trim().is_empty() || ci.price_kop < 0 {
+                if ci.plu.trim().is_empty()
+                    || ci.name.trim().is_empty()
+                    || ci.price_kop <= 0
+                    || ci.price_kop > datastore::MAX_PRICE_KOP
+                {
                     skipped += 1;
                     continue;
                 }

@@ -523,7 +523,24 @@ pub fn print_log_filtered(
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
+pub const MAX_PRICE_KOP: i64 = 99_999_999;
 pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
+    for it in items {
+        if it.price <= 0 || it.price > MAX_PRICE_KOP {
+            return Err(StoreError::Xml(format!(
+                "цена позиции {} вне диапазона 1..{MAX_PRICE_KOP} коп",
+                it.plu
+            )));
+        }
+        if let Some(cp) = it.card_price {
+            if cp < 0 || cp > MAX_PRICE_KOP {
+                return Err(StoreError::Xml(format!(
+                    "цена по карте позиции {} вне диапазона 0..{MAX_PRICE_KOP} коп",
+                    it.plu
+                )));
+            }
+        }
+    }
     let tx = conn.unchecked_transaction()?;
     let mut stmt = tx.prepare(
         "INSERT INTO plucodes
@@ -623,13 +640,13 @@ pub fn parse_plu_xml_counted(data: &str) -> Result<(Vec<PluItem>, usize), StoreE
                             .to_string();
                         match a.key.as_ref() {
                             b"plunumber" => it.plu = v,
-                            b"price" => match v.parse() {
-                                Ok(p) => it.price = p,
-                                Err(_) => bad = true,
+                            b"price" => match v.parse::<i64>() {
+                                Ok(p) if p > 0 && p <= MAX_PRICE_KOP => it.price = p,
+                                _ => bad = true,
                             },
-                            b"cardprice" => match v.parse() {
-                                Ok(p) => it.card_price = Some(p),
-                                Err(_) => bad = true,
+                            b"cardprice" => match v.parse::<i64>() {
+                                Ok(p) if p >= 0 && p <= MAX_PRICE_KOP => it.card_price = Some(p),
+                                _ => bad = true,
                             },
                             b"itemcode" => it.itemcode = v,
                             b"namefirst" => it.namefirst = v,
@@ -780,6 +797,44 @@ mod tests {
 <button name="ГРЕЦКИЙ" PLU="000111" img="000111.jpg"/>
 </group>
 </body>"#;
+    #[test]
+    fn parse_plu_xml_rejects_out_of_range_prices() {
+        let good = r#"<body>
+<item plunumber="1" price="47999" namefirst="A"/>
+<item plunumber="2" price="1" namefirst="B"/>
+<item plunumber="3" price="47999" namefirst="C"/>
+</body>"#;
+        let (items, skipped) = parse_plu_xml_counted(good).unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(skipped, 0);
+        for bad_price in ["0", "-5", "100000000"] {
+            let xml = format!(
+                r#"<body>
+<item plunumber="1" price="{bad_price}" namefirst="A"/>
+<item plunumber="2" price="47999" namefirst="B"/>
+</body>"#
+            );
+            assert!(
+                parse_plu_xml_counted(&xml).is_err(),
+                "price={bad_price} должен отвергаться"
+            );
+        }
+    }
+    #[test]
+    fn import_plu_rejects_out_of_range_price() {
+        let conn = open(Path::new(":memory:")).unwrap();
+        let it = PluItem {
+            plu: "1".into(),
+            price: 100_000_000,
+            card_price: None,
+            itemcode: "1".into(),
+            namefirst: "A".into(),
+            namesecond: String::new(),
+            groupcode: String::new(),
+            shelflife: String::new(),
+        };
+        assert!(import_plu(&conn, &[it]).is_err());
+    }
     #[test]
     fn parse_layout_real_format() {
         let groups = parse_layout_xml(LAYOUT_SAMPLE).unwrap();

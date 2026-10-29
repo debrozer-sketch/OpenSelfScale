@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 pub const DONE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
 pub fn sum_kopecks(price: i64, weight_g: u32) -> i64 {
-    (price * weight_g as i64 + 500) / 1000
+    price.saturating_mul(weight_g as i64).saturating_add(500) / 1000
 }
 pub fn round_sum(sum: i64, mode: i64) -> i64 {
     match mode {
@@ -134,6 +134,11 @@ mod tests {
         assert_eq!(sum_kopecks(19999, 1350), 26999);
         assert_eq!(sum_str(26999), "269.99 ₽");
         assert_eq!(price_str(19999), "199.99 ₽/кг");
+    }
+    #[test]
+    fn sum_kopecks_saturates_instead_of_overflowing() {
+        assert_eq!(sum_kopecks(99_999_999, 99_999), 9_999_899_900);
+        assert_eq!(sum_kopecks(i64::MAX, u32::MAX), i64::MAX / 1000);
     }
     #[test]
     fn round_sum_modes() {
