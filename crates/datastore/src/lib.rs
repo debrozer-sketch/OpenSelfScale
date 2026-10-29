@@ -118,24 +118,42 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              ALTER TABLE depts ADD COLUMN fg TEXT;",
         )?;
     }
-    let dept_count: i64 =
-        conn.query_row("SELECT COUNT(*) FROM depts", [], |r| r.get(0))?;
-    if dept_count == 0 {
-        for (i, (name, img)) in SEED_DEPTS.iter().enumerate() {
+    let seeded: bool =
+        conn.query_row(
+            "SELECT COUNT(*) FROM app_settings WHERE key = 'seed_done'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false);
+    if !seeded {
+        let dept_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM depts", [], |r| r.get(0))?;
+        if dept_count == 0 {
+            for (i, (name, img)) in SEED_DEPTS.iter().enumerate() {
+                conn.execute(
+                    "INSERT OR IGNORE INTO depts (name, ord, img) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![name, i as i64, img],
+                )?;
+            }
+        }
+        for (g, d) in SEED_GROUP_DEPT {
             conn.execute(
-                "INSERT OR IGNORE INTO depts (name, ord, img) VALUES (?1, ?2, ?3)",
-                rusqlite::params![name, i as i64, img],
+                "INSERT OR IGNORE INTO group_dept (grp, dept) VALUES (?1, ?2)",
+                rusqlite::params![g, d],
             )?;
         }
-    }
-    for (g, d) in SEED_GROUP_DEPT {
         conn.execute(
-            "INSERT OR IGNORE INTO group_dept (grp, dept) VALUES (?1, ?2)",
-            rusqlite::params![g, d],
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('seed_done', '1')",
+            [],
         )?;
     }
     migrated_paths().lock().unwrap().insert(key);
     Ok(conn)
+}
+#[cfg(test)]
+pub(crate) fn clear_migrated_paths() {
+    migrated_paths().lock().unwrap().clear();
 }
 fn migrated_paths() -> &'static Mutex<std::collections::HashSet<String>> {
     static M: std::sync::OnceLock<Mutex<std::collections::HashSet<String>>> =
@@ -799,6 +817,33 @@ pub fn apply_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn seeding_happens_once_per_database() {
+        let dir = std::env::temp_dir().join(format!("os-seed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("t.sqlite");
+        {
+            let conn = open(&db).unwrap();
+            assert!(depts_list(&conn).unwrap().iter().any(|d| d.name == "ОВОЩИ"));
+            dept_remove(&conn, "ОВОЩИ").unwrap();
+        }
+        clear_migrated_paths();
+        {
+            let conn = open(&db).unwrap();
+            let depts = depts_list(&conn).unwrap();
+            assert!(
+                !depts.iter().any(|d| d.name == "ОВОЩИ"),
+                "удалённый отдел возродился сидом"
+            );
+            let gd = group_depts(&conn).unwrap();
+            assert!(
+                !gd.iter().any(|(g, _)| g == "КАПУСТА"),
+                "привязки удалённого отдела возродились сидом"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     const SAMPLE: &str = r#"<body>
 <item plunumber="012112" price="44999" itemcode="02367" namefirst="АВОКАДО КГ" namesecond="" groupcode="21" shelflife="22/11/2026 15:25:36" />
 <item plunumber="2502192" price="19999" cardprice="17999" itemcode="02136" namefirst="ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ" namesecond="" groupcode="21" shelflife="20/09/2026 18:25:45" />
