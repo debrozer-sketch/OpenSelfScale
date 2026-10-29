@@ -305,13 +305,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 let data = (|| -> Option<(Vec<datastore::DeptRow>, Vec<(String, String)>, Vec<(String, i64)>)> {
                     let conn = datastore::open(&cfg2.db_path).ok()?;
                     let depts = datastore::depts_list(&conn).ok()?;
-                    let gd_map: std::collections::HashMap<String, String> =
+                    let mut gd_map: std::collections::HashMap<String, String> =
                         datastore::group_depts(&conn).ok()?.into_iter().collect();
                     let all_groups = datastore::groups_alpha(&conn).ok()?;
-                    let unmapped = all_groups
-                        .iter()
-                        .filter(|(g, n)| *n > 0 && !gd_map.contains_key(g))
-                        .count();
                     match datastore::route_unmapped_groups(&conn, &mut gd_map, &all_groups) {
                         Ok(un) if !un.is_empty() => {
                             for g in &un {
@@ -321,7 +317,6 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                         Ok(_) => {}
                         Err(e) => log::error!("раскладка: группы без отдела: {e}"),
                     }
-                    let _ = unmapped;
                     let depts = if depts.is_empty() {
                         datastore::depts_list(&conn).unwrap_or(depts)
                     } else {
