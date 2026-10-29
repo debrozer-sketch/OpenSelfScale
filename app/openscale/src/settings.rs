@@ -583,7 +583,17 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         drop(k);
                         let cfg2 = cfg.clone();
                         let ui_handle2 = ui_handle.clone();
-                        std::thread::spawn(move || {
+                        let ui_panic = ui_handle.clone();
+                        spawn_menu_task(
+                            "калибровка мастера",
+                            move |msg| {
+                                if let Some(ui) = ui_panic.upgrade() {
+                                    ui.set_setup_note(
+                                        format!("Калибровка прервана ошибкой: {msg}").into(),
+                                    );
+                                }
+                            },
+                            move || {
                             let (text, saved) = calibrate_label_text(&cfg2);
                             if saved.is_some() {
                                 let Ok(conn) = datastore::open(&cfg2.db_path) else { return };
@@ -619,7 +629,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                 })
                                 .ok();
                             }
-                        });
+                            },
+                        );
                     }
                     7 => {
                         k.setup_pin_stage = 34;
@@ -975,7 +986,15 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     if let Some(ui) = ui_handle.upgrade() {
                         ui.set_prn_diag_text("Сброс аварии: лестница восстановления…".into());
                     }
-                    std::thread::spawn(move || {
+                    let ui_panic = ui_handle.clone();
+                    spawn_menu_task(
+                        "сброс аварии принтера",
+                        move |msg| {
+                            if let Some(ui) = ui_panic.upgrade() {
+                                ui.set_prn_diag_text(format!("Сброс прерван ошибкой: {msg}").into());
+                            }
+                        },
+                        move || {
                         let text = match print::reset_printer(&cfg) {
                             Ok(()) => {
                                 log::info!("меню: принтер: авария сброшена");
@@ -1000,7 +1019,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             }
                         })
                         .ok();
-                    });
+                        },
+                    );
                 }
                 "prn-calib" => {
                     let snap = app_state.snapshot();
@@ -1061,7 +1081,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             }
                         })
                         .ok();
-                    });
+                        },
+                    );
                 }
                 "testprint" => {
                     let cfg = cfg.clone();
@@ -1173,7 +1194,13 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 (k.net_dhcp, k.net_buf.clone())
             };
             let show = show_net_result.clone();
-            std::thread::spawn(move || {
+            let show_panic = show_net_result.clone();
+            spawn_menu_task(
+                "сеть",
+                move |msg| {
+                    show_panic(false, format!("Не применено: внутренняя ошибка ({msg})"));
+                },
+                move || {
                 let (ok, text) = if dhcp {
                     match net::apply_dhcp() {
                         Ok(()) => {
@@ -1207,7 +1234,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 };
                 NET_APPLYING.store(false, std::sync::atomic::Ordering::SeqCst);
                 show(ok, text);
-            });
+                },
+            );
         }
     });
     ui.on_net_popup_close({
@@ -1543,7 +1571,15 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
             let cfg = cfg.clone();
             let ui_handle = ui_handle.clone();
-            std::thread::spawn(move || {
+            let ui_panic = ui_handle.clone();
+            spawn_menu_task(
+                "сетка координат",
+                move |msg| {
+                    if let Some(ui) = ui_panic.upgrade() {
+                        ui.set_labels_status(format!("Печать сетки прервана ошибкой: {msg}").into());
+                    }
+                },
+                move || {
                 let res = crate::print::print_ruler_probe(&cfg);
                 let text = match res {
                     Ok(()) => {
@@ -1560,7 +1596,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         ui.set_labels_status(text.into());
                     }
                 });
-            });
+                },
+            );
         }
     });
     ui.on_labels_calibrate({
@@ -1572,7 +1609,15 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
             let cfg = cfg.clone();
             let ui_handle = ui_handle.clone();
-            std::thread::spawn(move || {
+            let ui_panic = ui_handle.clone();
+            spawn_menu_task(
+                "проверка роликов",
+                move |msg| {
+                    if let Some(ui) = ui_panic.upgrade() {
+                        ui.set_labels_status(format!("Проверка прервана ошибкой: {msg}").into());
+                    }
+                },
+                move || {
                 let res = crate::print::calibrate_label(&cfg);
                 let text = match res {
                     Ok(len) => {
@@ -1607,7 +1652,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         ui.set_labels_status(text.into());
                     }
                 });
-            });
+                },
+            );
         }
     });
 }
@@ -2131,6 +2177,29 @@ fn spawn_settime(
 thread_local! {
     static KIOSK_RC: RefCell<Option<std::rc::Rc<RefCell<crate::session::Kiosk>>>> =
         const { RefCell::new(None) };
+}
+/// Поток меню с защитой от паники: тело не должно молча оставить экран
+/// «занят» (NET_APPLYING, статусы «Печатаю…») — при панике вызывается
+/// `on_panic`, чтобы сбросить флаги и вернуть UI-статус.
+fn spawn_menu_task<F, C>(name: &'static str, on_panic: C, f: F)
+where
+    F: FnOnce() + Send + 'static,
+    C: FnOnce(&str) + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        if let Err(e) = r {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "неизвестная паника".to_string()
+            };
+            log::error!("меню: {name}: поток паниковал: {msg}");
+            on_panic(&msg);
+        }
+    });
 }
 fn spawn_settime_then_advance(
     cfg: &Config,
