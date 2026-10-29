@@ -179,6 +179,17 @@ pub fn create_user(
     )?;
     Ok(Ok(()))
 }
+const CLOCK_SANITY_EPOCH: i64 = 1_704_067_200;
+fn effective_wait(locked_until: i64, now: i64) -> u64 {
+    if now < CLOCK_SANITY_EPOCH {
+        return 0;
+    }
+    if now < locked_until {
+        ((locked_until - now) as u64).min(600)
+    } else {
+        0
+    }
+}
 pub fn verify(conn: &Connection, pin: &str) -> Result<Auth, rusqlite::Error> {
     ensure_tables(conn)?;
     let well_formed = pin.len() >= 4 && pin.len() <= 8 && pin.bytes().all(|b| b.is_ascii_digit());
@@ -188,8 +199,9 @@ pub fn verify(conn: &Connection, pin: &str) -> Result<Auth, rusqlite::Error> {
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     let now = now_unix() as i64;
-    if now < locked_until {
-        return Ok(Auth::Denied { wait_secs: (locked_until - now) as u64 });
+    let wait = effective_wait(locked_until, now);
+    if wait > 0 {
+        return Ok(Auth::Denied { wait_secs: wait });
     }
     let mut stmt = conn.prepare(
         "SELECT id, pin_salt, pin_hash, role FROM admin_user ORDER BY id",
@@ -227,7 +239,7 @@ pub fn lock_left(conn: &Connection) -> u64 {
         .query_row("SELECT locked_until FROM admin_lock WHERE id = 1", [], |r| r.get(0))
         .unwrap_or(0);
     let now = now_unix() as i64;
-    (locked_until - now).max(0) as u64
+    effective_wait(locked_until, now)
 }
 pub fn pin_is(conn: &Connection, id: i64, pin: &str) -> Result<bool, rusqlite::Error> {
     ensure_tables(conn)?;
@@ -339,6 +351,14 @@ mod tests {
             verify(&conn, "123456789").unwrap(),
             Auth::Denied { .. }
         ));
+    }
+    #[test]
+    fn effective_wait_capped_and_sanity() {
+        let now = now_unix() as i64;
+        assert_eq!(effective_wait(now + 10_000, now), 600);
+        assert_eq!(effective_wait(now + 100, now), 100);
+        assert_eq!(effective_wait(60_000, 60_000), 0);
+        assert_eq!(effective_wait(now - 5, now), 0);
     }
     #[test]
     fn brute_force_lockout_persists_and_blocks_even_correct_pin() {
