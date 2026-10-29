@@ -71,6 +71,7 @@ pub struct Kiosk {
     pub setup_pin_stage: u8,
     pub setup_print_sub: u8,
     pub setup_scales_seen: bool,
+    pub admin_idle: Option<Instant>,
 }
 impl Kiosk {
     pub fn reset_admin_taps(&mut self) {
@@ -130,7 +131,39 @@ impl Kiosk {
             setup_pin_stage: 0,
             setup_print_sub: 0,
             setup_scales_seen: false,
+            admin_idle: None,
         }
+    }
+    pub fn reset_state(&mut self) {
+        let op = self.print_op + 1;
+        *self = Kiosk::new();
+        self.print_op = op;
+    }
+    pub fn admin_fingerprint(&self) -> u64 {
+        let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
+        fn mix(h: &mut u64, v: u64) {
+            *h ^= v.wrapping_mul(0xFF51_AFD7_ED55_8CCD);
+            *h = h.rotate_left(27);
+        }
+        mix(&mut h, self.admin_stage as u64);
+        mix(&mut h, self.admin_pin_buf.len() as u64);
+        mix(&mut h, self.pin_pending.len() as u64);
+        mix(&mut h, self.pin_new.len() as u64);
+        mix(&mut h, self.net_focus as u64);
+        mix(&mut h, self.net_dhcp as u64);
+        mix(&mut h, self.report_period as u64);
+        mix(&mut h, self.report_kind as u64);
+        mix(&mut h, self.setup_active as u64);
+        mix(&mut h, self.setup_pin_stage as u64);
+        mix(&mut h, self.setup_print_sub as u64);
+        mix(&mut h, self.setup_scales_seen as u64);
+        mix(&mut h, self.imp_files.len() as u64);
+        mix(&mut h, self.imp_pending.len() as u64);
+        mix(&mut h, self.labels_rows.len() as u64);
+        mix(&mut h, self.labels_pending_del.is_some() as u64);
+        mix(&mut h, self.labels_pending_import.is_some() as u64);
+        mix(&mut h, self.pin_forced as u64);
+        h
     }
 }
 #[cfg(test)]
@@ -157,6 +190,30 @@ mod tests {
         assert_eq!(round_sum(26949, 2), 26900);
         assert_eq!(round_sum(0, 1), 0);
         assert_eq!(round_sum(26999, 9), 26999);
+    }
+    #[test]
+    fn reset_state_clears_session() {
+        let mut k = Kiosk::new();
+        k.phase = 2;
+        k.admin_open = true;
+        k.admin_stage = 5;
+        k.dept_page = 3;
+        k.header_dept_page = 2;
+        k.item_page = 1;
+        k.print_weight_g = Some(1350);
+        k.idle_since = Some(Instant::now());
+        k.reset_state();
+        assert_eq!(k.phase, 0);
+        assert!(k.selected.is_none());
+        assert!(k.pending.is_none());
+        assert!(!k.admin_open);
+        assert_eq!(k.admin_stage, 1);
+        assert_eq!(k.header_dept_page, 0);
+        assert_eq!(k.dept_page, 0);
+        assert_eq!(k.item_page, 0);
+        assert!(k.print_weight_g.is_none());
+        assert!(k.idle_since.is_none());
+        assert_eq!(k.print_op, 1, "поздние результаты печати инвалидируются");
     }
     #[test]
     fn admin_tap_series_and_reset() {

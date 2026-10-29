@@ -539,10 +539,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
             if let Ok(mut k) = kiosk.try_borrow_mut() {
-                k.reset_admin_taps();
-                k.dept_page = 0;
-                k.header_dept_page = 0;
-                k.item_page = 0;
+                k.reset_state();
             }
             ui.set_screen(0);
             ui.set_page_no(0);

@@ -32,6 +32,7 @@ pub fn start(
         let tick_cache = tick_cache.clone();
         let checklist_cache: Rc<RefCell<(i32, u32, i32)>> =
             Rc::new(RefCell::new((-1, 0, 0)));
+        let admin_fp: Rc<RefCell<u64>> = Rc::new(RefCell::new(0));
         let go_root = go_root.clone();
         timer.start(
             slint::TimerMode::Repeated,
@@ -126,10 +127,8 @@ pub fn start(
                             log::info!("этикетка напечатана: {g} г");
                             k.phase = 3;
                             k.done_at = Some(Instant::now());
-                            k.reset_admin_taps();
-                            k.dept_page = 0;
-                            k.item_page = 0;
                             if cfg.kiosk.return_to_root_after_print {
+                                k.reset_state();
                                 go_root();
                             }
                         }
@@ -196,20 +195,31 @@ pub fn start(
                     k.selected = None;
                 }
                 let idle_timeout = Duration::from_secs(idle_secs.get().max(10));
-                if k.phase < 2 {
+                if k.phase < 2 && !k.admin_open {
                     if k.idle_since.is_none() {
                         k.idle_since = Some(Instant::now());
                     } else if k.idle_since.is_some_and(|t| t.elapsed() > idle_timeout) {
-                        k.selected = None;
-                        k.pending = None;
-                        k.dept_page = 0;
-                        k.item_page = 0;
-                        k.idle_since = None;
-                        k.reset_admin_taps();
+                        k.reset_state();
                         go_root();
                     }
                 } else {
                     k.idle_since = None;
+                }
+                if k.admin_open {
+                    const ADMIN_IDLE_LIMIT: Duration = Duration::from_secs(120);
+                    let fp = k.admin_fingerprint();
+                    if fp != *admin_fp.borrow() {
+                        *admin_fp.borrow_mut() = fp;
+                        k.admin_idle = Some(Instant::now());
+                    }
+                    if k.admin_idle.is_none_or(|t| t.elapsed() > ADMIN_IDLE_LIMIT) {
+                        log::info!("меню администратора закрыто по таймеру бездействия (120 с)");
+                        k.reset_state();
+                        go_root();
+                    }
+                } else {
+                    k.admin_idle = None;
+                    *admin_fp.borrow_mut() = 0;
                 }
                 if k.admin_open {
                     let screen = match k.admin_stage {
@@ -345,10 +355,8 @@ pub fn start(
                     } else if ui.get_lock_left() != 0 {
                         ui.set_lock_left(0);
                     }
-                } else if ui.get_screen() >= 4 {
-                    k.reset_admin_taps();
-                    k.dept_page = 0;
-                    k.item_page = 0;
+                } else if ui.get_screen() >= 4 && !k.admin_open {
+                    k.reset_state();
                     go_root();
                 }
                 if k.phase != 2 {
