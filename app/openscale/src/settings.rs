@@ -1092,12 +1092,28 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     });
                 }
                 "zero" => {
-                    app_state.request_zero();
-                    log::info!("меню: запрошено обнуление весов");
-                    let mut k = kiosk.borrow_mut();
-                    k.admin_open = false;
-                    k.admin_stage = 1;
-                    k.admin_pin_buf.clear();
+                    let snap = app_state.snapshot();
+                    if snap.mass_kg >= 0.01 {
+                        log::warn!(
+                            "меню: обнуление отклонено: на платформе вес {:.3} кг",
+                            snap.mass_kg
+                        );
+                        show_cfg_popup(
+                            &ui_handle,
+                            false,
+                            format!(
+                                "Обнуление невозможно: на платформе вес {:.3} кг.\nСнимите товар и повторите.",
+                                snap.mass_kg
+                            ),
+                        );
+                    } else {
+                        app_state.request_zero();
+                        log::info!("меню: запрошено обнуление весов");
+                        let mut k = kiosk.borrow_mut();
+                        k.admin_open = false;
+                        k.admin_stage = 1;
+                        k.admin_pin_buf.clear();
+                    }
                 }
                 "diag" => {
                     kiosk.borrow_mut().admin_stage = 4;
