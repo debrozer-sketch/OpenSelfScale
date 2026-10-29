@@ -277,6 +277,42 @@ global Theme {
     in property <length> font-xs: 16px;
 }
 
+component AppButton inherits Rectangle {
+    in property <string> label;
+    in property <int> kind: 0; // 0 chip, 1 accent, 2 success, 3 danger-soft
+    in property <bool> enabled: true;
+    in property <length> font-size: Theme.font-body;
+    in property <color> text-color: Theme.ink;
+    callback clicked();
+    property <color> base:
+        kind == 1 ? Theme.accent
+        : kind == 2 ? Theme.success
+        : kind == 3 ? Theme.danger-soft
+        : Theme.chip;
+    property <color> hit:
+        kind == 1 ? Theme.accent-pressed
+        : kind == 2 ? Theme.success-dark
+        : kind == 3 ? Theme.danger-pressed
+        : Theme.pressed;
+    border-radius: 12px;
+    background: !enabled ? Theme.border-soft : ta.pressed ? hit : base;
+    Text {
+        text: root.label;
+        font-size: root.font-size;
+        font-weight: 700;
+        color: !root.enabled ? Theme.ink-faint : root.text-color;
+        overflow: elide;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
 export component MainWindow inherits Window {
     title: "OpenScale";
     in property <length> screen-w: 1024px;
@@ -1045,22 +1081,16 @@ export component MainWindow inherits Window {
                     clicked => { root.plu-cancel(); }
                 }
             }
-            Rectangle {
+            AppButton {
                 x: 496px; y: 392px;
                 width: 200px; height: 56px;
                 border-radius: 16px;
-                background: !popup-ok-ta.enabled ? Theme.border
-                         : popup-ok-ta.pressed ? Theme.success : Theme.success-bright;
-                Text {
-                    text: "ПЕЧАТЬ";
-                    font-size: Theme.font-body;
-                    font-weight: 700;
-                    color: Theme.surface;
-                }
-                popup-ok-ta := TouchArea {
-                    enabled: !root.popup-empty && root.weight-state == 2;
-                    clicked => { root.plu-confirm(); }
-                }
+                kind: 2;
+                label: "ПЕЧАТЬ";
+                font-size: Theme.font-body;
+                text-color: Theme.surface;
+                enabled: !root.popup-empty && root.weight-state == 2;
+                clicked => { root.plu-confirm(); }
             }
         }
     }
@@ -1363,60 +1393,37 @@ export component MainWindow inherits Window {
                     clicked => { root.setup-tap("back"); }
                 }
             }
-            Rectangle {
+            AppButton {
                 x: 482px;
                 y: parent.height - 156px;
                 width: parent.width - 490px;
                 height: 68px;
-                border-radius: 12px;
-                background: !root.setup-action-enabled ? Theme.border-soft
-                    : (setup-action-ta.pressed ? Theme.success-dark : Theme.success);
-                Text {
-                    text: root.setup-action-label;
-                    font-size: Theme.font-sm;
-                    font-weight: 700;
-                    color: Theme.surface;
-                    overflow: elide;
-                }
-                setup-action-ta := TouchArea {
-                    enabled: root.setup-action-enabled;
-                    clicked => { root.setup-tap("action"); }
-                }
+                kind: 2;
+                label: root.setup-action-label;
+                font-size: Theme.font-sm;
+                text-color: Theme.surface;
+                enabled: root.setup-action-enabled;
+                clicked => { root.setup-tap("action"); }
             }
-            if root.setup-skip-visible : Rectangle {
+            if root.setup-skip-visible : AppButton {
                 x: 320px;
                 y: parent.height - 80px;
                 width: parent.width - 540px;
                 height: 68px;
-                border-radius: 12px;
-                background: setup-skip-ta.pressed ? Theme.pressed : Theme.chip;
-                Text {
-                    text: root.setup-skip-label;
-                    font-size: Theme.font-md;
-                    font-weight: 700;
-                    color: Theme.ink;
-                    overflow: elide;
-                }
-                setup-skip-ta := TouchArea {
-                    clicked => { root.setup-tap("skip"); }
-                }
+                label: root.setup-skip-label;
+                font-size: Theme.font-md;
+                clicked => { root.setup-tap("skip"); }
             }
-            if root.setup-next-visible : Rectangle {
+            if root.setup-next-visible : AppButton {
                 x: parent.width - 208px;
                 y: parent.height - 80px;
                 width: 200px;
                 height: 68px;
-                border-radius: 12px;
-                background: setup-next-ta.pressed ? Theme.success-dark : Theme.success;
-                Text {
-                    text: "ДАЛЕЕ";
-                    font-size: Theme.font-sm;
-                    font-weight: 700;
-                    color: Theme.surface;
-                }
-                setup-next-ta := TouchArea {
-                    clicked => { root.setup-tap("next"); }
-                }
+                kind: 2;
+                label: "ДАЛЕЕ";
+                font-size: Theme.font-sm;
+                text-color: Theme.surface;
+                clicked => { root.setup-tap("next"); }
             }
         }
         if root.screen == 5 : Rectangle {
@@ -1485,25 +1492,17 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-            Rectangle {
+            AppButton {
                 x: 262px;
                 y: 608px;
                 width: 500px;
                 height: 64px;
-                border-radius: 14px;
-                background: root.lock-left > 0 || root.pin-mask == ""
-                    ? Theme.border-soft
-                    : (pin-ok-ta.pressed ? Theme.success-dark : Theme.success);
-                Text {
-                    text: "ВОЙТИ";
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.surface;
-                }
-                pin-ok-ta := TouchArea {
-                    enabled: root.lock-left == 0 && root.pin-mask != "";
-                    clicked => { root.pin-try(); }
-                }
+                kind: 2;
+                label: "ВОЙТИ";
+                font-size: Theme.font-h3;
+                text-color: Theme.surface;
+                enabled: root.lock-left == 0 && root.pin-mask != "";
+                clicked => { root.pin-try(); }
             }
             Text {
                 x: parent.width - 360px;
@@ -2224,8 +2223,7 @@ export component MainWindow inherits Window {
                         background: lbl-del-ta.pressed ? Theme.danger-pressed : Theme.danger-soft;
                         Text { text: "✕"; font-size: Theme.font-body; font-weight: 700; color: Theme.danger-ink; }
                         lbl-del-ta := TouchArea { clicked => { root.labels-delete-tap(i); } }
-                    }
-                }
+                    }}
                 if root.labels-rows.length == 0 && root.labels-files.length == 0 : Text {
                     x: 16px;
                     y: 20px;
