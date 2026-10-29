@@ -342,9 +342,7 @@ fn run_kiosk(cfg: config::Config) {
                     }
                 }
                 if has_users {
-                    if let Some(ui) = Some(&ui) {
-                        ui.set_ip_note(format!("IP: {}", crate::net::read_live().ip).into());
-                    }
+                    // S9: IP не показываем на экране входа — он в «Состоянии» и «Сети».
                 } else {
                     settings::startup_setup_render(&ui.as_weak(), &ctx.kiosk, &cfg);
                 }

@@ -470,7 +470,6 @@ export component MainWindow inherits Window {
     callback net-tap(int);
     callback net-key(string);
     callback net-apply();
-    in property <string> ip-note;
     in property <string> diag-text;
     Rectangle {
         x: 0; y: 0;
@@ -1490,16 +1489,6 @@ export component MainWindow inherits Window {
                 text-color: Theme.surface;
                 enabled: root.lock-left == 0 && root.pin-mask != "";
                 clicked => { root.pin-try(); }
-            }
-            Text {
-                x: parent.width - 360px;
-                y: parent.height - 30px;
-                width: 350px;
-                height: 26px;
-                text: root.ip-note;
-                font-size: Theme.font-md;
-                color: Theme.ink-faint;
-                horizontal-alignment: right;
             }
         }
         if root.screen == 6 : Rectangle {
