@@ -672,6 +672,13 @@ git commit -m "print: отчёт печати по локальному врем
 - S5: закрыт в волне 1 (Task 2 — валидация аргументов settime в самом скрипте). S10: закрыт Ruling'ом волны 1 (sudoers без шаблонов, скрипты валидируют сами; точные аргументы добавлены для новых хелперов).
 - S3 (TLS FTP): НЕ делается в этой сессии — требует серверной стороны центра (сертификат на их FTP, порт 990, suppaftp TLS-feature). Задача на согласование с центром; клиентская поддержка добавляется включением feature после готовности сервера.
 
+## Установка на стенд (29.10.2026)
+
+- Загружено и установлено: бинарь openscale (release, zigbuild) → /usr/local/bin, openscale-vnc-toggle → /usr/local/sbin (+sudoers 440, visudo OK), openscale-imgsync → /usr/local/bin/scale-imgsync. Сервис перезапущен: openscale-kiosk active, лог чистый (отделы, лэйаут).
+- Проверено на стенде: vnc-toggle off → VNC failed, on → active; /home/scales/plu.db права 0600 (S6 работает на живой БД).
+- machine-id весов: 14048019e764451ea1dd90050f16aff5 (для make_reset_key.py — записать эксплуатанту).
+- Архив исходников для проверки: openscale-src-review-20261029.zip (git archive HEAD, 198 файлов, 101.7 МБ; незакоммиченные пользовательские файлы не включены).
+
 ## Гигиена: выполнена (основная часть)
 
 - Мёртвый код снесён (009e9e3): setup::evaluate, datastore::dept_of/print_log_count_all/print_log_recent (+их тесты), escpos::parse_status/PrinterStatus/EscPosError::Encoding, config.ui.max_cols (+сводка). tick: лишний кортеж ticks/goods упрощён, Mutex → RefCell (tick однопоточный).
