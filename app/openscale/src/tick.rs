@@ -33,6 +33,7 @@ pub fn start(
         let checklist_cache: Rc<RefCell<(i32, u32, i32)>> =
             Rc::new(RefCell::new((-1, 0, 0)));
         let admin_fp: Rc<RefCell<u64>> = Rc::new(RefCell::new(0));
+        let logo_hold: Rc<RefCell<Option<Instant>>> = Rc::new(RefCell::new(None));
         let go_root = go_root.clone();
         timer.start(
             slint::TimerMode::Repeated,
@@ -193,6 +194,24 @@ pub fn start(
                 if k.phase == 4 && k.error_at.is_some_and(|t| t.elapsed() > ERROR_TIMEOUT) {
                     k.phase = 0;
                     k.selected = None;
+                }
+                let logo_pressed = ui.get_logo_pressed();
+                if logo_pressed {
+                    let mut hold = logo_hold.borrow_mut();
+                    if hold.is_none() {
+                        *hold = Some(Instant::now());
+                    } else if let Some(start) = *hold {
+                        if start.elapsed() > Duration::from_millis(3000) {
+                            log::info!("скрытый вход: удержание логотипа");
+                            k.admin_open = true;
+                            k.admin_stage = 1;
+                            k.admin_pin_buf.clear();
+                            k.admin_idle = Some(Instant::now());
+                            *hold = None;
+                        }
+                    }
+                } else {
+                    *logo_hold.borrow_mut() = None;
                 }
                 let idle_timeout = Duration::from_secs(idle_secs.get().max(10));
                 if k.phase < 2 && !k.admin_open {

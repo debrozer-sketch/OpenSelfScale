@@ -280,6 +280,7 @@ export component MainWindow inherits Window {
     callback dept-next();
     callback dept-prev();
     callback up();
+    in-out property <bool> logo-pressed: false;
     callback admin-tap();
     callback search-open();
     callback key-tapped(string);
@@ -403,14 +404,6 @@ export component MainWindow inherits Window {
                  : root.paper-state != 0 || status-level == 1 ? #6B4A1B : #4E8A67;
         }
     }
-    admin-tap-zone := TouchArea {
-        x: 0;
-        y: 24px;
-        width: 420px;
-        height: 152px;
-        enabled: root.screen == 0 || root.screen == 2;
-        clicked => { root.admin-tap(); }
-    }
     Text {
         x: 16px; y: 44px;
         width: 380px;
@@ -437,19 +430,34 @@ export component MainWindow inherits Window {
         border-radius: 3px;
         background: weight-state == 2 ? #2FA36B : #E0A100;
     }
-    property <length> logo-h: (root.width - 496px) * (88px / 480px);
-    if root.logo-has : Rectangle {
-        x: 480px;
-        y: 44px + (112px - root.logo-h) / 2;
-        width: root.width - 496px;
-        height: root.logo-h;
-        Image {
-            width: 100%;
-            height: 100%;
-            image-fit: fill;
-            source: root.logo-img;
-        }
-    }
+     property <length> logo-h: (root.width - 496px) * (88px / 480px);
+     if root.logo-has : Rectangle {
+         x: 480px;
+         y: 44px + (112px - root.logo-h) / 2;
+         width: root.width - 496px;
+         height: root.logo-h;
+         Image {
+             width: 100%;
+             height: 100%;
+             image-fit: fill;
+             source: root.logo-img;
+         }
+     }
+     TouchArea {
+         x: 480px;
+         y: 44px + (112px - root.logo-h) / 2;
+         width: root.width - 496px;
+         height: root.logo-h;
+         enabled: root.screen == 0 && root.logo-has;
+         pointer-event(ev) => {
+             if ev.kind == PointerEventKind.down {
+                 root.logo-pressed = true;
+             } else if ev.kind == PointerEventKind.up {
+                 root.logo-pressed = false;
+             }
+         }
+         clicked => { }
+     }
     if screen == 0 : Rectangle {
         x: 0; y: 160px;
         width: root.width;
@@ -969,11 +977,6 @@ export component MainWindow inherits Window {
                 horizontal-alignment: center;
                 vertical-alignment: center;
                 color: root.popup-under-min ? #B3261E : #707A86;
-            }
-            admin-pop-zone := TouchArea {
-                x: 24px; y: 300px;
-                width: 300px; height: 88px;
-                clicked => { root.admin-tap(); }
             }
             Rectangle {
                 x: 24px; y: 392px;
