@@ -95,6 +95,32 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              UPDATE plucodes SET \"group\" = UPPER(substr(namefirst, 1, instr(namefirst || ' ', ' ') - 1));",
         )?;
     }
+    let group_normed: bool =
+        conn.query_row(
+            "SELECT COUNT(*) FROM app_settings WHERE key = 'group_norm_v2'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|n| n > 0)
+        .unwrap_or(false);
+    if !group_normed {
+        let mut stmt = conn.prepare("SELECT plu, namefirst FROM plucodes")?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        drop(stmt);
+        for (plu, name) in rows {
+            conn.execute(
+                "UPDATE plucodes SET \"group\" = ?2 WHERE plu = ?1",
+                rusqlite::params![plu, group_of(&name)],
+            )?;
+        }
+        conn.execute(
+            "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('group_norm_v2', '1')",
+            [],
+        )?;
+    }
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS depts (
              name TEXT PRIMARY KEY NOT NULL,
@@ -557,6 +583,13 @@ pub fn sanitize_text(s: &str) -> String {
         .map(|c| if (c as u32) < 0x20 || c == '\u{7f}' { ' ' } else { c })
         .collect()
 }
+fn group_of(namefirst: &str) -> String {
+    namefirst
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_uppercase()
+}
 pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
     for it in items {
         if it.price <= 0 || it.price > MAX_PRICE_KOP {
@@ -578,8 +611,7 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
     let mut stmt = tx.prepare(
         "INSERT INTO plucodes
              (plu, price, card_price, itemcode, groupcode, namefirst, namesecond, shelflife, \"group\")
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                 UPPER(substr(?6 || ' ', 1, instr(?6 || ' ', ' ') - 1)))
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(plu) DO UPDATE SET
              price = excluded.price,
              card_price = CASE
@@ -602,7 +634,8 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
             it.groupcode,
             it.namefirst,
             it.namesecond,
-            it.shelflife
+            it.shelflife,
+            group_of(&it.namefirst)
         ])?;
     }
     drop(stmt);
@@ -817,6 +850,16 @@ pub fn apply_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn group_column_uses_full_unicode_uppercase() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        let xml = r#"<body><item plunumber="77" price="10000" namefirst="вишня морозная кг" /></body>"#;
+        import_plu(&conn, &parse_plu_xml(xml).unwrap()).unwrap();
+        let g: String = conn
+            .query_row("SELECT \"group\" FROM plucodes WHERE plu='77'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(g, "ВИШНЯ", "SQL UPPER не поднимает кириллицу — нужен Rust uppercase");
+    }
     #[test]
     fn seeding_happens_once_per_database() {
         let dir = std::env::temp_dir().join(format!("os-seed-{}", std::process::id()));
