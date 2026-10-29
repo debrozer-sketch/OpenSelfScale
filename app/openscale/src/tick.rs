@@ -204,9 +204,9 @@ pub fn start(
                     k.selected = None;
                 }
                 // Страховка от залипшего logo-pressed: флаг считается только
-                // на главном экране; иначе удержание «висит» вечно и тик
-                // раз в 3 с чистит PIN-буфер, делая вход по паролю невозможным.
-                let logo_pressed = ui.get_logo_pressed() && ui.get_screen() == 0;
+                // на клиентских экранах (0/2/3); иначе удержание «висит» вечно
+                // и тик раз в 3 с чистит PIN-буфер, делая вход по паролю невозможным.
+                let logo_pressed = ui.get_logo_pressed() && logo_entry_screen(ui.get_screen());
                 if logo_pressed {
                     let mut hold = logo_hold.borrow_mut();
                     if hold.is_none() {
@@ -425,4 +425,33 @@ pub fn start(
         );
     }
     timer
+}
+
+/// Клиентские экраны, на которых доступен скрытый вход удержанием логотипа:
+/// корень каталога (0), каталог отдела (2), поиск (3).
+/// Исторический гейт только screen==0 мешал сотруднику открыть настройки,
+/// когда покупатель ушёл в товары; залипание флага больше не возможно —
+/// TouchArea логотипа не дизейблится и чистит флаг на up/cancel (main.slint).
+fn logo_entry_screen(screen: i32) -> bool {
+    matches!(screen, 0 | 2 | 3)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::logo_entry_screen;
+
+    #[test]
+    fn logo_entry_on_customer_screens() {
+        assert!(logo_entry_screen(0), "корень каталога");
+        assert!(logo_entry_screen(2), "товары отдела");
+        assert!(logo_entry_screen(3), "поиск");
+    }
+
+    #[test]
+    fn logo_entry_denied_elsewhere() {
+        assert!(!logo_entry_screen(1), "резервный экран");
+        assert!(!logo_entry_screen(4), "настройки отделов");
+        assert!(!logo_entry_screen(12), "меню администратора");
+        assert!(!logo_entry_screen(-1), "мусорное значение");
+    }
 }
