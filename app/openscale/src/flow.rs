@@ -10,6 +10,22 @@ pub struct FlowHandles {
     pub refresh_data: Rc<dyn Fn()>,
     pub relayout: Rc<dyn Fn()>,
 }
+struct FlowRc {
+    kiosk: Rc<RefCell<crate::session::Kiosk>>,
+    depts_all: Rc<RefCell<Vec<DeptDef>>>,
+    group_dept: Rc<RefCell<std::collections::HashMap<String, String>>>,
+    catalog: Rc<RefCell<Vec<datastore::PluEntry>>>,
+    catalog_up: Rc<RefCell<Vec<(String, usize)>>>,
+    items_all: Rc<RefCell<Vec<PluTile>>>,
+    img_dir: std::path::PathBuf,
+    set_header: Rc<dyn Fn(usize)>,
+    show_items: Rc<dyn Fn(usize)>,
+    relayout: Rc<dyn Fn()>,
+    go_root: Rc<dyn Fn()>,
+}
+thread_local! {
+    static FLOW_RC: RefCell<Option<FlowRc>> = const { RefCell::new(None) };
+}
 pub fn install(ctx: &AppContext) -> FlowHandles {
     let ui = ctx.ui.upgrade().expect("UI init");
     let ui_handle = ctx.ui.clone();
@@ -579,68 +595,108 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let show_items = show_items_page.clone();
         let go_root = go_root.clone();
         let relayout = relayout.clone();
+        // I1: Rc-состояние живёт в UI-потоке; фоновые части доставляют
+        // данные через thread_local-хранилище (invoke выполняется в UI-потоке).
+        FLOW_RC.with(|c| {
+            *c.borrow_mut() = Some(FlowRc {
+                kiosk: kiosk.clone(),
+                group_dept: group_dept.clone(),
+                depts_all: depts_all.clone(),
+                catalog: catalog.clone(),
+                catalog_up: catalog_up.clone(),
+                items_all: items_all.clone(),
+                img_dir: img_dir.clone(),
+                set_header: set_header_slice.clone(),
+                show_items: Rc::new(show_items),
+                relayout: relayout.clone(),
+                go_root: go_root.clone(),
+            });
+        });
         move || {
             let Some(ui) = ui_handle.upgrade() else { return };
             tiles::clear_img_cache();
-            let conn = match datastore::open(&cfg.db_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    log::error!("обновление данных: база: {e}");
-                    return;
-                }
-            };
-            let items = match datastore::load_all(&conn) {
-                Ok(i) => i,
-                Err(e) => {
-                    log::error!("обновление данных: PLU: {e}");
-                    return;
-                }
-            };
-            log::info!("данные обновлены: {} товаров", items.len());
-            *catalog.borrow_mut() = items;
-            *catalog_up.borrow_mut() = catalog
-                .borrow()
-                .iter()
-                .enumerate()
-                .map(|(i, p)| (p.name.to_uppercase(), i))
-                .collect();
-            if let Ok(mut k) = kiosk.try_borrow_mut() {
-                if let Some(p) = k.pending.clone() {
-                    let changed = match catalog.borrow().iter().find(|e| e.plu == p.plu) {
-                        Some(f) => {
-                            f.price != p.price || f.card_price != p.card_price || f.name != p.name
-                        }
-                        None => true,
-                    };
-                    if changed {
-                        log::info!("карточка PLU {} закрыта: товар изменён синхронизацией", p.plu);
-                        k.pending = None;
-                        ui.set_popup_open(false);
+            // I1: полный каталог читается в рабочем потоке; UI-поток
+            // получает готовый вектор и только раскладывает модели.
+            static REFRESHING: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if REFRESHING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                log::info!("обновление данных уже идёт, запрос пропущен");
+                return;
+            }
+            let cfg2 = cfg.clone();
+            let ui2 = ui_handle.clone();
+            std::thread::spawn(move || {
+                let items = match datastore::open(&cfg2.db_path)
+                    .and_then(|conn| datastore::load_all(&conn))
+                {
+                    Ok(i) => i,
+                    Err(e) => {
+                        REFRESHING.store(false, std::sync::atomic::Ordering::SeqCst);
+                        log::error!("обновление данных: {e}");
+                        return;
                     }
-                }
-            }
-            let cur = ui.get_screen();
-            relayout();
-            if depts_all.borrow().len() == 1 && cur == 0 {
-                go_root();
-            }
-            if cur == 2 {
-                let title = ui.get_screen_title();
-                let gd = group_dept.borrow();
-                let mut tiles: Vec<PluTile> = catalog
-                    .borrow()
+                };
+                log::info!("данные обновлены: {} товаров", items.len());
+                let up: Vec<(String, usize)> = items
                     .iter()
-                    .filter(|p| {
-                        let g = if p.group.is_empty() { "ПРОЧЕЕ" } else { p.group.as_str() };
-                        gd.get(g).map(|d| d == title.as_str()).unwrap_or(false)
-                    })
-                    .map(|p| tiles::tile_of(p, &img_dir))
+                    .enumerate()
+                    .map(|(i, p)| (p.name.to_uppercase(), i))
                     .collect();
-                tiles.sort_by(|a, b| a.name.cmp(&b.name));
-                *items_all.borrow_mut() = tiles;
-                let ipage = kiosk.borrow().item_page;
-                show_items(ipage);
-            }
+                REFRESHING.store(false, std::sync::atomic::Ordering::SeqCst);
+                let _ = slint::invoke_from_event_loop(move || {
+                    FLOW_RC.with(|c| {
+                        let st = c.borrow();
+                        let st = st.as_ref().expect("flow state");
+                        let Some(ui) = ui2.upgrade() else { return };
+                        *st.catalog.borrow_mut() = items;
+                        *st.catalog_up.borrow_mut() = up;
+                        if let Ok(mut k) = st.kiosk.try_borrow_mut() {
+                            if let Some(p) = k.pending.clone() {
+                                let changed = match st.catalog.borrow().iter().find(|e| e.plu == p.plu) {
+                                    Some(f) => {
+                                        f.price != p.price
+                                            || f.card_price != p.card_price
+                                            || f.name != p.name
+                                    }
+                                    None => true,
+                                };
+                                if changed {
+                                    log::info!(
+                                        "карточка PLU {} закрыта: товар изменён синхронизацией",
+                                        p.plu
+                                    );
+                                    k.pending = None;
+                                    ui.set_popup_open(false);
+                                }
+                            }
+                        }
+                        let cur = ui.get_screen();
+                        (st.relayout)();
+                        if st.depts_all.borrow().len() == 1 && cur == 0 {
+                            (st.go_root)();
+                        }
+                        if cur == 2 {
+                            let title = ui.get_screen_title();
+                            let gd = st.group_dept.borrow();
+                            let mut tiles: Vec<PluTile> = st
+                                .catalog
+                                .borrow()
+                                .iter()
+                                .filter(|p| {
+                                    let g = if p.group.is_empty() { "ПРОЧЕЕ" } else { p.group.as_str() };
+                                    gd.get(g).map(|d| d == title.as_str()).unwrap_or(false)
+                                })
+                                .map(|p| tiles::tile_of(p, &st.img_dir))
+                                .collect();
+                            drop(gd);
+                            tiles.sort_by(|a, b| a.name.cmp(&b.name));
+                            *st.items_all.borrow_mut() = tiles;
+                            let ipage = st.kiosk.borrow().item_page;
+                            (st.show_items)(ipage);
+                        }
+                    });
+                });
+            });
         }
     };
     let refresh_data: Rc<dyn Fn()> = Rc::new(refresh_data);
