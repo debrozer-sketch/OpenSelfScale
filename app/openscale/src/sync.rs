@@ -40,13 +40,13 @@ fn parse_canonical_json(text: &str) -> Result<(Vec<datastore::PluItem>, usize), 
                     continue;
                 }
                 items.push(datastore::PluItem {
-                    plu: ci.plu.trim().to_string(),
+                    plu: datastore::sanitize_text(ci.plu.trim()),
                     price: ci.price_kop,
                     card_price: ci.card_price_kop.filter(|p| *p > 0),
-                    itemcode: ci.itemcode.unwrap_or_default(),
+                    itemcode: datastore::sanitize_text(ci.itemcode.unwrap_or_default().trim()),
                     groupcode: ci.group.unwrap_or_default(),
-                    namefirst: ci.name.trim().to_string(),
-                    namesecond: ci.name_second.unwrap_or_default(),
+                    namefirst: datastore::sanitize_text(ci.name.trim()),
+                    namesecond: datastore::sanitize_text(ci.name_second.as_deref().unwrap_or("")),
                     shelflife: ci.shelf_life.unwrap_or_default(),
                 });
             }

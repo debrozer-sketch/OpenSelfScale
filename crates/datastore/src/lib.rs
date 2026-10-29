@@ -524,6 +524,11 @@ pub fn print_log_filtered(
     Ok(rows)
 }
 pub const MAX_PRICE_KOP: i64 = 99_999_999;
+pub fn sanitize_text(s: &str) -> String {
+    s.chars()
+        .map(|c| if (c as u32) < 0x20 || c == '\u{7f}' { ' ' } else { c })
+        .collect()
+}
 pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
     for it in items {
         if it.price <= 0 || it.price > MAX_PRICE_KOP {
@@ -649,8 +654,8 @@ pub fn parse_plu_xml_counted(data: &str) -> Result<(Vec<PluItem>, usize), StoreE
                                 _ => bad = true,
                             },
                             b"itemcode" => it.itemcode = v,
-                            b"namefirst" => it.namefirst = v,
-                            b"namesecond" => it.namesecond = v,
+                            b"namefirst" => it.namefirst = sanitize_text(&v),
+                            b"namesecond" => it.namesecond = sanitize_text(&v),
                             b"groupcode" => it.groupcode = v,
                             b"shelflife" => it.shelflife = v,
                             _ => {}
@@ -819,6 +824,19 @@ mod tests {
                 "price={bad_price} должен отвергаться"
             );
         }
+    }
+    #[test]
+    fn sanitize_text_replaces_control_chars() {
+        assert_eq!(sanitize_text("A\u{1b}B\u{7}C"), "A B C");
+        assert_eq!(sanitize_text("обычный"), "обычный");
+    }
+    #[test]
+    fn parse_plu_xml_sanitizes_names() {
+        let xml = r#"<body>
+<item plunumber="1" price="47999" namefirst="АВОКАДО&#27;КГ"/>
+</body>"#;
+        let (items, _) = parse_plu_xml_counted(xml).unwrap();
+        assert_eq!(items[0].namefirst, "АВОКАДО КГ");
     }
     #[test]
     fn import_plu_rejects_out_of_range_price() {

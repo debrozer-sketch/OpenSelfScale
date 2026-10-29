@@ -39,6 +39,9 @@ pub fn to_cp866(text: &str) -> Result<Vec<u8>, EscPosError> {
     text.chars()
         .map(|c| {
             let code = c as u32;
+            if code < 0x20 {
+                return Ok(b' ');
+            }
             if code < 0x80 {
                 Ok(code as u8)
             } else if (0x410..=0x42F).contains(&code) {
@@ -350,6 +353,11 @@ mod tests {
     fn cp866_unknown_char_becomes_question() {
         let bytes = to_cp866("Їжак 😀кг").unwrap();
         assert_eq!(bytes, b"?\xA6\xA0\xAA ?\xAA\xA3");
+    }
+    #[test]
+    fn cp866_strips_control_bytes() {
+        let bytes = to_cp866("A\u{1b}B\u{3}C").unwrap();
+        assert_eq!(bytes, b"A B C");
     }
     #[test]
     fn recover_frame_is_dle_enq() {
