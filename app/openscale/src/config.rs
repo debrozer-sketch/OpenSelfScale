@@ -104,7 +104,7 @@ impl Default for KioskProfile {
         Self {
             return_to_root_after_print: true,
             idle_timeout_secs: 30,
-            cfg_export_dir: PathBuf::from("/var/ftp/scale/cfg"),
+            cfg_export_dir: PathBuf::from("/var/lib/openscale/cfg-import"),
             dept_palette: Vec::new(),
         }
     }
@@ -245,6 +245,11 @@ impl Config {
             note("printer.baud=0 → 19200".into());
             self.printer.baud = 19_200;
         }
+        // S7: каталог обмена конфигурацией не должен быть доступен по FTP.
+        if self.kiosk.cfg_export_dir == PathBuf::from("/var/ftp/scale/cfg") {
+            note("kiosk.cfg_export_dir=/var/ftp/scale/cfg → /var/lib/openscale/cfg-import".into());
+            self.kiosk.cfg_export_dir = PathBuf::from("/var/lib/openscale/cfg-import");
+        }
         if self.ui.max_cols == 0 {
             note("ui.max_cols=0 → 1".into());
             self.ui.max_cols = 1;
@@ -356,6 +361,14 @@ baud = 115200
     fn example_config_has_no_unknown_keys() {
         let text = include_str!("../../../config.example.toml");
         assert!(unknown_keys(text).is_empty(), "{:?}", unknown_keys(text));
+    }
+    #[test]
+    fn legacy_ftp_cfg_dir_migrates_out_of_ftp_zone() {
+        let mut c = Config::default();
+        c.kiosk.cfg_export_dir = PathBuf::from("/var/ftp/scale/cfg");
+        c.sanitize();
+        assert_eq!(c.kiosk.cfg_export_dir, PathBuf::from("/var/lib/openscale/cfg-import"));
+        assert!(c.warnings.iter().any(|w| w.contains("cfg_export_dir")));
     }
     #[test]
     fn zero_values_are_replaced_with_safe_ones() {

@@ -138,6 +138,8 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
 }
 pub fn list(cfg: &Config) -> Vec<PathBuf> {
     let dir = export_dir(cfg);
+    // Каталог обмена создаётся при первом обращении: на свежей установке его нет.
+    let _ = std::fs::create_dir_all(&dir);
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
