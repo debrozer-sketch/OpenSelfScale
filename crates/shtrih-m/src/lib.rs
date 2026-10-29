@@ -328,6 +328,12 @@ mod tests {
             for b in buf.iter_mut() {
                 *b = 0xAA;
             }
+    #[cfg(unix)]
+    impl PortPoll for GarbageStream {
+        fn read_timeout(&mut self, buf: &mut [u8], _timeout: Duration) -> std::io::Result<usize> {
+            Read::read(self, buf)
+        }
+    }
             Ok(buf.len())
         }
     }
