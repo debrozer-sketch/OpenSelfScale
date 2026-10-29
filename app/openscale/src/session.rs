@@ -71,11 +71,13 @@ pub struct Kiosk {
     pub setup_print_sub: u8,
     pub setup_scales_seen: bool,
     pub admin_idle: Option<Instant>,
+    pub role: u8,
 }
 impl Kiosk {
     pub fn new() -> Self {
         Kiosk {
             phase: 0,
+            role: 0,
             selected: None,
             print_weight_g: None,
             done_at: None,

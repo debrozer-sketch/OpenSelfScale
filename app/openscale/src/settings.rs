@@ -145,6 +145,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             k.setup_pin_stage = 0;
             k.setup_print_sub = 0;
             k.setup_scales_seen = false;
+            k.role = 0;
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_role(0);
                 ui.set_pin_mask("".into());
@@ -494,6 +495,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     k.admin_open = false;
                     k.admin_stage = 1;
                     k.admin_pin_buf.clear();
+                    k.role = 0;
                     if let Some(ui) = ui_handle.upgrade() {
                         ui.set_setup_menu_visible(false);
                         ui.set_role(0);
@@ -751,6 +753,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let trade = trade.clone();
         let relayout = flow.relayout.clone();
         move |id: slint::SharedString| {
+            const ADMIN_TAPS: [&str; 5] = ["scaleset", "createstaff", "net", "restart", "actionlog"];
+            if ADMIN_TAPS.contains(&id.as_str()) && kiosk.borrow().role != 1 {
+                log::warn!("меню: отказ: «{id}» только для администратора");
+                return;
+            }
             match id.as_str() {
                 "createstaff" => {
                     let mut k = kiosk.borrow_mut();
