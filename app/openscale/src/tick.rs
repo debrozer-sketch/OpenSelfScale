@@ -1,6 +1,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -166,10 +167,12 @@ pub fn start(
                         let op = k.print_op;
                         let item = k.selected.as_ref().cloned();
                         let plu = item.as_ref().map(|p| p.plu.clone()).unwrap_or_default();
+                        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        k.cancel_print = Some(cancel.clone());
                         log::info!("печать: PLU {plu}, {weight_g} г (операция #{op})");
                         std::thread::spawn(move || {
                             let res = match item {
-                                Some(item) => print::print_for_item(&cfg, &item, weight_g)
+                                Some(item) => print::print_for_item_with_cancel(&cfg, &item, weight_g, cancel)
                                     .map_err(|e| format!("{e}")),
                                 None => Err("позиция не выбрана".into()),
                             };
@@ -181,7 +184,10 @@ pub fn start(
                 if k.phase == 2 && k.print_weight_g.is_some()
                     && k.print_at.is_some_and(|t| t.elapsed() > PRINT_TIMEOUT)
                 {
-                    log::warn!("печать не завершилась за {PRINT_TIMEOUT:?} — ошибка печати");
+                    log::warn!("печать не завершилась за {PRINT_TIMEOUT:?} — отмена и ошибка");
+                    if let Some(c) = k.cancel_print.take() {
+                        c.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
                     k.print_at = None;
                     k.print_op += 1;
                     k.phase = 4;

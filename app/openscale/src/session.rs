@@ -1,4 +1,6 @@
 
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 pub const DONE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
@@ -61,6 +63,7 @@ pub struct Kiosk {
     pub restart_requested: bool,
     pub imp_files: Vec<std::path::PathBuf>,
     pub imp_pending: String,
+    pub cancel_print: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub labels_rows: Vec<(String, i64, i64, usize)>,
     pub labels_files: Vec<std::path::PathBuf>,
     pub labels_pending_del: Option<String>,
@@ -121,6 +124,7 @@ impl Kiosk {
             restart_requested: false,
             imp_files: Vec::new(),
             imp_pending: String::new(),
+            cancel_print: None,
             labels_rows: Vec::new(),
             labels_files: Vec::new(),
             labels_pending_del: None,

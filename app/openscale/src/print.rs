@@ -497,6 +497,7 @@ pub enum PrinterRequest {
         ack: mpsc::Sender<Result<(), String>>,
         queued_at: std::time::Instant,
         meta: Option<PrintMeta>,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
     },
     Feed { ack: mpsc::Sender<Result<(), String>> },
     Test { bytes: Vec<u8>, ack: mpsc::Sender<Result<(), String>> },
@@ -525,6 +526,8 @@ pub struct PrinterDiagnostics {
     pub serial: Option<String>,
 }
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 static PRINTER_TX: std::sync::OnceLock<mpsc::Sender<PrinterRequest>> =
     std::sync::OnceLock::new();
 static HEALTH: std::sync::OnceLock<std::sync::Mutex<PrinterHealth>> =
@@ -863,7 +866,11 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
             next_prune = std::time::Instant::now() + Duration::from_secs(6 * 3600);
         }
         match rx.recv_timeout(mon.next_probe()) {
-            Ok(PrinterRequest::Print { bytes, ack, queued_at, meta }) => {
+            Ok(PrinterRequest::Print { bytes, ack, queued_at, meta, cancel }) => {
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    finish(ack, Err("задание печати отменено".into()), "отмена");
+                    continue;
+                }
                 if queued_at.elapsed() > STALE_JOB {
                     log::warn!(
                         "принтер: задание устарело ({} с в очереди) — пропущено",
@@ -1495,6 +1502,14 @@ pub fn print_for_item(
     item: &PluItem,
     weight_g: u32,
 ) -> Result<(), PrintError> {
+    print_for_item_with_cancel(cfg, item, weight_g, Arc::new(AtomicBool::new(false)))
+}
+pub fn print_for_item_with_cancel(
+    cfg: &crate::config::Config,
+    item: &PluItem,
+    weight_g: u32,
+    cancel: Arc<AtomicBool>,
+) -> Result<(), PrintError> {
     if !cfg.printer.enabled {
         return Err(PrintError::PrinterDisabled);
     }
@@ -1529,6 +1544,7 @@ pub fn print_for_item(
                 weight_g,
                 sum_kop,
             }),
+            cancel,
         }
     })
     .map_err(std::io::Error::other)?;
