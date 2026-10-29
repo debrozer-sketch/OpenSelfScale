@@ -116,6 +116,60 @@ fn run_external(cmd: &str, input: &Path) -> Result<String, String> {
     String::from_utf8(raw).map_err(|_| "вывод конвертера — не UTF-8".into())
 }
 const ARCHIVE_KEEP: usize = 240;
+const LOCK_STALE_SECS: u64 = 600;
+#[derive(Debug)]
+pub struct SyncLock {
+    path: std::path::PathBuf,
+}
+impl Drop for SyncLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+pub fn take_lock(dir: &Path) -> Result<SyncLock, String> {
+    let path = dir.join("sync.lock");
+    for attempt in 0..2 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(_) => return Ok(SyncLock { path }),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let stale = std::fs::metadata(&path)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|d| d.as_secs() > LOCK_STALE_SECS)
+                    .unwrap_or(false);
+                if stale && attempt == 0 {
+                    log::warn!("sync.lock старше {LOCK_STALE_SECS} с — считаю зависшим, снимаю");
+                    let _ = std::fs::remove_file(&path);
+                    continue;
+                }
+                return Err(
+                    "каталог обмена занят другим процессом приёма (sync.lock удерживается)".into(),
+                );
+            }
+            Err(e) => return Err(format!("sync.lock: {e}")),
+        }
+    }
+    unreachable!("lock retry loop")
+}
+type MetaCap = (u64, std::time::SystemTime);
+fn snapshot_meta(p: &Path) -> Option<MetaCap> {
+    let m = std::fs::metadata(p).ok()?;
+    Some((m.len(), m.modified().ok()?))
+}
+fn delete_if_unchanged(p: &Path, cap: Option<MetaCap>) -> bool {
+    let Some((size, mtime)) = cap else {
+        return false;
+    };
+    match snapshot_meta(p) {
+        Some((s, t)) if s == size && t == mtime => std::fs::remove_file(p).is_ok(),
+        _ => false,
+    }
+}
 fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension(format!("tmp{}", std::process::id()));
     std::fs::write(&tmp, data)?;
@@ -216,13 +270,16 @@ fn apply_upload(
             .collect::<Vec<_>>(),
     );
     let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
-    let imported = datastore::import_plu(&conn, items).map_err(|e| format!("импорт: {e}"))?;
-    let removed = datastore::remove_absent(&conn, items).map_err(|e| format!("удаление снятых: {e}"))?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("транзакция: {e}"))?;
+    let imported = datastore::import_plu(&tx, items).map_err(|e| format!("импорт: {e}"))?;
+    let removed = datastore::remove_absent(&tx, items).map_err(|e| format!("удаление снятых: {e}"))?;
     let removed_note = if removed > 0 { format!(", снято {removed}") } else { String::new() };
     let layout_note = match groups {
         Some(g) => {
             let (regrouped, orphans) =
-                datastore::apply_layout(&conn, g).map_err(|e| format!("раскладка: {e}"))?;
+                datastore::apply_layout(&tx, g).map_err(|e| format!("раскладка: {e}"))?;
             format!(
                 ", раскладка: {} групп / {} переназначено / {} без группы",
                 g.len(),
@@ -232,6 +289,7 @@ fn apply_upload(
         }
         None => String::new(),
     };
+    tx.commit().map_err(|e| format!("коммит приёма: {e}"))?;
     Ok((imported, format!("{removed_note}{layout_note}")))
 }
 pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
@@ -242,6 +300,10 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     if !dir.join("ready.flg").exists() {
         return Ok(None);
     }
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let _lock = take_lock(dir)?;
+    let ready = dir.join("ready.flg");
+    let ready_cap = snapshot_meta(&ready);
     let external = cfg.center.protocol == "external";
     let input_name = if external {
         let n = cfg.center.external_input.trim();
@@ -275,6 +337,7 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
     let plu_data = std::fs::read_to_string(&plu).map_err(|e| format!("{}: {e}", plu.display()))?;
+    let plu_cap = snapshot_meta(&plu);
     let (items, skipped) = if external {
         let canon = run_external(&cfg.center.external_cmd, &plu)?;
         parse_canonical_json(&canon).map_err(|e| format!("канонический JSON: {e}"))?
@@ -288,21 +351,22 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         return Err(format!("{} не содержит товаров — выгрузка не принята", input_name.display()));
     }
     let layout = dir.join("layout.xml");
-    let (groups, ldata) = if layout.exists() {
+    let (groups, ldata, layout_cap) = if layout.exists() {
         let s = std::fs::read_to_string(&layout)
             .map_err(|e| format!("{}: {e}", layout.display()))?;
         let g = datastore::parse_layout_xml(&s)
             .map_err(|e| format!("разбор layout.xml: {e}"))?;
-        (Some(g), s)
+        let cap = snapshot_meta(&layout);
+        (Some(g), s, cap)
     } else {
-        (None, String::new())
+        (None, String::new(), None)
     };
     let local = cfg.center.img_local_dir.join("plu");
     std::fs::create_dir_all(&local).map_err(|e| format!("{}: {e}", local.display()))?;
     let mut imgs_new = 0;
     let mut imgs_skip = 0;
     let mut imgs_bmp = 0;
-    let mut images: Vec<std::path::PathBuf> = Vec::new();
+    let mut images: Vec<(std::path::PathBuf, Option<MetaCap>)> = Vec::new();
     let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for entry in entries.flatten() {
         let p = entry.path();
@@ -315,20 +379,20 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
             continue;
         }
         if ext == "jpg" || ext == "png" {
-            images.push(p);
+            images.push((p.clone(), snapshot_meta(&p)));
         }
     }
     let hot_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let first: Vec<Option<u64>> = images
             .iter()
-            .map(|p| p.metadata().map(|m| m.len()).ok())
+            .map(|(p, _)| p.metadata().map(|m| m.len()).ok())
             .collect();
         std::thread::sleep(std::time::Duration::from_millis(300));
         let hot = first
             .iter()
             .zip(images.iter())
-            .any(|(s1, p)| match s1 {
+            .any(|(s1, (p, _))| match s1 {
                 None => false, 
                 Some(s1) => p.metadata().map(|m| m.len()).ok() != Some(*s1),
             });
@@ -336,8 +400,8 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
             break;
         }
     }
-    let mut copied: Vec<std::path::PathBuf> = Vec::new();
-    for p in &images {
+    let mut copied: Vec<(std::path::PathBuf, Option<MetaCap>)> = Vec::new();
+    for (p, cap) in &images {
         let dst = local.join(p.file_name().unwrap_or_default());
         let stale = match (
             std::fs::metadata(&dst).map(|m| m.len()).ok(),
@@ -353,22 +417,32 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         } else {
             imgs_skip += 1;
         }
-        copied.push(p.clone());
+        copied.push((p.clone(), *cap));
     }
     let (imported, layout_note) =
         apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata)?;
-    let rm = |p: &std::path::Path| {
-        if let Err(e) = std::fs::remove_file(p) {
-            log::warn!("выгрузка (drop): не удалён {}: {e}", p.display());
+    let mut deferred = 0usize;
+    let mut rm = |p: &std::path::Path, cap: &Option<MetaCap>| {
+        if !delete_if_unchanged(p, *cap) {
+            deferred += 1;
+            log::warn!(
+                "выгрузка (drop): {} изменился во время приёма — не удалён, приём повторится",
+                p.display()
+            );
         }
     };
-    rm(&dir.join("ready.flg"));
-    rm(&plu);
+    rm(&ready, &ready_cap);
+    rm(&plu, &plu_cap);
     if groups.is_some() {
-        rm(&layout);
+        rm(&layout, &layout_cap);
     }
-    for p in &copied {
-        rm(p);
+    for (p, cap) in &copied {
+        rm(p, cap);
+    }
+    if deferred > 0 {
+        return Err(format!(
+            "приём выполнен, но {deferred} исходных файлов изменились — не удалены, повторный приём отложен до стабильных файлов"
+        ));
     }
     Ok(Some(format!(
         "выгрузка (drop): {} товаров (обновлено {imported}), картинок: новых {imgs_new}, уже были {imgs_skip}, bmp {imgs_bmp}{layout_note}",
@@ -501,6 +575,42 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sync_lock_is_exclusive() {
+        let dir = std::env::temp_dir().join(format!("os-sync-lock-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let _g = take_lock(&dir).expect("первый захват lock");
+        let err = take_lock(&dir).unwrap_err();
+        assert!(err.contains("занят"), "{err}");
+        drop(_g);
+        let _g2 = take_lock(&dir).expect("после снятия lock доступен");
+    }
+    #[test]
+    fn drop_keeps_rewritten_files() {
+        let dir = std::env::temp_dir().join(format!("os-sync-rw-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("plu.xml");
+        std::fs::write(&p, b"old-data").unwrap();
+        let cap = snapshot_meta(&p);
+        std::fs::write(&p, b"new-rewritten-data-longer").unwrap();
+        assert!(!delete_if_unchanged(&p, cap), "переписанный файл не удаляется");
+        assert!(p.exists(), "новая выгрузка пережила приём старой");
+        let cap2 = snapshot_meta(&p);
+        assert!(delete_if_unchanged(&p, cap2), "неизменённый файл удаляется");
+        assert!(!p.exists());
+    }
+    #[test]
+    fn drop_removes_only_read_set() {
+        let dir = std::env::temp_dir().join(format!("os-sync-set-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("known.jpg");
+        std::fs::write(&p, b"img").unwrap();
+        let stranger = dir.join("stranger.txt");
+        std::fs::write(&stranger, b"not ours").unwrap();
+        let cap = snapshot_meta(&p);
+        assert!(delete_if_unchanged(&p, cap));
+        assert!(stranger.exists(), "посторонний файл не трогается");
+    }
     #[test]
     fn canonical_json_minimal_and_optional() {
         let s = concat!(
