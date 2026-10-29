@@ -73,6 +73,7 @@ pub struct Kiosk {
     pub admin_idle: Option<Instant>,
     pub role: u8,
     pub status_from: u8,
+    pub vnc_on: bool,
 }
 impl Kiosk {
     pub fn new() -> Self {
@@ -80,6 +81,7 @@ impl Kiosk {
             phase: 0,
             role: 0,
             status_from: 0,
+            vnc_on: true,
             selected: None,
             print_weight_g: None,
             done_at: None,

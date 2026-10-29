@@ -1,0 +1,11 @@
+#!/bin/bash
+# Включение/выключение удалённого доступа VNC (rev. R5/S2).
+# Вызывается киоском через sudo; аргументы ограничены маской в sudoers:
+#   openscale-vnc-toggle on
+#   openscale-vnc-toggle off
+set -eu
+case "${1:-}" in
+  on)  systemctl enable --now openscale-vnc.service ;;
+  off) systemctl disable --now openscale-vnc.service ;;
+  *) echo "usage: openscale-vnc-toggle on|off" >&2; exit 2 ;;
+esac

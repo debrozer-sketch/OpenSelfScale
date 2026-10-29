@@ -1,0 +1,4 @@
+# Root-хелперы сервисного пользователя openscale-kiosk (rev. S10):
+# аргументы ограничены точными значениями on|off — свободных аргументов нет.
+@KIOSK_USER@ ALL=(root) NOPASSWD: /usr/local/sbin/openscale-vnc-toggle on
+@KIOSK_USER@ ALL=(root) NOPASSWD: /usr/local/sbin/openscale-vnc-toggle off

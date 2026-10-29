@@ -97,3 +97,23 @@ openscale-settime ntp-on|ntp-off (вкл/выкл systemd-timesyncd). Аргум
 валидуется скриптом (скелет + диапазоны + реальность даты через GNU date),
 ввод извне в shell не попадает. NTP-сервер своей сети — [time] server
 в /etc/openscale/config.toml.
+
+## Удалённый доступ VNC (включение/выключение из меню)
+
+Киоск переключает VNC через sudo-хелпер с фиксированными аргументами:
+
+`
+install -m 755 deploy/openscale-vnc-toggle /usr/local/sbin/openscale-vnc-toggle
+install -m 440 deploy/openscale-vnc-toggle.sudoers /etc/sudoers.d/openscale-vnc-toggle
+`
+
+Пункт «Удалённый доступ (VNC)» в разделе «Доступ и безопасность». Событие пишется
+в журнал действий.
+
+## Восстановление PIN администратора (файл-ключ на USB)
+
+1. На весах: `cat /etc/machine-id` (записать при установке).
+2. `python deploy/make_reset_key.py <machine-id> > openscale-reset.key`
+3. Положить `openscale-reset.key` в корень USB-флешки, вставить в весы.
+4. «Доступ и безопасность» → «Сбросить PIN ключом с USB» → PIN станет 12345,
+   сменить. Событие пишется в журнал действий.

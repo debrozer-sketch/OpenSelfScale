@@ -1046,6 +1046,71 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     );
                     kiosk.borrow_mut().admin_stage = 23;
                 }
+                "vnctoggle" => {
+                    let cur = kiosk.borrow().vnc_on;
+                    let next = !cur;
+                    let arg = if next { "on" } else { "off" };
+                    let ui_handle = ui_handle.clone();
+                    let cfg_t = cfg.clone();
+                    std::thread::spawn(move || {
+                        match std::process::Command::new("sudo")
+                            .arg("/usr/local/sbin/openscale-vnc-toggle")
+                            .arg(arg)
+                            .output()
+                        {
+                            Ok(o) if o.status.success() => {
+                                kiosk_vnc_note(next);
+                                log_action(&cfg_t.db_path, "удалённый доступ", format!("VNC {}", if next { "включён" } else { "выключен" }));
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(ui) = ui_handle.upgrade() {
+                                        ui.set_imp_popup_text(format!(
+                                            "Удалённый доступ VNC {}.",
+                                            if next { "включён" } else { "выключен" }
+                                        ).into());
+                                        ui.set_imp_confirm(false);
+                                        ui.set_imp_popup_open(true);
+                                    }
+                                });
+                            }
+                            Ok(o) => {
+                                log::warn!(
+                                    "vnc-toggle: код {}: {}",
+                                    o.status,
+                                    String::from_utf8_lossy(&o.stderr)
+                                );
+                            }
+                            Err(e) => log::warn!("vnc-toggle: {e}"),
+                        }
+                    });
+                }
+                "resetkey" => {
+                    match crate::settings::reset_admin_pin_by_usb_key(&cfg.db_path) {
+                        Ok(true) => {
+                            log_action(
+                                &cfg.db_path,
+                                "восстановление доступа",
+                                "PIN администратора сброшен ключом с USB".into(),
+                            );
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_imp_popup_text(
+                                    "PIN администратора сброшен на 12345.\nСмените его в «Пароль администратора».".into(),
+                                );
+                                ui.set_imp_confirm(false);
+                                ui.set_imp_popup_open(true);
+                            }
+                        }
+                        Ok(false) => {
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_imp_popup_text(
+                                    "Ключ не принят.\nНа USB должен быть файл openscale-reset.key\nс кодом для этого весов.".into(),
+                                );
+                                ui.set_imp_confirm(false);
+                                ui.set_imp_popup_open(true);
+                            }
+                        }
+                        Err(e) => log::warn!("resetkey: {e}"),
+                    }
+                }
                 "custscreen" => {
                     kiosk.borrow_mut().admin_stage = 24;
                 }
@@ -2438,6 +2503,61 @@ thread_local! {
 /// Поток меню с защитой от паники: тело не должно молча оставить экран
 /// «занят» (NET_APPLYING, статусы «Печатаю…») — при панике вызывается
 /// `on_panic`, чтобы сбросить флаги и вернуть UI-статус.
+fn kiosk_vnc_note(on: bool) {
+    KIOSK_RC.with(|c| {
+        if let Some(k) = &*c.borrow() {
+            k.borrow_mut().vnc_on = on;
+        }
+    });
+}
+
+/// S11/B12: восстановление доступа файлом-ключом с USB.
+/// Ожидаемое содержимое openscale-reset.key — hex(sha256("openscale-reset:" + machine_id)).
+/// Ключ для конкретного весов генерирует оператор (deploy/make_reset_key.py).
+pub fn reset_admin_pin_by_usb_key(db_path: &std::path::Path) -> Result<bool, String> {
+    let machine = std::fs::read_to_string("/etc/machine-id")
+        .map_err(|e| format!("machine-id: {e}"))?
+        .trim()
+        .to_string();
+    if machine.is_empty() {
+        return Ok(false);
+    }
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    h.update(b"openscale-reset:");
+    h.update(machine.as_bytes());
+    let expected: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    let mut found = false;
+    for root in ["/media", "/run/media"] {
+        let entries = match std::fs::read_dir(root) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for user_dir in entries.flatten() {
+            let mounts = match std::fs::read_dir(user_dir.path()) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for mount in mounts.flatten() {
+                let key = mount.path().join("openscale-reset.key");
+                let Ok(content) = std::fs::read_to_string(&key) else { continue };
+                if content.trim().eq_ignore_ascii_case(&expected) {
+                    found = true;
+                }
+            }
+        }
+    }
+    if !found {
+        return Ok(false);
+    }
+    let conn = datastore::open(db_path).map_err(|e| format!("база: {e}"))?;
+    match datastore::auth::create_user(&conn, 1, "admin", "12345") {
+        Ok(Ok(())) => Ok(true),
+        Ok(Err(msg)) => Err(msg.to_string()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 fn spawn_menu_task<F, C>(name: &'static str, on_panic: C, f: F)
 where
     F: FnOnce() + Send + 'static,

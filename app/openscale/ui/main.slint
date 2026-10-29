@@ -2344,6 +2344,8 @@ export component MainWindow inherits Window {
             property <[MenuRow]> rows: [
                 { label: "Пароль администратора", id: "changepin", admin: true },
                 { label: "Пароль кассира", id: "createstaff", admin: true },
+                { label: "Удалённый доступ (VNC)", id: "vnctoggle", admin: true },
+                { label: "Сбросить PIN ключом с USB", id: "resetkey", admin: true },
                 { label: "Журнал действий", id: "actionlog", admin: true },
             ];
             for r[i] in rows : Rectangle {
