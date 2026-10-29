@@ -10,6 +10,7 @@ use crate::diag;
 use crate::print;
 use crate::setup;
 use crate::MainWindow;
+static PRN_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static NET_APPLYING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 fn show_cfg_popup(
     ui_handle: &slint::Weak<MainWindow>,
@@ -477,6 +478,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 }
                 "back" => match stage {
                     6 if k.setup_print_sub == 1 => {
+                        if PRN_BUSY.load(std::sync::atomic::Ordering::SeqCst) {
+                            log::info!("настройка: принтер занят, повторная подача пропущена");
+                            return;
+                        }
                         drop(k);
                         adjust_feed(&conn, -16);
                         spawn_wizard_test_print(&cfg);
@@ -563,6 +568,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         setup_render();
                     }
                     6 => {
+                        if PRN_BUSY.load(std::sync::atomic::Ordering::SeqCst) {
+                            log::info!("настройка: принтер занят, повторная подача пропущена");
+                            return;
+                        }
                         drop(k);
                         adjust_feed(&conn, 16);
                         spawn_wizard_test_print(&cfg);
@@ -1085,10 +1094,18 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     );
                 }
                 "testprint" => {
+                    if PRN_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        log::info!("меню: принтер занят, повторная печать пропущена");
+                        return;
+                    }
                     let cfg = cfg.clone();
-                    std::thread::spawn(move || match print::print_test_label(&cfg) {
-                        Ok(()) => log::info!("меню: тестовая этикетка"),
-                        Err(e) => log::warn!("меню: тестовая печать: {e}"),
+                    std::thread::spawn(move || {
+                        let res = print::print_test_label(&cfg);
+                        PRN_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                        match res {
+                            Ok(()) => log::info!("меню: тестовая этикетка"),
+                            Err(e) => log::warn!("меню: тестовая печать: {e}"),
+                        }
                     });
                 }
                 "zero" => {
@@ -2111,10 +2128,18 @@ fn adjust_feed(conn: &rusqlite::Connection, delta: i64) {
     }
 }
 fn spawn_wizard_test_print(cfg: &Config) {
+    if PRN_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        log::info!("настройка: принтер занят, повторная печать пропущена");
+        return;
+    }
     let cfg = cfg.clone();
-    std::thread::spawn(move || match print::print_test_label(&cfg) {
-        Ok(()) => log::info!("настройка: тестовая этикетка напечатана"),
-        Err(e) => log::warn!("настройка: тестовая печать: {e}"),
+    std::thread::spawn(move || {
+        let res = print::print_test_label(&cfg);
+        PRN_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+        match res {
+            Ok(()) => log::info!("настройка: тестовая этикетка напечатана"),
+            Err(e) => log::warn!("настройка: тестовая печать: {e}"),
+        }
     });
 }
 fn calibrate_label_text(cfg: &Config) -> (String, Option<i64>) {
