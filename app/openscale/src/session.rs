@@ -167,7 +167,7 @@ mod tests {
     }
     #[test]
     fn weight_state_thresholds() {
-        let mut s = crate::weight::Snapshot { mass_kg: -0.006, stable: true, port_up: true };
+        let mut s = crate::weight::Snapshot { mass_kg: -0.006, stable: true, port_up: true, updated_at_ms: 1 };
         assert_eq!(weight_state(&s, 0.010), 0);
         s.mass_kg = 1.35;
         assert_eq!(weight_state(&s, 0.010), 2);

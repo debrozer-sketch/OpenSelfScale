@@ -1,13 +1,26 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use drivers_api::{ScalesDriver, ScalesProfile};
+pub const SNAPSHOT_STALE_MS: u64 = 1500;
+static EPOCH: OnceLock<std::time::Instant> = OnceLock::new();
+pub fn now_ms() -> u64 {
+    let e = EPOCH.get_or_init(std::time::Instant::now);
+    std::time::Instant::now().duration_since(*e).as_millis() as u64
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Snapshot {
     pub mass_kg: f64,
     pub stable: bool,
     pub port_up: bool,
+    pub updated_at_ms: u64,
+}
+pub fn apply_staleness(s: &mut Snapshot, now: u64) {
+    if s.port_up && now.saturating_sub(s.updated_at_ms) > SNAPSHOT_STALE_MS {
+        s.port_up = false;
+        s.stable = false;
+    }
 }
 pub struct WeightSource {
     inner: Arc<Mutex<Snapshot>>,
@@ -20,6 +33,7 @@ impl WeightSource {
             mass_kg: 0.0,
             stable: false,
             port_up: false,
+            updated_at_ms: 0,
         }));
         let stop = Arc::new(AtomicBool::new(false));
         let zero = Arc::new(AtomicBool::new(false));
@@ -54,7 +68,9 @@ impl WeightSource {
         Self { inner, stop, zero }
     }
     pub fn snapshot(&self) -> Snapshot {
-        *self.inner.lock().unwrap_or_else(|e| e.into_inner())
+        let mut s = *self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        apply_staleness(&mut s, now_ms());
+        s
     }
     pub fn request_zero(&self) {
         self.zero.store(true, Ordering::Relaxed);
@@ -104,9 +120,20 @@ fn open_tty_raw(path: &str, baud: u32) -> Result<std::fs::File, String> {
         Ok(p) => p,
         Err(e) => return Err(format!("путь порта {path:?}: {e}")),
     };
-    let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDWR | libc::O_NOCTTY) };
+    let fd = unsafe {
+        libc::open(
+            c_path.as_ptr(),
+            libc::O_RDWR | libc::O_NOCTTY | libc::O_NONBLOCK,
+        )
+    };
     if fd < 0 {
         return Err(std::io::Error::last_os_error().to_string());
+    }
+    let rc = unsafe { libc::ioctl(fd, libc::TIOCEXCL) };
+    if rc != 0 {
+        let e = std::io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(format!("TIOCEXCL: {e}"));
     }
     let mut term = libc::termios {
         c_iflag: 0,
@@ -131,6 +158,12 @@ fn open_tty_raw(path: &str, baud: u32) -> Result<std::fs::File, String> {
         let e = std::io::Error::last_os_error();
         unsafe { libc::close(fd) };
         return Err(format!("tcsetattr: {e}"));
+    }
+    let fl = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if fl < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, fl & !libc::O_NONBLOCK) } < 0 {
+        let e = std::io::Error::last_os_error();
+        unsafe { libc::close(fd) };
+        return Err(format!("fcntl(O_NONBLOCK off): {e}"));
     }
     let mask: libc::c_int = libc::TIOCM_DTR | libc::TIOCM_RTS;
     let rc = unsafe { libc::ioctl(fd, libc::TIOCMBIS, &mask) };
@@ -173,6 +206,7 @@ fn poll_loop(
                             s.mass_kg = sample.mass_g as f64 / 1000.0;
                             s.stable = sample.stable;
                             s.port_up = true;
+                            s.updated_at_ms = now_ms();
                         }
                         Err(drivers_api::DriverError::Timeout) => {
                             silent += 1;
@@ -210,6 +244,35 @@ fn poll_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stale_snapshot_marks_port_down() {
+        let mut stale = Snapshot {
+            mass_kg: 1.0,
+            stable: true,
+            port_up: true,
+            updated_at_ms: 100,
+        };
+        apply_staleness(&mut stale, 2000);
+        assert!(!stale.port_up);
+        assert!(!stale.stable);
+        let mut fresh = Snapshot {
+            mass_kg: 1.0,
+            stable: true,
+            port_up: true,
+            updated_at_ms: 1900,
+        };
+        apply_staleness(&mut fresh, 2000);
+        assert!(fresh.port_up);
+        assert!(fresh.stable);
+        let mut never = Snapshot {
+            mass_kg: 0.0,
+            stable: false,
+            port_up: true,
+            updated_at_ms: 0,
+        };
+        apply_staleness(&mut never, 10_000);
+        assert!(!never.port_up);
+    }
     #[test]
     fn snapshot_defaults_are_safe_without_hardware() {
         let s = WeightSource::spawn(&ScalesProfile {
