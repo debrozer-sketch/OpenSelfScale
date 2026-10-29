@@ -1027,7 +1027,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     kiosk.borrow_mut().admin_stage = 22;
                 }
                 "status" => {
-                    kiosk.borrow_mut().status_from = kiosk.borrow().admin_stage;
+                    let status_from = kiosk.borrow().admin_stage;
+                    kiosk.borrow_mut().status_from = status_from;
                     let app_state = app_state.clone();
                     let cfg_s = cfg.clone();
                     let ui_handle = ui_handle.clone();
