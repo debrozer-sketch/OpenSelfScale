@@ -108,11 +108,10 @@ def connect() -> paramiko.SSHClient:
             timeout=15,
         )
     try:
-        client.connect(
+        kwargs = dict(
             hostname=cfg["SCALE_HOST"],
             port=int(cfg.get("SCALE_PORT", "22")),
             username=cfg["SCALE_USER"],
-            password=cfg["SCALE_PASSWORD"],
             sock=sock,
             timeout=10,
             banner_timeout=10,
@@ -120,6 +119,12 @@ def connect() -> paramiko.SSHClient:
             allow_agent=False,
             look_for_keys=False,
         )
+        key_path = cfg.get("SCALE_KEY")
+        if key_path and Path(key_path).exists():
+            kwargs["pkey"] = paramiko.Ed25519Key.from_private_key_file(key_path)
+        else:
+            kwargs["password"] = cfg["SCALE_PASSWORD"]
+        client.connect(**kwargs)
     except paramiko.SSHException as e:
         _fail_unknown_host(cfg["SCALE_HOST"], e)
     return client

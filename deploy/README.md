@@ -19,8 +19,16 @@
 
 ## Процедура
 
+В `.env` перед сборкой:
+
+- `SCALE_SSH_PUBKEY` — публичный ключ деплой-машины (обязателен, ставится root'у).
+- `SCALE_SSH_MODE` — `key` (по умолчанию; root SSH только по ключу,
+  `PermitRootLogin prohibit-password`) или `password` (как раньше, `PermitRootLogin yes`).
+- `SCALE_KEY` — путь к приватному ключу; если задан, `scale_ssh.py` ходит
+  по ключу, иначе по паролю.
+
 ```bash
-# 1. Собрать initrd с preseed (пароль из .env, в репозиторий не попадает)
+# 1. Собрать initrd с preseed (пароль/ключ из .env, в репозиторий не попадает)
 python deploy/make_initrd.py
 
 # 2. Загрузить на весы: ядро, initrd, ISO, kexec-tools

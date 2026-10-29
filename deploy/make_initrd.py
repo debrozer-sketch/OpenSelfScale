@@ -47,12 +47,23 @@ def main() -> int:
     if not mirror:
         print("нет MIRROR_IP в .env — не могу подставить адрес зеркала", file=sys.stderr)
         return 1
+    pubkey = env.get("SCALE_SSH_PUBKEY")
+    if not pubkey:
+        print("нет SCALE_SSH_PUBKEY в .env — не могу поставить ключ root", file=sys.stderr)
+        return 1
+    mode = env.get("SCALE_SSH_MODE", "key").strip().lower()
+    if mode not in ("key", "password"):
+        print("SCALE_SSH_MODE должен быть key или password", file=sys.stderr)
+        return 1
+    permit = "prohibit-password" if mode == "key" else "yes"
     seed = (
         SEED_SRC.read_text(encoding="utf-8")
         .replace("__ROOT_PW__", pw)
         .replace("__MIRROR_IP__", mirror)
+        .replace("__ROOT_PUBKEY__", pubkey)
+        .replace("__SSH_PERMIT__", permit)
     )
-    for placeholder in ("__ROOT_PW__", "__MIRROR_IP__"):
+    for placeholder in ("__ROOT_PW__", "__MIRROR_IP__", "__ROOT_PUBKEY__", "__SSH_PERMIT__"):
         if placeholder in seed:
             print(f"плейсхолдер не заменён: {placeholder}", file=sys.stderr)
             return 1
