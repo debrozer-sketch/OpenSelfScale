@@ -120,23 +120,35 @@ impl<P: PortPoll> ShtrihScales<P> {
         self.buf.clear();
         self.port.write_all(&build_poll_frame())?;
         self.port.flush()?;
+        let deadline = std::time::Instant::now() + timeout;
         let mut scratch = [0u8; 64];
         loop {
             if let Some(start) = self.buf.iter().position(|&b| b == STX) {
-                if self.buf[start] == STX && self.buf.len() > start + 1 {
-                    let need = 2 + self.buf[start + 1] as usize + 1; 
+                if self.buf.len() > start + 1 {
+                    let need = 2 + self.buf[start + 1] as usize + 1;
                     if self.buf.len() >= start + need {
                         let frame: Vec<u8> = self.buf[start..start + need].to_vec();
-                        self.port.write_all(&[ACK])?;
-                        self.port.flush()?;
-                        return parse_reply(&frame);
+                        match parse_reply(&frame) {
+                            Ok(reply) => {
+                                self.port.write_all(&[ACK])?;
+                                self.port.flush()?;
+                                return Ok(reply);
+                            }
+                            Err(_) => {
+                                self.buf.drain(..start + need);
+                                continue;
+                            }
+                        }
                     }
                 }
             }
             if self.buf.len() > 64 {
                 self.buf.clear();
             }
-            let n = self.port.read_timeout(&mut scratch, timeout)?;
+            if std::time::Instant::now() >= deadline {
+                return Err(ShtrihError::Timeout);
+            }
+            let n = self.port.read_timeout(&mut scratch, deadline - std::time::Instant::now())?;
             if n == 0 {
                 return Err(ShtrihError::Timeout);
             }
@@ -155,6 +167,7 @@ impl<P: PortPoll> ShtrihScales<P> {
         self.buf.clear();
         self.port.write_all(frame)?;
         self.port.flush()?;
+        let deadline = std::time::Instant::now() + timeout;
         let mut scratch = [0u8; 64];
         loop {
             if let Some(start) = self.buf.iter().position(|&b| b == STX) {
@@ -162,8 +175,6 @@ impl<P: PortPoll> ShtrihScales<P> {
                     let need = 2 + self.buf[start + 1] as usize + 1;
                     if self.buf.len() >= start + need {
                         let reply: Vec<u8> = self.buf[start..start + need].to_vec();
-                        self.port.write_all(&[ACK])?;
-                        self.port.flush()?;
                         if reply.len() < 4 || reply[2] != cmd {
                             return Err(ShtrihError::Protocol(
                                 reply.get(2).copied().unwrap_or(0),
@@ -176,6 +187,8 @@ impl<P: PortPoll> ShtrihScales<P> {
                                 got: reply[reply.len() - 1],
                             });
                         }
+                        self.port.write_all(&[ACK])?;
+                        self.port.flush()?;
                         let code = reply[3];
                         if code != 0 {
                             return Err(ShtrihError::Device { cmd, code });
@@ -187,7 +200,10 @@ impl<P: PortPoll> ShtrihScales<P> {
             if self.buf.len() > 64 {
                 self.buf.clear();
             }
-            let n = self.port.read_timeout(&mut scratch, timeout)?;
+            if std::time::Instant::now() >= deadline {
+                return Err(ShtrihError::Timeout);
+            }
+            let n = self.port.read_timeout(&mut scratch, deadline - std::time::Instant::now())?;
             if n == 0 {
                 return Err(ShtrihError::Timeout);
             }
@@ -305,6 +321,57 @@ mod tests {
         ShtrihScales::zero(&mut ShtrihScales::new(&mut port), Duration::from_millis(50))
             .expect("zero should succeed on split reply");
         assert!(port.written.last() == Some(&0x06));
+    }
+    struct GarbageStream;
+    impl Read for GarbageStream {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            for b in buf.iter_mut() {
+                *b = 0xAA;
+            }
+            Ok(buf.len())
+        }
+    }
+    impl Write for GarbageStream {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn poll_deadline_on_garbage_stream() {
+        let mut s = ShtrihScales::new(GarbageStream);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let r = s.poll_once(Duration::from_millis(300));
+            let _ = tx.send(r);
+        });
+        match rx.recv_timeout(Duration::from_secs(3)) {
+            Ok(Err(ShtrihError::Timeout)) => {}
+            Ok(other) => panic!("ожидается Timeout, получено: {other:?}"),
+            Err(_) => panic!("poll_once завис на потоке мусорных байтов"),
+        }
+    }
+    #[test]
+    fn ack_sent_only_after_lrc_ok() {
+        let mut bad = vec![0x02u8, 0x0b, b':', 0x00, 0x15, 0x00, 0x46, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, b'g'];
+        bad[13] ^= 0xFF;
+        let mut port = SplitReplyPort::new(vec![bad]);
+        let res = ShtrihScales::poll_once(&mut ShtrihScales::new(&mut port), Duration::from_millis(300));
+        assert!(
+            matches!(res, Err(ShtrihError::Timeout)),
+            "битый кадр выбрасывается, опрос завершается по дедлайну"
+        );
+        assert!(
+            !port.written.contains(&ACK),
+            "ACK не должен уходить до проверки LRC"
+        );
+        let good = vec![0x02u8, 0x0b, b':', 0x00, 0x15, 0x00, 0x46, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, b'g'];
+        let mut port = SplitReplyPort::new(vec![good]);
+        let res = ShtrihScales::poll_once(&mut ShtrihScales::new(&mut port), Duration::from_millis(300));
+        assert!(res.is_ok());
+        assert!(port.written.contains(&ACK), "валидный кадр подтверждается ACK");
     }
     #[test]
     fn zero_reports_device_error() {
