@@ -590,6 +590,33 @@ fn group_of(namefirst: &str) -> String {
         .unwrap_or_default()
         .to_uppercase()
 }
+pub fn ean_code5_collisions(
+    conn: &Connection,
+) -> Result<Vec<(String, Vec<String>)>, StoreError> {
+    let mut stmt = conn.prepare("SELECT plu, itemcode FROM plucodes")?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>();
+    drop(stmt);
+    let mut by_code5: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for (plu, itemcode) in rows {
+        let digits: String = itemcode.chars().filter(|c| c.is_ascii_digit()).collect();
+        let code5 = if digits.len() >= 5 {
+            digits[digits.len() - 5..].to_string()
+        } else {
+            format!("{digits:0>5}")
+        };
+        by_code5.entry(code5).or_default().push(plu);
+    }
+    let mut out: Vec<(String, Vec<String>)> = by_code5
+        .into_iter()
+        .filter(|(_, v)| v.len() > 1)
+        .collect();
+    out.sort();
+    Ok(out)
+}
 pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
     for it in items {
         if it.price <= 0 || it.price > MAX_PRICE_KOP {
@@ -640,6 +667,17 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
     }
     drop(stmt);
     tx.commit()?;
+    match ean_code5_collisions(conn) {
+        Ok(cols) => {
+            for (code5, plus) in &cols {
+                log::warn!(
+                    "импорт: коллизия штрихкода (последние 5 цифр itemcode = {code5}): {}",
+                    plus.join(", ")
+                );
+            }
+        }
+        Err(e) => log::warn!("импорт: проверка коллизий штрихкодов: {e}"),
+    }
     Ok(n)
 }
 pub fn remove_absent(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
@@ -850,6 +888,20 @@ pub fn apply_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ean_code5_collisions_are_detected() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        let xml = concat!(
+            r#"<body><item plunumber="1" price="100" itemcode="102136" namefirst="A" />"#,
+            r#"<item plunumber="2" price="100" itemcode="02136" namefirst="B" />"#,
+            r#"<item plunumber="3" price="100" itemcode="99999" namefirst="C" /></body>"#
+        );
+        import_plu(&conn, &parse_plu_xml(xml).unwrap()).unwrap();
+        let c = ean_code5_collisions(&conn).unwrap();
+        assert_eq!(c.len(), 1, "одна коллизия: {c:?}");
+        assert_eq!(c[0].0, "02136");
+        assert_eq!(c[0].1.len(), 2);
+    }
     #[test]
     fn group_column_uses_full_unicode_uppercase() {
         let conn = open(":memory:".as_ref()).unwrap();
