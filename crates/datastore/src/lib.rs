@@ -169,7 +169,7 @@ pub fn load_all(conn: &Connection) -> Result<Vec<PluEntry>, StoreError> {
             group: r.get(5)?,
         })
     })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    Ok(rows_collect_warn(rows))
 }
 pub fn get_item(conn: &Connection, plu: &str) -> Result<Option<PluItem>, StoreError> {
     let mut stmt = conn.prepare(
@@ -193,13 +193,23 @@ pub fn get_item(conn: &Connection, plu: &str) -> Result<Option<PluItem>, StoreEr
         })
         .transpose()
 }
+fn rows_collect_warn<T>(rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>>) -> Vec<T> {
+    let mut out = Vec::new();
+    for r in rows {
+        match r {
+            Ok(v) => out.push(v),
+            Err(e) => log::warn!("данные: строка не прочитана и пропущена: {e}"),
+        }
+    }
+    out
+}
 pub fn groups_alpha(conn: &Connection) -> Result<Vec<(String, i64)>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT COALESCE(NULLIF(\"group\", ''), 'ПРОЧЕЕ') AS g, COUNT(*) AS n
          FROM plucodes GROUP BY g ORDER BY g",
     )?;
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    Ok(rows_collect_warn(rows))
 }
 const SEED_DEPTS: &[(&str, &str)] = &[
     ("ОВОЩИ", "ovoshi.png"),
@@ -279,7 +289,7 @@ pub fn label_layout_list(conn: &Connection) -> Result<Vec<LabelLayoutRow>, Store
             json: r.get(3)?,
         })
     })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    Ok(rows_collect_warn(rows))
 }
 pub fn label_layout_delete(conn: &Connection, name: &str) -> Result<bool, StoreError> {
     let n = conn.execute("DELETE FROM label_layouts WHERE name = ?1", [name])?;
@@ -307,12 +317,12 @@ pub fn depts_list(conn: &Connection) -> Result<Vec<DeptRow>, StoreError> {
             fg: r.get(4)?,
         })
     })?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    Ok(rows_collect_warn(rows))
 }
 pub fn group_depts(conn: &Connection) -> Result<Vec<(String, String)>, StoreError> {
     let mut stmt = conn.prepare("SELECT grp, dept FROM group_dept ORDER BY grp")?;
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-    Ok(rows.filter_map(|r| r.ok()).collect())
+    Ok(rows_collect_warn(rows))
 }
 pub fn dept_add(
     conn: &Connection,
