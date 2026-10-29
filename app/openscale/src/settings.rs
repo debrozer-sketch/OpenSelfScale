@@ -840,6 +840,18 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         trade.rounding.set(v);
                         refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                         log::info!("меню: округление цены: режим {v}");
+                        if v != 0 {
+                            if let Some(ui) = ui_handle.upgrade() {
+                                ui.set_imp_popup_text(
+                                    "Внимание: включено округление суммы на этикетке.\n\
+                                     Штрихкод несёт только вес — касса считает сумму сама.\n\
+                                     Покупатель может увидеть на этикетке одну сумму, а заплатить другую."
+                                        .into(),
+                                );
+                                ui.set_imp_confirm(false);
+                                ui.set_imp_popup_open(true);
+                            }
+                        }
                     });
                 }
                 "minweight" => {
