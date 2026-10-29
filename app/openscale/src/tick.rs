@@ -203,7 +203,10 @@ pub fn start(
                     k.phase = 0;
                     k.selected = None;
                 }
-                let logo_pressed = ui.get_logo_pressed();
+                // Страховка от залипшего logo-pressed: флаг считается только
+                // на главном экране; иначе удержание «висит» вечно и тик
+                // раз в 3 с чистит PIN-буфер, делая вход по паролю невозможным.
+                let logo_pressed = ui.get_logo_pressed() && ui.get_screen() == 0;
                 if logo_pressed {
                     let mut hold = logo_hold.borrow_mut();
                     if hold.is_none() {

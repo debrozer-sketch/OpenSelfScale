@@ -287,7 +287,9 @@ global Theme {
     // Шрифт: IBM Plex Sans; при отсутствии шрифта в системе — fallback системный
     in property <string> family: "IBM Plex Sans";
     // Шрифтовая шкала (маппинг на t-* из proposal: display 92, title 30, headline 24, body 20, label 16)
-    in property <length> font-display: 92px;
+    // display: 80px — не 92 из proposal: femtovg на GPU киоска не растеризует
+    // глифы крупнее ~84px (проверено на стенде: 80 рисуется, 88 — пусто)
+    in property <length> font-display: 80px;
     in property <length> font-h1: 30px;
     in property <length> font-h2: 30px;
     in property <length> font-h3: 24px;
@@ -595,11 +597,13 @@ export component MainWindow inherits Window {
          y: 44px + (112px - root.logo-h) / 2;
          width: root.width - 496px;
          height: root.logo-h;
-         enabled: root.screen == 0;
+         // Не дизейблим при смене экрана: задизейбленный TouchArea не получит
+         // отпускание, logo-pressed залипнет, и тик будет считать логотип
+         // удержанным бесконечно. Проверку экрана делаем в down.
          pointer-event(ev) => {
              if ev.kind == PointerEventKind.down {
-                 root.logo-pressed = true;
-             } else if ev.kind == PointerEventKind.up {
+                 root.logo-pressed = root.screen == 0;
+             } else if ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel {
                  root.logo-pressed = false;
              }
          }
