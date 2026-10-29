@@ -25,12 +25,14 @@ fn load_img_cached(path: &Path) -> Option<slint::Image> {
 pub fn clear_img_cache() {
     IMG_CACHE.with(|c| c.borrow_mut().clear());
 }
-pub fn items_pages(total: usize, cap: usize) -> usize {
+pub fn items_pages(total: usize, cap: usize, back: bool) -> usize {
     let cap = cap.max(3);
     if total <= cap - 1 {
         1
-    } else {
+    } else if back {
         1 + (total - (cap - 1)).div_ceil(cap - 2)
+    } else {
+        1 + (total - (cap - 1)).div_ceil(cap - 1)
     }
 }
 pub fn tile_of(p: &datastore::PluEntry, img_dir: &Path) -> crate::PluTile {
@@ -156,13 +158,22 @@ mod tests {
     }
     #[test]
     fn grid_pagination_matches_spec() {
-    assert_eq!(items_pages(0, 27), 1);
-    assert_eq!(items_pages(26, 27), 1);
-    assert_eq!(items_pages(27, 27), 2);
-    assert_eq!(items_pages(51, 27), 2);
-    assert_eq!(items_pages(52, 27), 3);
-    assert_eq!(items_pages(17, 18), 1);
-    assert_eq!(items_pages(18, 18), 2);
+        assert_eq!(items_pages(0, 27, true), 1);
+        assert_eq!(items_pages(26, 27, true), 1);
+        assert_eq!(items_pages(27, 27, true), 2);
+        assert_eq!(items_pages(51, 27, true), 2);
+        assert_eq!(items_pages(52, 27, true), 3);
+        assert_eq!(items_pages(17, 18, true), 1);
+        assert_eq!(items_pages(18, 18, true), 2);
+    }
+    #[test]
+    fn pages_no_back_no_duplicates() {
+        // cap=27, back=false: page0=26, page1=26 → 52 items в 2 страницах
+        assert_eq!(items_pages(0, 27, false), 1);
+        assert_eq!(items_pages(26, 27, false), 1);
+        assert_eq!(items_pages(27, 27, false), 2);
+        assert_eq!(items_pages(52, 27, false), 2);
+        assert_eq!(items_pages(53, 27, false), 3);
     }
     #[test]
     fn hl_parts_cuts_by_chars_not_bytes() {

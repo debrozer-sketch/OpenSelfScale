@@ -113,16 +113,15 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             ui.set_items_cols(cols as i32);
             ui.set_items_col_w(col_w);
             let cap = cols * 3;
-            let pages_total = tiles::items_pages(items_all.borrow().len(), cap);
-            let page = page.min(pages_total - 1);
             let back = catalog_back.get();
-            let (skip, take) = if page == 0 {
-                (0, cap - 1)
+            let pages_total = tiles::items_pages(items_all.borrow().len(), cap, back);
+            let page = page.min(pages_total - 1);
+            let (skip, take, step) = if page == 0 {
+                (0, cap - 1, cap - 1)
+            } else if back {
+                (cap - 1 + (page - 1) * (cap - 2), cap - 2, cap - 2)
             } else {
-                (
-                    cap - 1 + (page - 1) * (cap - 2),
-                    if back { cap - 2 } else { cap - 1 },
-                )
+                (cap - 1 + (page - 1) * (cap - 1), cap - 1, cap - 1)
             };
             let tiles: Vec<PluTile> = items_all
                 .borrow()
@@ -481,13 +480,15 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let ui_handle = ui_handle.clone();
         let cols = ctx.trade.cols.clone();
         let item_cols = ctx.trade.item_cols.clone();
+        let catalog_back = ctx.trade.catalog_back.clone();
         move || {
             kiosk.borrow_mut().idle_since = None;
             let Some(ui) = ui_handle.upgrade() else { return };
             match ui.get_screen() {
                 2 => {
                     let cap = item_cols.get().max(2) * 3;
-                    let pages_total = tiles::items_pages(items_all.borrow().len(), cap);
+                    let back = catalog_back.get();
+                    let pages_total = tiles::items_pages(items_all.borrow().len(), cap, back);
                     let page = (kiosk.borrow().item_page + 1).min(pages_total - 1);
                     show_items(page);
                 }
