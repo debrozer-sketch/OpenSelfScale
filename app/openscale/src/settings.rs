@@ -1,5 +1,6 @@
 
 use std::cell::RefCell;
+use std::rc::Rc;
 use crate::admin;
 use crate::cfgio;
 use crate::context::AppContext;
@@ -76,20 +77,32 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     if cfg.time.ntp && !cfg.time.server.is_empty() {
         spawn_settime(&cfg, &["ntp-server", cfg.time.server.as_str()], ui_handle.clone(), "NTP-сервер применён");
     }
-    let admin_reload = {
+    let admin_reload: Rc<dyn Fn()> = Rc::new({
         let ui_handle = ui_handle.clone();
         let cfg = cfg.clone();
         let palette = ctx.palette.clone();
         let palette_names = ctx.palette_names.clone();
         move || {
-            if let Some(ui) = ui_handle.upgrade() {
-                match datastore::open(&cfg.db_path) {
-                    Ok(conn) => admin::admin_rows_set(&ui, &conn, &palette, &palette_names),
-                    Err(e) => log::error!("меню: база: {e}"),
-                }
-            }
+            let palette: Vec<(u32, u32)> = palette.iter().cloned().collect();
+            let palette_names: Vec<String> = palette_names.iter().cloned().collect();
+            let ui_handle = ui_handle.clone();
+            let cfg = cfg.clone();
+            std::thread::spawn(move || {
+                let rows = match datastore::open(&cfg.db_path) {
+                    Ok(conn) => admin::admin_rows(&conn, &palette, &palette_names),
+                    Err(e) => {
+                        log::error!("отделы: база: {e}");
+                        return;
+                    }
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_admin_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+                    }
+                });
+            });
         }
-    };
+    });
     ui.on_admin_close({
         let kiosk = kiosk.clone();
         let ui_handle = ui_handle.clone();

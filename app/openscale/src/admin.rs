@@ -1,15 +1,13 @@
 
 use crate::config;
-pub fn admin_rows_set(
-    ui: &crate::MainWindow,
+pub fn admin_rows(
     conn: &rusqlite::Connection,
     palette: &[(u32, u32)],
     palette_names: &[String],
-) {
+) -> Vec<crate::AdminRow> {
     let list = datastore::depts_list(conn).unwrap_or_default();
     let n = list.len();
-    let rows: Vec<crate::AdminRow> = list
-        .iter()
+    list.iter()
         .enumerate()
         .map(|(i, d)| {
             let (_idx, label, swatch) = color_state(&d.bg, palette, palette_names);
@@ -21,7 +19,16 @@ pub fn admin_rows_set(
                 color: swatch,
             }
         })
-        .collect();
+        .collect()
+}
+
+pub fn admin_rows_set(
+    ui: &crate::MainWindow,
+    conn: &rusqlite::Connection,
+    palette: &[(u32, u32)],
+    palette_names: &[String],
+) {
+    let rows = admin_rows(conn, palette, palette_names);
     ui.set_admin_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
 }
 pub(crate) const PALETTE_NAMES: [&str; 8] = [
