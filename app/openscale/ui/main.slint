@@ -1543,30 +1543,35 @@ export component MainWindow inherits Window {
             ];
             property <[MenuRow]> rows: root.role == 0 ? rows-staff
                 : (root.setup-menu-visible ? rows-admin-setup : rows-admin);
-            for r[i] in rows : Rectangle {
-                x: 8px;
-                y: 12px + i * 82px;
-                width: parent.width - 16px;
-                height: 74px;
-                border-radius: 12px;
-                border-width: 2px;
-                border-color: Theme.border;
-                background: menu-ta.pressed ? Theme.pressed : Theme.surface;
-                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
-                Text {
-                    x: 24px;
-                    width: parent.width - 48px;
-                    height: parent.height;
-                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-                menu-ta := TouchArea {
-                    clicked => {
-                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+                viewport-height: 12px + rows.length * 82px;
+                for r[i] in rows : Rectangle {
+                    x: 8px;
+                    y: 12px + i * 82px;
+                    width: parent.width - 16px;
+                    height: 74px;
+                    border-radius: 12px;
+                    border-width: 2px;
+                    border-color: Theme.border;
+                    background: menu-ta.pressed ? Theme.pressed : Theme.surface;
+                    opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
+                    Text {
+                        x: 24px;
+                        width: parent.width - 48px;
+                        height: parent.height;
+                        text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
+                        font-size: Theme.font-h3;
+                        font-weight: 700;
+                        color: Theme.ink;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    menu-ta := TouchArea {
+                        clicked => {
+                            (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
+                        }
                     }
                 }
             }
@@ -2383,7 +2388,11 @@ export component MainWindow inherits Window {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-            for r[i] in root.admin-rows : Rectangle {
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+                viewport-height: 12px + root.admin-rows.length * 72px;
+                for r[i] in root.admin-rows : Rectangle {
                 x: 8px;
                 y: 12px + i * 72px;
                 width: parent.width - 16px;
@@ -2462,6 +2471,7 @@ export component MainWindow inherits Window {
                     background: admin-del-ta.pressed ? Theme.danger-pressed : Theme.danger-soft;
                     Text { text: "✕"; font-size: Theme.font-h3; font-weight: 700; color: Theme.danger-ink; }
                     admin-del-ta := TouchArea { clicked => { root.admin-del(r.name); } }
+                }
                 }
             }
         }
