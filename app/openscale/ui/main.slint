@@ -63,7 +63,7 @@ component DeptTile inherits Rectangle {
     height: root.tile-h;
     border-radius: 24px;
     border-width: 2px;
-    border-color: #C9CFD7;
+    border-color: Theme.border;
     background: ta.pressed ? d.bg-pressed : d.bg;
     if d.has-img : Rectangle {
         x: 8px;
@@ -85,7 +85,7 @@ component DeptTile inherits Rectangle {
         width: parent.width - 16px;
         height: parent.height - 110px - 16px;
         border-radius: 20px;
-        background: rgba(255, 255, 255, 0.75);
+        background: Theme.scrim;
     }
     Text {
         x: 8px;
@@ -131,7 +131,7 @@ component PluCard inherits Rectangle {
     x: 8px + Math.mod(self.idx + self.cell-offset, self.cols) * (root.col-w + 8px);
     y: 56px + Math.floor((self.idx + self.cell-offset) / self.cols) * 182px;
     border-radius: 12px;
-    background: !root.active ? #EDEFF2 : ta.pressed ? #E4E8ED : #FFFFFF;
+    background: !root.active ? Theme.chip : ta.pressed ? Theme.pressed : Theme.surface;
     Rectangle {
         x: 2px;
         y: root.card-show-name ? 2px : 21px;
@@ -139,7 +139,7 @@ component PluCard inherits Rectangle {
         height: 104px;
         border-radius: 10px;
         clip: true;
-        background: #F0F2F5;
+        background: Theme.chip;
         if root.p.has-img : Image {
             width: 100%;
             height: 100%;
@@ -158,7 +158,7 @@ component PluCard inherits Rectangle {
         overflow: elide;
         horizontal-alignment: center;
         vertical-alignment: center;
-        color: !root.active ? #A6ADB8 : #1A1E24;
+        color: !root.active ? Theme.ink-faint : Theme.ink;
     }
     if root.p.card-price == "" : Text {
         x: 3px;
@@ -170,7 +170,7 @@ component PluCard inherits Rectangle {
         font-weight: 700;
         horizontal-alignment: center;
         vertical-alignment: center;
-        color: !root.active ? #A6ADB8 : #1A1E24;
+        color: !root.active ? Theme.ink-faint : Theme.ink;
     }
     if root.p.card-price != "" : Text {
         x: 3px;
@@ -181,7 +181,7 @@ component PluCard inherits Rectangle {
         font-size: 9px;
         horizontal-alignment: center;
         vertical-alignment: center;
-        color: #A6ADB8;
+        color: Theme.ink-faint;
     }
     if root.p.card-price != "" : Text {
         x: 3px;
@@ -193,7 +193,7 @@ component PluCard inherits Rectangle {
         font-weight: 700;
         horizontal-alignment: center;
         vertical-alignment: center;
-        color: #2FA36B;
+        color: Theme.success-bright;
     }
     ta := TouchArea {
         enabled: root.active;
@@ -210,12 +210,12 @@ component KbKey inherits Rectangle {
     height: 58px;
     border-radius: 12px;
     border-width: 2px;
-    border-color: #C9CFD7;
-    background: k-ta.pressed ? #E4E8ED : #FFFFFF;
+    border-color: Theme.border;
+    background: k-ta.pressed ? Theme.pressed : Theme.surface;
     Text {
         text: root.key;
-        font-size: 22px;
-        color: #1A1E24;
+        font-size: Theme.font-body;
+        color: Theme.ink;
     }
     k-ta := TouchArea {
         clicked => { root.key-tapped(root.key); }
@@ -226,13 +226,64 @@ component KbKey inherits Rectangle {
         triggered => { root.key-tapped("ЗАБОЙ"); }
     }
 }
+global Theme {
+    // Поверхности и слои
+    in property <color> bg: #F6F7F9;           // фон окна
+    in property <color> surface: #FFFFFF;      // карточки, попапы
+    in property <color> chip: #EDF0F3;         // клавиши, чипы, вторичные кнопки
+    in property <color> pressed: #E4E8ED;      // нажатое состояние surface
+    in property <color> pressed-deep: #DDE3EA; // нажатое состояние surface-белого
+    // Текст
+    in property <color> ink: #1A1E24;
+    in property <color> ink-soft: #4A5460;
+    in property <color> ink-faint: #A6ADB8;
+    // Границы
+    in property <color> border: #C9CFD7;
+    in property <color> border-soft: #DDE1E6;
+    // Акцент (синий, администрирование)
+    in property <color> accent: #2F6FED;
+    in property <color> accent-pressed: #2456C4;
+    in property <color> accent-disabled: #C3CAD3;
+    // Успех (зелёный)
+    in property <color> success: #2E7D57;
+    in property <color> success-bright: #2FA36B;
+    in property <color> success-dark: #1E4D3A;
+    in property <color> success-soft: #F0F7F2;
+    // Опасность (красный)
+    in property <color> danger: #B3261E;
+    in property <color> danger-bright: #E23B3B;
+    in property <color> danger-pressed: #F2B8B5;
+    in property <color> danger-soft: #F6DEDD;
+    in property <color> danger-ink: #7A2E2E;
+    // Предупреждение (жёлтый)
+    in property <color> warning: #E8A13D;
+    in property <color> warning-strong: #E0A100;
+    in property <color> warning-deep: #C77700;
+    in property <color> warning-soft: #F6D9A0;
+    in property <color> warning-ink: #6B4A1B;
+    // Затемнение под попапами
+    in property <color> overlay: rgba(10, 14, 20, 0.45);
+    in property <color> overlay-strong: rgba(10, 14, 20, 0.6);
+    in property <color> scrim: rgba(255, 255, 255, 0.75);
+    // Шрифтовая шкала
+    in property <length> font-display: 96px;
+    in property <length> font-h1: 40px;
+    in property <length> font-h2: 32px;
+    in property <length> font-h3: 26px;
+    in property <length> font-lg: 24px;
+    in property <length> font-body: 22px;
+    in property <length> font-sm: 20px;
+    in property <length> font-md: 18px;
+    in property <length> font-xs: 16px;
+}
+
 export component MainWindow inherits Window {
     title: "OpenScale";
     in property <length> screen-w: 1024px;
     in property <length> screen-h: 768px;
     width: screen-w;
     height: screen-h;
-    background: #F6F7F9;
+    background: Theme.bg;
     default-font-family: "DejaVu Sans";
     in property <string> weight-text: "0.000";
     in property <int> weight-state: 0;
@@ -383,10 +434,10 @@ export component MainWindow inherits Window {
         x: 0; y: 0;
         width: root.width;
         height: 20px;
-        background: root.printer-fault || !root.scales-ok || status-level == 2 ? #E23B3B
-                  : root.paper-state != 0 ? #F6D9A0
-                  : root.label-waiting ? #F6D9A0
-                  : status-level == 1 ? #F5E3BC : #D8EEDF;
+        background: root.printer-fault || !root.scales-ok || status-level == 2 ? Theme.danger-bright
+                  : root.paper-state != 0 ? Theme.warning-soft
+                  : root.label-waiting ? Theme.warning-soft
+                  : status-level == 1 ? Theme.warning-soft : Theme.success-soft;
         Text {
             x: 16px;
             width: 992px;
@@ -399,8 +450,8 @@ export component MainWindow inherits Window {
                 : root.paper-state == 1 ? "Лента заканчивается" : "";
             font-size: 13px;
             vertical-alignment: center;
-            color: root.printer-fault || !root.scales-ok || status-level == 2 ? #FFFFFF
-                 : root.paper-state != 0 || status-level == 1 ? #6B4A1B : #4E8A67;
+            color: root.printer-fault || !root.scales-ok || status-level == 2 ? Theme.surface
+                 : root.paper-state != 0 || status-level == 1 ? Theme.warning-ink : Theme.success;
         }
     }
     Text {
@@ -408,18 +459,18 @@ export component MainWindow inherits Window {
         width: 380px;
         height: 112px;
         text: root.weight-text;
-        font-size: 96px;
+        font-size: Theme.font-display;
         font-weight: 700;
         horizontal-alignment: right;
         vertical-alignment: center;
-        color: weight-state == 0 ? #A6ADB8
-             : weight-state == 1 ? #C77700 : #1A1E24;
+        color: weight-state == 0 ? Theme.ink-faint
+             : weight-state == 1 ? Theme.warning-deep : Theme.ink;
     }
     Text {
         x: 404px; y: 96px;
         text: "кг";
-        font-size: 32px;
-        color: weight-state == 0 ? #A6ADB8 : #707A86;
+        font-size: Theme.font-h2;
+        color: weight-state == 0 ? Theme.ink-faint : Theme.ink-faint;
     }
     if weight-state == 1 || weight-state == 2 : Rectangle {
         x: 16px;
@@ -427,7 +478,7 @@ export component MainWindow inherits Window {
         width: 444px;
         height: 6px;
         border-radius: 3px;
-        background: weight-state == 2 ? #2FA36B : #E0A100;
+        background: weight-state == 2 ? Theme.success-bright : Theme.warning-strong;
     }
      property <length> logo-h: (root.width - 496px) * (88px / 480px);
      if root.logo-has : Rectangle {
@@ -485,13 +536,13 @@ export component MainWindow inherits Window {
             height: 56px;
             border-radius: 16px;
             border-width: 2px;
-            border-color: #C9CFD7;
-            background: pager-back-ta.pressed ? #E4E8ED : #FFFFFF;
+            border-color: Theme.border;
+            background: pager-back-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 text: "← НАЗАД";
-                font-size: 24px;
+                font-size: Theme.font-lg;
                 font-weight: 700;
-                color: #4A5460;
+                color: Theme.ink-soft;
             }
             pager-back-ta := TouchArea {
                 clicked => { root.back(); }
@@ -504,13 +555,13 @@ export component MainWindow inherits Window {
             height: 56px;
             border-radius: 16px;
             border-width: 2px;
-            border-color: #C9CFD7;
-            background: pager-more-ta.pressed ? #E4E8ED : #FFFFFF;
+            border-color: Theme.border;
+            background: pager-more-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 text: "ДАЛЕЕ →";
-                font-size: 24px;
+                font-size: Theme.font-lg;
                 font-weight: 700;
-                color: #4A5460;
+                color: Theme.ink-soft;
             }
             pager-more-ta := TouchArea {
                 clicked => { root.more(); }
@@ -531,19 +582,19 @@ export component MainWindow inherits Window {
                 width: 110px;
                 height: 40px;
                 border-radius: 12px;
-                background: d.name == root.screen-title ? #DDE3EA
-                         : hd-ta.pressed ? #E4E8ED : #FFFFFF;
+                background: d.name == root.screen-title ? Theme.pressed-deep
+                         : hd-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     x: 4px;
                     width: parent.width - 8px;
                     height: parent.height;
                     text: d.name;
-                    font-size: 15px;
+                    font-size: Theme.font-xs;
                     font-weight: 700;
                     overflow: elide;
                     horizontal-alignment: center;
                     vertical-alignment: center;
-                    color: #1A1E24;
+                    color: Theme.ink;
                 }
                 hd-ta := TouchArea {
                     clicked => { root.dept-tapped(d.name); }
@@ -555,12 +606,12 @@ export component MainWindow inherits Window {
                 width: 62px;
                 height: 40px;
                 border-radius: 12px;
-                background: dept-prev-ta.pressed ? #E4E8ED : #FFFFFF;
+                background: dept-prev-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     text: "НАЗАД";
                     font-size: 13px;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                 }
                 dept-prev-ta := TouchArea {
                     clicked => { root.dept-prev(); }
@@ -573,12 +624,12 @@ export component MainWindow inherits Window {
                 width: 62px;
                 height: 40px;
                 border-radius: 12px;
-                background: dept-next-ta.pressed ? #E4E8ED : #FFFFFF;
+                background: dept-next-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     text: "ДАЛЕЕ";
                     font-size: 13px;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                 }
                 dept-next-ta := TouchArea {
                     clicked => { root.dept-next(); }
@@ -591,17 +642,17 @@ export component MainWindow inherits Window {
             width: 110px;
             height: 40px;
             border-radius: 12px;
-            background: cat-back-ta.pressed ? #E4E8ED : #FFFFFF;
+            background: cat-back-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 width: parent.width;
                 height: parent.height;
                 text: "НАЗАД";
-                font-size: 15px;
+                font-size: Theme.font-xs;
                 font-weight: 700;
                 overflow: elide;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-                color: #1A1E24;
+                color: Theme.ink;
             }
             cat-back-ta := TouchArea {
                 clicked => { root.catalog-back(); }
@@ -612,15 +663,15 @@ export component MainWindow inherits Window {
             width: 300px; height: 40px;
             border-radius: 12px;
             border-width: 2px;
-            border-color: #C9CFD7;
-            background: search2-ta.pressed ? #E4E8ED : #FFFFFF;
+            border-color: Theme.border;
+            background: search2-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 x: 12px;
                 width: parent.width - 24px;
                 height: parent.height;
                 text: "Поиск товара";
-                font-size: 16px;
-                color: #A6ADB8;
+                font-size: Theme.font-xs;
+                color: Theme.ink-faint;
                 vertical-alignment: center;
             }
             search2-ta := TouchArea {
@@ -633,14 +684,14 @@ export component MainWindow inherits Window {
             width: 108px;
             height: 178px;
             border-radius: 12px;
-            background: prev2-ta.pressed ? #E4E8ED : #FFFFFF;
+            background: prev2-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 text: "← НАЗАД";
                 font-size: 14px;
                 font-weight: 700;
                 wrap: word-wrap;
                 horizontal-alignment: center;
-                color: #4A5460;
+                color: Theme.ink-soft;
             }
             prev2-ta := TouchArea {
                 clicked => { root.back(); }
@@ -663,15 +714,15 @@ export component MainWindow inherits Window {
             height: 178px;
             border-radius: 12px;
             border-width: 2px;
-            border-color: #C9CFD7;
-            background: next2-ta.pressed ? #E4E8ED : #FFFFFF;
+            border-color: Theme.border;
+            background: next2-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 text: "ДАЛЕЕ →";
                 font-size: 14px;
                 font-weight: 700;
                 wrap: word-wrap;
                 horizontal-alignment: center;
-                color: #4A5460;
+                color: Theme.ink-soft;
             }
             next2-ta := TouchArea {
                 clicked => { root.more(); }
@@ -685,15 +736,15 @@ export component MainWindow inherits Window {
         height: 56px;
         border-radius: 16px;
         border-width: 2px;
-        border-color: #C9CFD7;
-        background: search-ta.pressed ? #E4E8ED : #FFFFFF;
+        border-color: Theme.border;
+        background: search-ta.pressed ? Theme.pressed : Theme.surface;
         Text {
             x: 16px;
             width: parent.width - 32px;
             height: parent.height;
             text: "Поиск товара";
-            font-size: 24px;
-            color: #A6ADB8;
+            font-size: Theme.font-lg;
+            color: Theme.ink-faint;
             vertical-alignment: center;
         }
         search-ta := TouchArea {
@@ -708,12 +759,12 @@ export component MainWindow inherits Window {
             x: 8px; y: 8px;
             width: 180px; height: 56px;
             border-radius: 16px;
-            background: search-back-ta.pressed ? #E4E8ED : #FFFFFF;
+            background: search-back-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 text: "← Назад";
-                font-size: 24px;
+                font-size: Theme.font-lg;
                 font-weight: 700;
-                color: #1A1E24;
+                color: Theme.ink;
             }
             search-back-ta := TouchArea {
                 clicked => { root.up(); }
@@ -724,15 +775,15 @@ export component MainWindow inherits Window {
             width: 620px; height: 56px;
             border-radius: 16px;
             border-width: 2px;
-            border-color: #C9CFD7;
-            background: #FFFFFF;
+            border-color: Theme.border;
+            background: Theme.surface;
             Text {
                 x: 16px;
                 width: parent.width - 32px;
                 height: parent.height;
                 text: root.search-text == "" ? "Введите название…" : root.search-text;
-                font-size: 22px;
-                color: root.search-text == "" ? #A6ADB8 : #1A1E24;
+                font-size: Theme.font-body;
+                color: root.search-text == "" ? Theme.ink-faint : Theme.ink;
                 vertical-alignment: center;
             }
         }
@@ -741,13 +792,13 @@ export component MainWindow inherits Window {
             width: 176px; height: 56px;
             border-radius: 16px;
             border-width: 2px;
-            border-color: #C9CFD7;
-            background: search-clear-ta.pressed ? #E4E8ED : #FFFFFF;
+            border-color: Theme.border;
+            background: search-clear-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 text: "ОЧИСТИТЬ";
-                font-size: 20px;
+                font-size: Theme.font-sm;
                 font-weight: 700;
-                color: #4A5460;
+                color: Theme.ink-soft;
             }
             search-clear-ta := TouchArea {
                 clicked => { root.search-clear(); }
@@ -759,17 +810,17 @@ export component MainWindow inherits Window {
             width: 1008px;
             height: 56px;
             border-radius: 12px;
-            background: res-ta.pressed ? #E4E8ED : #FFFFFF;
+            background: res-ta.pressed ? Theme.pressed : Theme.surface;
             if p.hl-match == "" : Text {
                 x: 16px;
                 width: 560px;
                 height: parent.height;
                 text: p.name;
-                font-size: 20px;
+                font-size: Theme.font-sm;
                 font-weight: 700;
                 overflow: elide;
                 vertical-alignment: center;
-                color: #1A1E24;
+                color: Theme.ink;
             }
             if p.hl-match != "" : HorizontalLayout {
                 x: 16px;
@@ -777,28 +828,28 @@ export component MainWindow inherits Window {
                 height: parent.height;
                 Text {
                     text: p.hl-before;
-                    font-size: 20px;
+                    font-size: Theme.font-sm;
                     font-weight: 700;
                     vertical-alignment: center;
                     overflow: elide;
                     horizontal-stretch: 0;
-                    color: #1A1E24;
+                    color: Theme.ink;
                 }
                 Text {
                     text: p.hl-match;
-                    font-size: 20px;
+                    font-size: Theme.font-sm;
                     font-weight: 700;
                     vertical-alignment: center;
-                    color: #2F6FED;
+                    color: Theme.accent;
                 }
                 Text {
                     text: p.hl-after;
-                    font-size: 20px;
+                    font-size: Theme.font-sm;
                     font-weight: 700;
                     vertical-alignment: center;
                     overflow: elide;
                     horizontal-stretch: 1;
-                    color: #1A1E24;
+                    color: Theme.ink;
                 }
             }
             Text {
@@ -806,21 +857,21 @@ export component MainWindow inherits Window {
                 width: 190px;
                 height: parent.height;
                 text: p.price;
-                font-size: 18px;
+                font-size: Theme.font-md;
                 horizontal-alignment: right;
                 vertical-alignment: center;
-                color: p.card-price == "" ? #1A1E24 : #A6ADB8;
+                color: p.card-price == "" ? Theme.ink : Theme.ink-faint;
             }
             if p.card-price != "" : Text {
                 x: 790px;
                 width: 190px;
                 height: parent.height;
                 text: p.card-price;
-                font-size: 18px;
+                font-size: Theme.font-md;
                 font-weight: 700;
                 horizontal-alignment: right;
                 vertical-alignment: center;
-                color: #2FA36B;
+                color: Theme.success-bright;
             }
             res-ta := TouchArea {
                 clicked => { root.plu-tapped(p.id); }
@@ -830,17 +881,17 @@ export component MainWindow inherits Window {
             x: 0; y: 80px;
             width: root.width;
             text: "Начните вводить название товара";
-            font-size: 22px;
+            font-size: Theme.font-body;
             horizontal-alignment: center;
-            color: #A6ADB8;
+            color: Theme.ink-faint;
         }
         if root.items.length == 0 && root.search-text != "" : Text {
             x: 0; y: 80px;
             width: root.width;
             text: "Ничего не найдено";
-            font-size: 22px;
+            font-size: Theme.font-body;
             horizontal-alignment: center;
-            color: #A6ADB8;
+            color: Theme.ink-faint;
         }
         for k[i] in root.kb1 : KbKey {
             kx: 8px + i * 78px;
@@ -894,8 +945,8 @@ export component MainWindow inherits Window {
             width: 720px; height: 468px;
             border-radius: 24px;
             border-width: 2px;
-            border-color: #C9CFD7;
-            background: #FFFFFF;
+            border-color: Theme.border;
+            background: Theme.surface;
             popup-panel-ta := TouchArea { }
             Rectangle {
                 x: 24px;
@@ -904,7 +955,7 @@ export component MainWindow inherits Window {
                 height: 280px;
                 border-radius: 16px;
                 clip: true;
-                background: #F0F2F5;
+                background: Theme.chip;
                 if root.popup-plu.has-img : Image {
                     width: 100%;
                     height: 100%;
@@ -916,79 +967,79 @@ export component MainWindow inherits Window {
                 x: 328px; y: 24px;
                 width: 368px; height: 64px;
                 text: root.popup-plu.name;
-                font-size: 22px;
+                font-size: Theme.font-body;
                 font-weight: 700;
                 wrap: word-wrap;
                 overflow: elide;
                 vertical-alignment: center;
-                color: #1A1E24;
+                color: Theme.ink;
             }
             Text {
                 x: 328px; y: root.card-show-name ? 100px : 24px;
                 width: 368px; height: 32px;
                 text: "Цена: " + root.popup-plu.price;
-                font-size: 22px;
+                font-size: Theme.font-body;
                 vertical-alignment: center;
-                color: #1A1E24;
+                color: Theme.ink;
             }
             if root.popup-plu.card-price != "" : Text {
                 x: 328px; y: root.card-show-name ? 136px : 60px;
                 width: 368px; height: 32px;
                 text: "По скидочной карте: " + root.popup-plu.card-price;
-                font-size: 18px;
+                font-size: Theme.font-md;
                 font-weight: 700;
                 vertical-alignment: center;
-                color: #2FA36B;
+                color: Theme.success-bright;
             }
             if !root.popup-empty : Text {
                 x: 24px; y: 312px;
                 width: 300px; height: 72px;
                 text: root.popup-weight;
-                font-size: 40px;
+                font-size: Theme.font-h1;
                 font-weight: 700;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-                color: #1A1E24;
+                color: Theme.ink;
             }
             if !root.popup-empty : Text {
                 x: 328px; y: 316px;
                 width: 368px; height: 32px;
                 text: "Итого: " + root.popup-sum;
-                font-size: 26px;
+                font-size: Theme.font-h3;
                 font-weight: 700;
                 vertical-alignment: center;
-                color: #1A1E24;
+                color: Theme.ink;
             }
             if !root.popup-empty && root.popup-plu.card-price != "" : Text {
                 x: 328px; y: 352px;
                 width: 368px; height: 32px;
                 text: "Со скидочной картой: " + root.popup-card-sum;
-                font-size: 20px;
+                font-size: Theme.font-sm;
                 font-weight: 700;
                 vertical-alignment: center;
-                color: #2FA36B;
+                color: Theme.success-bright;
             }
             if root.popup-empty : Text {
                 x: 24px; y: 320px;
                 width: 672px; height: 56px;
                 text: root.popup-under-min ? "Вес слишком мал" : "Положите товар на весы";
-                font-size: 24px;
+                font-size: Theme.font-lg;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-                color: root.popup-under-min ? #B3261E : #707A86;
+                color: root.popup-under-min ? Theme.danger : Theme.ink-faint;
             }
             Rectangle {
                 x: 24px; y: 392px;
                 width: 200px; height: 56px;
                 border-radius: 16px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: popup-cancel-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: popup-cancel-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     text: "ОТМЕНА";
-                    font-size: 22px;
+                    font-size: Theme.font-body;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                 }
                 popup-cancel-ta := TouchArea {
                     clicked => { root.plu-cancel(); }
@@ -998,13 +1049,13 @@ export component MainWindow inherits Window {
                 x: 496px; y: 392px;
                 width: 200px; height: 56px;
                 border-radius: 16px;
-                background: !popup-ok-ta.enabled ? #C9CFD7
-                         : popup-ok-ta.pressed ? #268A5A : #2FA36B;
+                background: !popup-ok-ta.enabled ? Theme.border
+                         : popup-ok-ta.pressed ? Theme.success : Theme.success-bright;
                 Text {
                     text: "ПЕЧАТЬ";
-                    font-size: 22px;
+                    font-size: Theme.font-body;
                     font-weight: 700;
-                    color: #FFFFFF;
+                    color: Theme.surface;
                 }
                 popup-ok-ta := TouchArea {
                     enabled: !root.popup-empty && root.weight-state == 2;
@@ -1017,7 +1068,7 @@ export component MainWindow inherits Window {
         x: 0; y: 0;
         width: root.width;
         height: root.height;
-        background: rgba(10, 14, 20, 0.6);
+        background: Theme.overlay-strong;
         paper-popup-ta := TouchArea { }
         Rectangle {
             x: (root.width - 640px) / 2;
@@ -1025,15 +1076,15 @@ export component MainWindow inherits Window {
             width: 640px;
             height: 330px;
             border-radius: 18px;
-            background: #FFFFFF;
+            background: Theme.surface;
             Text {
                 x: 32px;
                 y: 30px;
                 width: parent.width - 64px;
                 text: "Закончилась бумага в принтере";
-                font-size: 30px;
+                font-size: Theme.font-h3;
                 font-weight: 700;
-                color: #C0392B;
+                color: Theme.danger;
             }
             Text {
                 x: 32px;
@@ -1042,8 +1093,8 @@ export component MainWindow inherits Window {
                 text: root.printer-power-hint
                     ? "Принтер не восстановился автоматически.\nВыключите и включите питание принтера.\nЕсли проблема повторяется — обратитесь в сервис."
                     : "Проверьте ленту в принтере и перезаправьте, если нужно.\nЗатем выключите весы на несколько секунд и включите обратно.";
-                font-size: 22px;
-                color: #2B2F36;
+                font-size: Theme.font-body;
+                color: Theme.ink;
                 wrap: word-wrap;
             }
         }
@@ -1052,7 +1103,7 @@ export component MainWindow inherits Window {
         x: 0; y: 0;
         width: root.screen-w;
         height: root.screen-h;
-        background: #F6F7F9;
+        background: Theme.bg;
         admin-block-ta := TouchArea { }
         Rectangle {
             x: 8px; y: 8px;
@@ -1060,8 +1111,8 @@ export component MainWindow inherits Window {
             height: 64px;
             border-radius: 16px;
             border-width: 2px;
-            border-color: #C9CFD7;
-            background: #FFFFFF;
+            border-color: Theme.border;
+            background: Theme.surface;
             Text {
                 x: 16px;
                 width: parent.width - 440px;
@@ -1082,9 +1133,9 @@ export component MainWindow inherits Window {
                     : root.screen == 20 ? "ЭТИКЕТКИ"
                     : root.screen == 19 ? "НАСТРОЙКА ВЕСОВ"
                     : "МЕНЮ НАСТРОЕК";
-                font-size: 26px;
+                font-size: Theme.font-h3;
                 font-weight: 700;
-                color: #1A1E24;
+                color: Theme.ink;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -1098,12 +1149,12 @@ export component MainWindow inherits Window {
                 width: 160px;
                 height: 48px;
                 border-radius: 12px;
-                background: admin-back-ta.pressed ? #E4E8ED : #EDF0F3;
+                background: admin-back-ta.pressed ? Theme.pressed : Theme.chip;
                 Text {
                     text: "НАЗАД";
-                    font-size: 24px;
+                    font-size: Theme.font-lg;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                 }
                 admin-back-ta := TouchArea {
                     clicked => { root.depts-close(); }
@@ -1115,12 +1166,12 @@ export component MainWindow inherits Window {
                 width: 160px;
                 height: 48px;
                 border-radius: 12px;
-                background: admin-done-ta.pressed ? #E4E8ED : #EDF0F3;
+                background: admin-done-ta.pressed ? Theme.pressed : Theme.chip;
                 Text {
                     text: root.screen == 4 ? "ГОТОВО" : "ВЫХОД";
-                    font-size: 24px;
+                    font-size: Theme.font-lg;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                 }
                 admin-done-ta := TouchArea {
                     clicked => { root.admin-close(); }
@@ -1136,9 +1187,9 @@ export component MainWindow inherits Window {
                 width: parent.width;
                 height: 32px;
                 text: root.pin-prompt;
-                font-size: 26px;
+                font-size: Theme.font-h3;
                 font-weight: 700;
-                color: #1A1E24;
+                color: Theme.ink;
                 horizontal-alignment: center;
             }
             Rectangle {
@@ -1148,13 +1199,13 @@ export component MainWindow inherits Window {
                 height: 64px;
                 border-radius: 14px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: #FFFFFF;
+                border-color: Theme.border;
+                background: Theme.surface;
                 Text {
                     text: root.pin-mask == "" ? "пароль" : root.pin-mask;
-                    font-size: 34px;
+                    font-size: Theme.font-h2;
                     font-weight: 700;
-                    color: root.pin-mask == "" ? #A6ADB8 : #1A1E24;
+                    color: root.pin-mask == "" ? Theme.ink-faint : Theme.ink;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
@@ -1164,9 +1215,9 @@ export component MainWindow inherits Window {
                 width: parent.width;
                 height: 32px;
                 text: root.pin-error;
-                font-size: 22px;
+                font-size: Theme.font-body;
                 font-weight: 700;
-                color: #B3261E;
+                color: Theme.danger;
                 horizontal-alignment: center;
             }
             property <[string]> keys: ["1","2","3","4","5","6","7","8","9","C","0","←"];
@@ -1176,14 +1227,14 @@ export component MainWindow inherits Window {
                 width: 160px;
                 height: 92px;
                 border-radius: 14px;
-                background: kb2-ta.pressed ? #DDE3EA : #FFFFFF;
+                background: kb2-ta.pressed ? Theme.pressed-deep : Theme.surface;
                 border-width: 2px;
-                border-color: #C9CFD7;
+                border-color: Theme.border;
                 Text {
                     text: k;
-                    font-size: 40px;
+                    font-size: Theme.font-h1;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                 }
                 kb2-ta := TouchArea {
                     clicked => {
@@ -1200,13 +1251,13 @@ export component MainWindow inherits Window {
                 height: 64px;
                 border-radius: 14px;
                 background: root.pin-mask == ""
-                    ? #DDE1E6
-                    : (pin-save-ta.pressed ? #1E4D3A : #2E7D57);
+                    ? Theme.border-soft
+                    : (pin-save-ta.pressed ? Theme.success-dark : Theme.success);
                 Text {
                     text: "ДАЛЕЕ";
-                    font-size: 28px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #FFFFFF;
+                    color: Theme.surface;
                 }
                 pin-save-ta := TouchArea {
                     enabled: root.pin-mask != "";
@@ -1245,20 +1296,20 @@ export component MainWindow inherits Window {
                 height: 42px;
                 border-radius: 10px;
                 border-width: 2px;
-                border-color: row.state == 2 ? #2E7D57
-                    : (row.state == 1 && root.setup-mode == 0 ? #E8A13D
-                    : (row.state == 1 ? #2E7D57 : #C9CFD7));
-                background: row.state == 2 ? #F0F7F2
-                    : (row.state == 1 && root.setup-mode == 0 ? #FDF7EC
-                    : (row.state == 1 ? #F0F7F2 : #FFFFFF));
+                border-color: row.state == 2 ? Theme.success
+                    : (row.state == 1 && root.setup-mode == 0 ? Theme.warning
+                    : (row.state == 1 ? Theme.success : Theme.border));
+                background: row.state == 2 ? Theme.success-soft
+                    : (row.state == 1 && root.setup-mode == 0 ? Theme.warning-soft
+                    : (row.state == 1 ? Theme.success-soft : Theme.surface));
                 Text {
                     x: 12px;
                     width: parent.width - 40px;
                     height: parent.height;
                     text: row.label;
-                    font-size: 18px;
+                    font-size: Theme.font-md;
                     font-weight: row.state == 1 ? 700 : 500;
-                    color: row.state == 0 ? #A6ADB8 : (row.state == 1 && root.setup-mode == 0 ? #8A5A16 : #1A1E24);
+                    color: row.state == 0 ? Theme.ink-faint : (row.state == 1 && root.setup-mode == 0 ? Theme.warning-ink : Theme.ink);
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -1267,9 +1318,9 @@ export component MainWindow inherits Window {
                     width: 26px;
                     height: parent.height;
                     text: "✓";
-                    font-size: 22px;
+                    font-size: Theme.font-body;
                     font-weight: 700;
-                    color: #2E7D57;
+                    color: Theme.success;
                     vertical-alignment: center;
                 }
             }
@@ -1280,16 +1331,16 @@ export component MainWindow inherits Window {
                 height: parent.height - 170px;
                 border-radius: 14px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: #FFFFFF;
+                border-color: Theme.border;
+                background: Theme.surface;
                 Text {
                     x: 16px;
                     y: 12px;
                     width: parent.width - 32px;
                     height: parent.height - 24px;
                     text: root.setup-note;
-                    font-size: 19px;
-                    color: #2B2F36;
+                    font-size: Theme.font-sm;
+                    color: Theme.ink;
                     wrap: word-wrap;
                     vertical-alignment: top;
                 }
@@ -1300,12 +1351,12 @@ export component MainWindow inherits Window {
                 width: 150px;
                 height: 68px;
                 border-radius: 12px;
-                background: setup-back-ta.pressed ? #E4E8ED : #EDF0F3;
+                background: setup-back-ta.pressed ? Theme.pressed : Theme.chip;
                 Text {
                     text: root.setup-back-label;
-                    font-size: 18px;
+                    font-size: Theme.font-md;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     overflow: elide;
                 }
                 setup-back-ta := TouchArea {
@@ -1318,13 +1369,13 @@ export component MainWindow inherits Window {
                 width: parent.width - 490px;
                 height: 68px;
                 border-radius: 12px;
-                background: !root.setup-action-enabled ? #DDE1E6
-                    : (setup-action-ta.pressed ? #1E4D3A : #2E7D57);
+                background: !root.setup-action-enabled ? Theme.border-soft
+                    : (setup-action-ta.pressed ? Theme.success-dark : Theme.success);
                 Text {
                     text: root.setup-action-label;
-                    font-size: 19px;
+                    font-size: Theme.font-sm;
                     font-weight: 700;
-                    color: #FFFFFF;
+                    color: Theme.surface;
                     overflow: elide;
                 }
                 setup-action-ta := TouchArea {
@@ -1338,12 +1389,12 @@ export component MainWindow inherits Window {
                 width: parent.width - 540px;
                 height: 68px;
                 border-radius: 12px;
-                background: setup-skip-ta.pressed ? #E4E8ED : #EDF0F3;
+                background: setup-skip-ta.pressed ? Theme.pressed : Theme.chip;
                 Text {
                     text: root.setup-skip-label;
-                    font-size: 18px;
+                    font-size: Theme.font-md;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     overflow: elide;
                 }
                 setup-skip-ta := TouchArea {
@@ -1356,12 +1407,12 @@ export component MainWindow inherits Window {
                 width: 200px;
                 height: 68px;
                 border-radius: 12px;
-                background: setup-next-ta.pressed ? #1E4D3A : #2E7D57;
+                background: setup-next-ta.pressed ? Theme.success-dark : Theme.success;
                 Text {
                     text: "ДАЛЕЕ";
-                    font-size: 20px;
+                    font-size: Theme.font-sm;
                     font-weight: 700;
-                    color: #FFFFFF;
+                    color: Theme.surface;
                 }
                 setup-next-ta := TouchArea {
                     clicked => { root.setup-tap("next"); }
@@ -1379,13 +1430,13 @@ export component MainWindow inherits Window {
                 height: 72px;
                 border-radius: 14px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: #FFFFFF;
+                border-color: Theme.border;
+                background: Theme.surface;
                 Text {
                     text: root.pin-mask == "" ? "пароль" : root.pin-mask;
-                    font-size: 34px;
+                    font-size: Theme.font-h2;
                     font-weight: 700;
-                    color: root.pin-mask == "" ? #A6ADB8 : #1A1E24;
+                    color: root.pin-mask == "" ? Theme.ink-faint : Theme.ink;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
@@ -1395,9 +1446,9 @@ export component MainWindow inherits Window {
                 width: parent.width;
                 height: 36px;
                 text: root.pin-error;
-                font-size: 24px;
+                font-size: Theme.font-lg;
                 font-weight: 700;
-                color: #B3261E;
+                color: Theme.danger;
                 horizontal-alignment: center;
             }
             if root.lock-left > 0 : Text {
@@ -1405,9 +1456,9 @@ export component MainWindow inherits Window {
                 width: parent.width;
                 height: 36px;
                 text: "Слишком много попыток. Повтор через " + root.lock-left + " с";
-                font-size: 24px;
+                font-size: Theme.font-lg;
                 font-weight: 700;
-                color: #B3261E;
+                color: Theme.danger;
                 horizontal-alignment: center;
             }
             property <[string]> keys: ["1","2","3","4","5","6","7","8","9","C","0","←"];
@@ -1417,14 +1468,14 @@ export component MainWindow inherits Window {
                 width: 160px;
                 height: 106px;
                 border-radius: 14px;
-                background: kb-ta.pressed ? #DDE3EA : #FFFFFF;
+                background: kb-ta.pressed ? Theme.pressed-deep : Theme.surface;
                 border-width: 2px;
-                border-color: #C9CFD7;
+                border-color: Theme.border;
                 Text {
                     text: k;
-                    font-size: 40px;
+                    font-size: Theme.font-h1;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                 }
                 kb-ta := TouchArea {
                     clicked => {
@@ -1441,13 +1492,13 @@ export component MainWindow inherits Window {
                 height: 64px;
                 border-radius: 14px;
                 background: root.lock-left > 0 || root.pin-mask == ""
-                    ? #DDE1E6
-                    : (pin-ok-ta.pressed ? #1E4D3A : #2E7D57);
+                    ? Theme.border-soft
+                    : (pin-ok-ta.pressed ? Theme.success-dark : Theme.success);
                 Text {
                     text: "ВОЙТИ";
-                    font-size: 28px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #FFFFFF;
+                    color: Theme.surface;
                 }
                 pin-ok-ta := TouchArea {
                     enabled: root.lock-left == 0 && root.pin-mask != "";
@@ -1460,8 +1511,8 @@ export component MainWindow inherits Window {
                 width: 350px;
                 height: 26px;
                 text: root.ip-note;
-                font-size: 18px;
-                color: #7A828C;
+                font-size: Theme.font-md;
+                color: Theme.ink-faint;
                 horizontal-alignment: right;
             }
         }
@@ -1500,17 +1551,17 @@ export component MainWindow inherits Window {
                 height: 74px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: menu-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: menu-ta.pressed ? Theme.pressed : Theme.surface;
                 opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
                 Text {
                     x: 24px;
                     width: parent.width - 48px;
                     height: parent.height;
                     text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -1531,8 +1582,8 @@ export component MainWindow inherits Window {
                 height: parent.height - 24px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: #FFFFFF;
+                border-color: Theme.border;
+                background: Theme.surface;
                 clip: true;
                 Flickable {
                     x: 16px; y: 16px;
@@ -1542,9 +1593,9 @@ export component MainWindow inherits Window {
                     diag-t := Text {
                         width: parent.width;
                         text: root.diag-text;
-                        font-size: 20px;
+                        font-size: Theme.font-sm;
                         font-family: "monospace";
-                        color: #1A1E24;
+                        color: Theme.ink;
                         wrap: word-wrap;
                     }
                 }
@@ -1561,20 +1612,20 @@ export component MainWindow inherits Window {
                 height: 52px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: #FFFFFF;
+                border-color: Theme.border;
+                background: Theme.surface;
                 Rectangle {
                     x: 4px;
                     y: 4px;
                     width: (parent.width - 16px) / 2;
                     height: parent.height - 8px;
                     border-radius: 10px;
-                    background: !root.net-dhcp ? #2F6FED : #EDF0F3;
+                    background: !root.net-dhcp ? Theme.accent : Theme.chip;
                     Text {
                         text: "РУЧНОЙ";
-                        font-size: 20px;
+                        font-size: Theme.font-sm;
                         font-weight: 700;
-                        color: !root.net-dhcp ? #FFFFFF : #1A1E24;
+                        color: !root.net-dhcp ? Theme.surface : Theme.ink;
                     }
                     TouchArea { clicked => { root.net-mode(false); } }
                 }
@@ -1584,12 +1635,12 @@ export component MainWindow inherits Window {
                     width: (parent.width - 16px) / 2;
                     height: parent.height - 8px;
                     border-radius: 10px;
-                    background: root.net-dhcp ? #2F6FED : #EDF0F3;
+                    background: root.net-dhcp ? Theme.accent : Theme.chip;
                     Text {
                         text: "DHCP";
-                        font-size: 20px;
+                        font-size: Theme.font-sm;
                         font-weight: 700;
-                        color: root.net-dhcp ? #FFFFFF : #1A1E24;
+                        color: root.net-dhcp ? Theme.surface : Theme.ink;
                     }
                     TouchArea { clicked => { root.net-mode(true); } }
                 }
@@ -1601,17 +1652,17 @@ export component MainWindow inherits Window {
                 height: 52px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: !root.net-dhcp && root.net-focus == i ? #2F6FED : #C9CFD7;
-                background: #FFFFFF;
+                border-color: !root.net-dhcp && root.net-focus == i ? Theme.accent : Theme.border;
+                background: Theme.surface;
                 opacity: root.net-dhcp ? 0.55 : 1.0;
                 Text {
                     x: 16px;
                     width: 140px;
                     height: parent.height;
                     text: f.label;
-                    font-size: 22px;
+                    font-size: Theme.font-body;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     vertical-alignment: center;
                 }
                 Text {
@@ -1619,9 +1670,9 @@ export component MainWindow inherits Window {
                     width: parent.width - 186px;
                     height: parent.height;
                     text: f.value;
-                    font-size: 24px;
+                    font-size: Theme.font-lg;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -1637,11 +1688,11 @@ export component MainWindow inherits Window {
                 width: (parent.width - 32px) / 3 - 12px;
                 height: 70px;
                 border-radius: 12px;
-                background: net-key-ta.pressed ? #E4E8ED : #FFFFFF;
+                background: net-key-ta.pressed ? Theme.pressed : Theme.surface;
                 border-width: 2px;
-                border-color: #C9CFD7;
+                border-color: Theme.border;
                 opacity: root.net-dhcp ? 0.45 : 1.0;
-                Text { text: k; font-size: 30px; font-weight: 700; color: #1A1E24; }
+                Text { text: k; font-size: Theme.font-h3; font-weight: 700; color: Theme.ink; }
                 net-key-ta := TouchArea { enabled: !root.net-dhcp; clicked => { root.net-key(k); } }
             }
             Rectangle {
@@ -1650,8 +1701,8 @@ export component MainWindow inherits Window {
                 width: 160px;
                 height: 50px;
                 border-radius: 12px;
-                background: net-clear-ta.pressed ? #E4E8ED : #EDF0F3;
-                Text { text: "C"; font-size: 26px; font-weight: 700; color: #1A1E24; }
+                background: net-clear-ta.pressed ? Theme.pressed : Theme.chip;
+                Text { text: "C"; font-size: Theme.font-h3; font-weight: 700; color: Theme.ink; }
                 net-clear-ta := TouchArea { clicked => { root.net-key("C"); } }
             }
             Rectangle {
@@ -1661,13 +1712,13 @@ export component MainWindow inherits Window {
                 height: 50px;
                 border-radius: 12px;
                 background: root.net-valid
-                    ? (net-apply-ta.pressed ? #2456C4 : #2F6FED)
-                    : (net-apply-ta.pressed ? #9AA5B1 : #C3CAD3);
+                    ? (net-apply-ta.pressed ? Theme.accent-pressed : Theme.accent)
+                    : (net-apply-ta.pressed ? Theme.accent-disabled : Theme.accent-disabled);
                 Text {
                     text: root.net-dhcp ? "ПРИМЕНИТЬ DHCP" : "ПРИМЕНИТЬ";
-                    font-size: 24px;
+                    font-size: Theme.font-lg;
                     font-weight: 700;
-                    color: #FFFFFF;
+                    color: Theme.surface;
                 }
                 net-apply-ta := TouchArea { enabled: root.net-valid; clicked => { root.net-apply(); } }
             }
@@ -1675,7 +1726,7 @@ export component MainWindow inherits Window {
                 x: 0; y: 0;
                 width: parent.width;
                 height: parent.height;
-                background: rgba(10, 14, 20, 0.45);
+                background: Theme.overlay;
                 popup-net-ta := TouchArea { }
                 Rectangle {
                     x: (parent.width - 560px) / 2;
@@ -1683,15 +1734,15 @@ export component MainWindow inherits Window {
                     width: 560px;
                     height: 260px;
                     border-radius: 18px;
-                    background: #FFFFFF;
+                    background: Theme.surface;
                     Text {
                         x: 32px;
                         y: 28px;
                         width: parent.width - 64px;
                         text: root.net-popup-text;
-                        font-size: 22px;
+                        font-size: Theme.font-body;
                         font-weight: 700;
-                        color: root.net-popup-ok ? #1E7A3C : #C0392B;
+                        color: root.net-popup-ok ? Theme.success : Theme.danger;
                         wrap: word-wrap;
                     }
                     Rectangle {
@@ -1700,8 +1751,8 @@ export component MainWindow inherits Window {
                         width: 220px;
                         height: 60px;
                         border-radius: 14px;
-                        background: net-popup-ta.pressed ? #1E4D3A : #2E7D57;
-                        Text { text: "ОК"; font-size: 26px; font-weight: 700; color: #FFFFFF; }
+                        background: net-popup-ta.pressed ? Theme.success-dark : Theme.success;
+                        Text { text: "ОК"; font-size: Theme.font-h3; font-weight: 700; color: Theme.surface; }
                         net-popup-ta := TouchArea { clicked => { root.net-popup-close(); } }
                     }
                 }
@@ -1725,16 +1776,16 @@ export component MainWindow inherits Window {
                 height: 74px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: menu-eq-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: menu-eq-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     x: 24px;
                     width: parent.width - 48px;
                     height: parent.height;
                     text: r.label;
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -1759,17 +1810,17 @@ export component MainWindow inherits Window {
                 height: 74px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: hub-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: hub-ta.pressed ? Theme.pressed : Theme.surface;
                 opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
                 Text {
                     x: 24px;
                     width: parent.width - 48px;
                     height: parent.height;
                     text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -1802,17 +1853,17 @@ export component MainWindow inherits Window {
                 height: 74px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: goods-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: goods-ta.pressed ? Theme.pressed : Theme.surface;
                 opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
                 Text {
                     x: 24px;
                     width: parent.width - 260px;
                     height: parent.height;
                     text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -1821,9 +1872,9 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.goods-cols;
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     horizontal-alignment: right;
                     vertical-alignment: center;
                 }
@@ -1832,9 +1883,9 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.goods-sort;
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     horizontal-alignment: right;
                     vertical-alignment: center;
                 }
@@ -1843,9 +1894,9 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.goods-idle;
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     horizontal-alignment: right;
                     vertical-alignment: center;
                 }
@@ -1854,9 +1905,9 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.goods-cardname;
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     horizontal-alignment: right;
                     vertical-alignment: center;
                 }
@@ -1865,9 +1916,9 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.goods-backbtn;
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     horizontal-alignment: right;
                     vertical-alignment: center;
                 }
@@ -1876,9 +1927,9 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.goods-itemscols;
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     horizontal-alignment: right;
                     vertical-alignment: center;
                 }
@@ -1904,17 +1955,17 @@ export component MainWindow inherits Window {
                 height: 74px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: trade-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: trade-ta.pressed ? Theme.pressed : Theme.surface;
                 opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
                 Text {
                     x: 24px;
                     width: parent.width - 260px;
                     height: parent.height;
                     text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -1923,9 +1974,9 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.trade-rounding;
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     horizontal-alignment: right;
                     vertical-alignment: center;
                 }
@@ -1934,9 +1985,9 @@ export component MainWindow inherits Window {
                     width: 190px;
                     height: parent.height;
                     text: root.trade-minw;
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     horizontal-alignment: right;
                     vertical-alignment: center;
                 }
@@ -1962,17 +2013,17 @@ export component MainWindow inherits Window {
                 height: 74px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: svc-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: svc-ta.pressed ? Theme.pressed : Theme.surface;
                 opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
                 Text {
                     x: 24px;
                     width: parent.width - 48px;
                     height: parent.height;
                     text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: 26px;
+                    font-size: Theme.font-h3;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -1993,8 +2044,8 @@ export component MainWindow inherits Window {
                 width: parent.width - 32px;
                 height: 60px;
                 text: "В каталоге обмена нет файлов конфигурации (.toml)";
-                font-size: 24px;
-                color: #4A5460;
+                font-size: Theme.font-lg;
+                color: Theme.ink-soft;
                 horizontal-alignment: center;
             }
             for name[i] in root.imp-files : Rectangle {
@@ -2004,16 +2055,16 @@ export component MainWindow inherits Window {
                 height: 74px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: imp-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: imp-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     x: 24px;
                     width: parent.width - 48px;
                     height: parent.height;
                     text: name;
-                    font-size: 24px;
+                    font-size: Theme.font-lg;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -2033,13 +2084,13 @@ export component MainWindow inherits Window {
                 height: 64px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: lbl-cal-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: lbl-cal-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     text: "Проверка\nроликов";
-                    font-size: 19px;
+                    font-size: Theme.font-sm;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     horizontal-alignment: center;
                     wrap: no-wrap;
                 }
@@ -2052,13 +2103,13 @@ export component MainWindow inherits Window {
                 height: 64px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: lbl-probe-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: lbl-probe-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     text: "Линейка";
-                    font-size: 19px;
+                    font-size: Theme.font-sm;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     horizontal-alignment: center;
                 }
                 lbl-probe-ta := TouchArea { clicked => { root.labels-probe(); } }
@@ -2070,13 +2121,13 @@ export component MainWindow inherits Window {
                 height: 64px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: lbl-imp-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: lbl-imp-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     text: "Импорт JSON";
-                    font-size: 19px;
+                    font-size: Theme.font-sm;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     horizontal-alignment: center;
                 }
                 lbl-imp-ta := TouchArea { clicked => { root.labels-import-tap(-1); } }
@@ -2087,8 +2138,8 @@ export component MainWindow inherits Window {
                 width: parent.width - 32px;
                 height: 40px;
                 text: root.labels-status;
-                font-size: 22px;
-                color: #4A5460;
+                font-size: Theme.font-body;
+                color: Theme.ink-soft;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -2105,9 +2156,9 @@ export component MainWindow inherits Window {
                     width: parent.width - 32px;
                     height: 34px;
                     text: "Файлы для импорта";
-                    font-size: 20px;
+                    font-size: Theme.font-sm;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     vertical-alignment: center;
                 }
                 for name[i] in root.labels-files : Rectangle {
@@ -2117,16 +2168,16 @@ export component MainWindow inherits Window {
                     height: 62px;
                     border-radius: 12px;
                     border-width: 2px;
-                    border-color: #C9CFD7;
-                    background: lbl-f-ta.pressed ? #E4E8ED : #FFFFFF;
+                    border-color: Theme.border;
+                    background: lbl-f-ta.pressed ? Theme.pressed : Theme.surface;
                     Text {
                         x: 24px;
                         width: parent.width - 48px;
                         height: parent.height;
                         text: name;
-                        font-size: 22px;
+                        font-size: Theme.font-body;
                         font-weight: 700;
-                        color: #1A1E24;
+                        color: Theme.ink;
                         vertical-alignment: center;
                         overflow: elide;
                     }
@@ -2138,9 +2189,9 @@ export component MainWindow inherits Window {
                     width: parent.width - 32px;
                     height: 34px;
                     text: "Загруженные раскладки · нажмите, чтобы удалить";
-                    font-size: 20px;
+                    font-size: Theme.font-sm;
                     font-weight: 700;
-                    color: #4A5460;
+                    color: Theme.ink-soft;
                     vertical-alignment: center;
                 }
                 for row[i] in root.labels-rows : Rectangle {
@@ -2150,16 +2201,16 @@ export component MainWindow inherits Window {
                     height: 62px;
                     border-radius: 12px;
                     border-width: 2px;
-                    border-color: #C9CFD7;
-                    background: lbl-r-ta.pressed ? #EAF2EC : #FFFFFF;
+                    border-color: Theme.border;
+                    background: lbl-r-ta.pressed ? Theme.success-soft : Theme.surface;
                     Text {
                         x: 24px;
                         width: parent.width - 96px;
                         height: parent.height;
                         text: row;
-                        font-size: 22px;
+                        font-size: Theme.font-body;
                         font-weight: 700;
-                        color: #1A1E24;
+                        color: Theme.ink;
                         vertical-alignment: center;
                         overflow: elide;
                     }
@@ -2170,8 +2221,8 @@ export component MainWindow inherits Window {
                         width: 44px;
                         height: 44px;
                         border-radius: 10px;
-                        background: lbl-del-ta.pressed ? #F2B8B5 : #F6DEDD;
-                        Text { text: "✕"; font-size: 22px; font-weight: 700; color: #7A2E2E; }
+                        background: lbl-del-ta.pressed ? Theme.danger-pressed : Theme.danger-soft;
+                        Text { text: "✕"; font-size: Theme.font-body; font-weight: 700; color: Theme.danger-ink; }
                         lbl-del-ta := TouchArea { clicked => { root.labels-delete-tap(i); } }
                     }
                 }
@@ -2181,8 +2232,8 @@ export component MainWindow inherits Window {
                     width: parent.width - 32px;
                     height: 80px;
                     text: "Раскладок нет.\nСоберите раскладку в конструкторе и положите label-*.json в каталог обмена.";
-                    font-size: 22px;
-                    color: #4A5460;
+                    font-size: Theme.font-body;
+                    color: Theme.ink-soft;
                     horizontal-alignment: center;
                     wrap: word-wrap;
                 }
@@ -2198,16 +2249,16 @@ export component MainWindow inherits Window {
                 height: 56px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: rep-p-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: rep-p-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     width: parent.width - 32px;
                     x: 16px;
                     height: parent.height;
                     text: "Период: " + root.report-period;
-                    font-size: 22px;
+                    font-size: Theme.font-body;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -2220,16 +2271,16 @@ export component MainWindow inherits Window {
                 height: 56px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: rep-k-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: rep-k-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     width: parent.width - 32px;
                     x: 16px;
                     height: parent.height;
                     text: root.report-kind;
-                    font-size: 22px;
+                    font-size: Theme.font-body;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -2241,9 +2292,9 @@ export component MainWindow inherits Window {
                 width: parent.width - 48px;
                 height: parent.height - 92px;
                 text: root.report-text;
-                font-size: 19px;
+                font-size: Theme.font-sm;
                 font-family: "DejaVu Sans Mono";
-                color: #1A1E24;
+                color: Theme.ink;
                 vertical-alignment: top;
                 wrap: word-wrap;
             }
@@ -2258,16 +2309,16 @@ export component MainWindow inherits Window {
                 height: 56px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: prn-r-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: prn-r-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     width: parent.width - 32px;
                     x: 16px;
                     height: parent.height;
                     text: "Обновить";
-                    font-size: 22px;
+                    font-size: Theme.font-body;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
@@ -2280,16 +2331,16 @@ export component MainWindow inherits Window {
                 height: 56px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: prn-c-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: prn-c-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     width: parent.width - 16px;
                     x: 8px;
                     height: parent.height;
                     text: "Калибровка";
-                    font-size: 22px;
+                    font-size: Theme.font-body;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
@@ -2302,16 +2353,16 @@ export component MainWindow inherits Window {
                 height: 56px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: prn-x-ta.pressed ? #E4E8ED : #FFFFFF;
+                border-color: Theme.border;
+                background: prn-x-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     width: parent.width - 16px;
                     x: 8px;
                     height: parent.height;
                     text: "Сброс аварии";
-                    font-size: 22px;
+                    font-size: Theme.font-body;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
@@ -2323,9 +2374,9 @@ export component MainWindow inherits Window {
                 width: parent.width - 48px;
                 height: parent.height - 92px;
                 text: root.prn-diag-text;
-                font-size: 19px;
+                font-size: Theme.font-sm;
                 font-family: "DejaVu Sans Mono";
-                color: #1A1E24;
+                color: Theme.ink;
                 vertical-alignment: top;
                 wrap: word-wrap;
             }
@@ -2341,16 +2392,16 @@ export component MainWindow inherits Window {
                 height: 64px;
                 border-radius: 12px;
                 border-width: 2px;
-                border-color: #C9CFD7;
-                background: #FFFFFF;
+                border-color: Theme.border;
+                background: Theme.surface;
                 Text {
                     x: 16px;
                     width: 220px;
                     height: parent.height;
                     text: r.name;
-                    font-size: 24px;
+                    font-size: Theme.font-lg;
                     font-weight: 700;
-                    color: #1A1E24;
+                    color: Theme.ink;
                     vertical-alignment: center;
                     overflow: elide;
                 }
@@ -2360,7 +2411,7 @@ export component MainWindow inherits Window {
                     width: 176px;
                     height: 48px;
                     border-radius: 10px;
-                    background: admin-col-ta.pressed ? #E4E8ED : #EDF0F3;
+                    background: admin-col-ta.pressed ? Theme.pressed : Theme.chip;
                     Rectangle {
                         x: 10px;
                         width: 28px;
@@ -2368,7 +2419,7 @@ export component MainWindow inherits Window {
                         y: (parent.height - 28px) / 2;
                         border-radius: 14px;
                         border-width: 2px;
-                        border-color: #C9CFD7;
+                        border-color: Theme.border;
                         background: r.color;
                     }
                     Text {
@@ -2376,9 +2427,9 @@ export component MainWindow inherits Window {
                         width: parent.width - 52px;
                         height: parent.height;
                         text: r.color-label;
-                        font-size: 15px;
+                        font-size: Theme.font-xs;
                         font-weight: 700;
-                        color: #4A5460;
+                        color: Theme.ink-soft;
                         vertical-alignment: center;
                         overflow: elide;
                     }
@@ -2390,8 +2441,8 @@ export component MainWindow inherits Window {
                     width: 64px;
                     height: 48px;
                     border-radius: 10px;
-                    background: admin-up-ta.pressed ? #E4E8ED : #EDF0F3;
-                    Text { text: "↑"; font-size: 26px; font-weight: 700; color: #4A5460; }
+                    background: admin-up-ta.pressed ? Theme.pressed : Theme.chip;
+                    Text { text: "↑"; font-size: Theme.font-h3; font-weight: 700; color: Theme.ink-soft; }
                     admin-up-ta := TouchArea { clicked => { root.admin-up(r.name); } }
                 }
                 if !r.last : Rectangle {
@@ -2400,8 +2451,8 @@ export component MainWindow inherits Window {
                     width: 64px;
                     height: 48px;
                     border-radius: 10px;
-                    background: admin-down-ta.pressed ? #E4E8ED : #EDF0F3;
-                    Text { text: "↓"; font-size: 26px; font-weight: 700; color: #4A5460; }
+                    background: admin-down-ta.pressed ? Theme.pressed : Theme.chip;
+                    Text { text: "↓"; font-size: Theme.font-h3; font-weight: 700; color: Theme.ink-soft; }
                     admin-down-ta := TouchArea { clicked => { root.admin-down(r.name); } }
                 }
                 Rectangle {
@@ -2410,8 +2461,8 @@ export component MainWindow inherits Window {
                     width: 64px;
                     height: 48px;
                     border-radius: 10px;
-                    background: admin-del-ta.pressed ? #F2B8B5 : #F6DEDD;
-                    Text { text: "✕"; font-size: 26px; font-weight: 700; color: #7A2E2E; }
+                    background: admin-del-ta.pressed ? Theme.danger-pressed : Theme.danger-soft;
+                    Text { text: "✕"; font-size: Theme.font-h3; font-weight: 700; color: Theme.danger-ink; }
                     admin-del-ta := TouchArea { clicked => { root.admin-del(r.name); } }
                 }
             }
@@ -2423,21 +2474,21 @@ export component MainWindow inherits Window {
                 x: 0; y: 0;
                 width: parent.width;
                 height: parent.height;
-                background: #00000040;
+                background: Theme.overlay;
                 Rectangle {
                     x: (parent.width - 640px) / 2;
                     y: (parent.height - 320px) / 2;
                     width: 640px;
                     height: 320px;
                     border-radius: 16px;
-                    background: #FFFFFF;
+                    background: Theme.surface;
                     Text {
                         x: 24px; y: 24px;
                         width: parent.width - 48px;
                         height: 200px;
                         text: ptext;
-                        font-size: 24px;
-                        color: #1A1E24;
+                        font-size: Theme.font-lg;
+                        color: Theme.ink;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                         overflow: elide;
@@ -2449,12 +2500,12 @@ export component MainWindow inherits Window {
                         width: 280px;
                         height: 56px;
                         border-radius: 12px;
-                        background: imp-no-ta.pressed ? #E4E8ED : #EDF0F3;
+                        background: imp-no-ta.pressed ? Theme.pressed : Theme.chip;
                         Text {
                             text: "ОТМЕНА";
-                            font-size: 24px;
+                            font-size: Theme.font-lg;
                             font-weight: 700;
-                            color: #1A1E24;
+                            color: Theme.ink;
                         }
                         imp-no-ta := TouchArea {
                             clicked => {
@@ -2468,14 +2519,14 @@ export component MainWindow inherits Window {
                         width: 280px;
                         height: 56px;
                         border-radius: 12px;
-                        background: imp-yes-ta.pressed ? #1E4D3A : #2E7D57;
+                        background: imp-yes-ta.pressed ? Theme.success-dark : Theme.success;
                         Text {
                             text: imp-mode
                                 ? (root.imp-confirm ? "ПРИМЕНИТЬ" : "OK")
                                 : (root.labels-confirm ? "УДАЛИТЬ" : "OK");
-                            font-size: 24px;
+                            font-size: Theme.font-lg;
                             font-weight: 700;
-                            color: #FFFFFF;
+                            color: Theme.surface;
                         }
                         imp-yes-ta := TouchArea {
                             clicked => {
@@ -2491,15 +2542,15 @@ export component MainWindow inherits Window {
                 x: 0; y: 0;
                 width: parent.width;
                 height: parent.height;
-                background: #00000060;
+                background: Theme.overlay-strong;
                 Rectangle {
                     x: (parent.width - root.labels-preview-scale * 58px) / 2;
                     y: (parent.height - root.labels-preview-scale * root.labels-preview-h * 1px - 72px) / 2;
                     width: root.labels-preview-scale * 58px;
                     height: root.labels-preview-scale * root.labels-preview-h * 1px;
-                    background: #FFFFFF;
+                    background: Theme.surface;
                     border-width: 2px;
-                    border-color: #1A1E24;
+                    border-color: Theme.ink;
                     for r in root.labels-preview-rows : Rectangle {
                         x: r.x * root.labels-preview-scale * 1px;
                         y: r.y * root.labels-preview-scale * 1px;
@@ -2510,8 +2561,8 @@ export component MainWindow inherits Window {
                             width: parent.width;
                             height: parent.height;
                             text: r.text;
-                            font-size: 18px;
-                            color: #000000;
+                            font-size: Theme.font-md;
+                            color: Theme.ink;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                             wrap: no-wrap;
@@ -2529,7 +2580,7 @@ export component MainWindow inherits Window {
                             height: parent.height;
                             text: r.text;
                             font-size: 13px;
-                            color: #000000;
+                            color: Theme.ink;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                             wrap: no-wrap;
@@ -2546,8 +2597,8 @@ export component MainWindow inherits Window {
                             width: parent.width;
                             height: parent.height;
                             text: r.text;
-                            font-size: 36px;
-                            color: #000000;
+                            font-size: Theme.font-h2;
+                            color: Theme.ink;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                             wrap: no-wrap;
@@ -2564,8 +2615,8 @@ export component MainWindow inherits Window {
                             width: parent.width;
                             height: parent.height;
                             text: r.text;
-                            font-size: 26px;
-                            color: #000000;
+                            font-size: Theme.font-h3;
+                            color: Theme.ink;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                             wrap: no-wrap;
@@ -2578,7 +2629,7 @@ export component MainWindow inherits Window {
                         width: r.w * root.labels-preview-scale * 1px;
                         height: r.h * root.labels-preview-scale * 1px;
                         visible: r.kind == 1;
-                        background: #000000;
+                        background: Theme.ink;
                     }
                 }
                 if root.labels-preview-importable : Rectangle {
@@ -2587,12 +2638,12 @@ export component MainWindow inherits Window {
                     width: 280px;
                     height: 64px;
                     border-radius: 12px;
-                    background: lbl-imp-yes-ta.pressed ? #1E4D3A : #2E7D57;
+                    background: lbl-imp-yes-ta.pressed ? Theme.success-dark : Theme.success;
                     Text {
                         text: "ИМПОРТИРОВАТЬ";
-                        font-size: 20px;
+                        font-size: Theme.font-sm;
                         font-weight: 700;
-                        color: #FFFFFF;
+                        color: Theme.surface;
                     }
                     lbl-imp-yes-ta := TouchArea { clicked => { root.labels-preview-import(); } }
                 }
@@ -2602,12 +2653,12 @@ export component MainWindow inherits Window {
                     width: 280px;
                     height: 64px;
                     border-radius: 12px;
-                    background: lbl-pv-ta.pressed ? #1E4D3A : #2E7D57;
+                    background: lbl-pv-ta.pressed ? Theme.success-dark : Theme.success;
                     Text {
                         text: root.labels-preview-importable ? "ОТМЕНА" : ("ЗАКРЫТЬ · " + root.labels-preview-name);
-                        font-size: 20px;
+                        font-size: Theme.font-sm;
                         font-weight: 700;
-                        color: #FFFFFF;
+                        color: Theme.surface;
                         overflow: elide;
                     }
                      lbl-pv-ta := TouchArea { clicked => { root.labels-preview-close(); } }
