@@ -6,7 +6,7 @@ Requires=openscale-kiosk.service
 [Service]
 User=@KIOSK_USER@
 Environment=XAUTHORITY=/run/openscale-kiosk/X.auth
-ExecStart=/usr/bin/x11vnc -display :0 -rfbport 5900 -rfbauth /home/@KIOSK_USER@/.config/tigervnc/passwd -forever -shared
+ExecStart=/usr/bin/x11vnc -display :0 -rfbport 5900 -localhost -rfbauth /home/@KIOSK_USER@/.config/tigervnc/passwd -forever -shared
 Restart=always
 RestartSec=3
 
