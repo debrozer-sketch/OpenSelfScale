@@ -16,9 +16,9 @@ pub const SCREENS: &[Screen] = &[
     Screen { stage: 4, slint: 7, title: "ДИАГНОСТИКА", parent: 6, back: true },
     Screen { stage: 5, slint: 8, title: "НАСТРОЙКИ · СЕТЬ И ВРЕМЯ", parent: 11, back: true },
     Screen { stage: 6, slint: 9, title: "НАСТРОЙКИ · ОБОРУДОВАНИЕ", parent: 11, back: true },
-    Screen { stage: 7, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 14, back: false },
-    Screen { stage: 8, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 14, back: false },
-    Screen { stage: 9, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 14, back: false },
+    Screen { stage: 7, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 25, back: false },
+    Screen { stage: 8, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 25, back: false },
+    Screen { stage: 9, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 25, back: false },
     Screen { stage: 10, slint: 7, title: "ДИАГНОСТИКА", parent: 12, back: false },
     Screen { stage: 11, slint: 12, title: "НАСТРОЙКИ ВЕСОВ", parent: EXIT, back: true },
     Screen { stage: 12, slint: 13, title: "ТОВАРЫ И ВЫГРУЗКА", parent: 11, back: true },
@@ -77,6 +77,16 @@ mod tests {
                     "stage {}: back=true при parent=0 — кнопка ведёт в выход, проверь поведение",
                     s.stage
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn every_screen_parent_exists() {
+        let stages: std::collections::HashSet<u8> = SCREENS.iter().map(|s| s.stage).collect();
+        for s in SCREENS {
+            if s.parent != EXIT {
+                assert!(stages.contains(&s.parent), "stage {}: parent {} не в таблице", s.stage, s.parent);
             }
         }
     }

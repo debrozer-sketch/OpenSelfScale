@@ -236,16 +236,6 @@ impl<P: Read + Write> EscPosPrinter<P> {
         self.port.flush()?;
         Ok(())
     }
-    pub fn recover(&mut self, level: u8) -> Result<(), EscPosError> {
-        self.port.write_all(&build_recover(level))?;
-        self.port.flush()?;
-        let mut b = [0u8; 1];
-        match self.port.read_exact(&mut b) {
-            Ok(()) => Ok(()),
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => Ok(()),
-            Err(e) => Err(e.into()),
-        }
-    }
 }
 #[cfg(test)]
 mod tests {

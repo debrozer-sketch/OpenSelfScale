@@ -476,14 +476,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 k.admin_stage = 20;
                 return;
             }
-            k.admin_stage = match k.admin_stage {
-                11 => 2,
-                15 => 12,
-                16 => 14,
-                17 => 6,
-                3 | 12 | 13 | 14 => 11,
-                _ => 2,
-            };
+            // Единая таблица «назад» — nav::screen_parent (дубль таблиц удалён по аудиту).
+            k.admin_stage = crate::nav::screen_parent(k.admin_stage);
         }
     });
     ui.on_setup_tap({

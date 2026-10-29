@@ -40,8 +40,6 @@ pub enum PrintError {
     Serial(#[from] serialport::Error),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
-    #[error("PLU {0} не найден в базе")]
-    PluNotFound(String),
     #[error("вес {0} г выше предела штрихкода (99999 г)")]
     WeightLimit(u32),
     #[error("принтер отключён в конфиге ([printer].enabled = false)")]
@@ -1567,18 +1565,6 @@ pub fn print_for_item_with_cancel(
     })
     .map_err(std::io::Error::other)?;
     Ok(())
-}
-pub fn print_for_plu(
-    cfg: &crate::config::Config,
-    weight_g: u32,
-    plu: &str,
-) -> Result<(), PrintError> {
-    if !cfg.printer.enabled {
-        return Err(PrintError::PrinterDisabled);
-    }
-    let conn = datastore::open(&cfg.db_path)?;
-    let item = datastore::get_item(&conn, plu)?.ok_or_else(|| PrintError::PluNotFound(plu.into()))?;
-    print_for_item(cfg, &item, weight_g)
 }
 #[cfg(test)]
 mod tests {

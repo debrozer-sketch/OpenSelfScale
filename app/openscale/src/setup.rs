@@ -50,16 +50,6 @@ pub struct Checklist {
     pub printer_ok: bool,
     pub scales_ok: bool,
 }
-impl Checklist {
-    pub fn from_mask(mask: u32) -> Self {
-        Self {
-            goods: mask & 1 != 0,
-            layout: mask & 2 != 0,
-            printer_ok: mask & 4 != 0,
-            scales_ok: mask & 8 != 0,
-        }
-    }
-}
 pub fn all_green(mask: u32) -> bool {
     mask == 0b1111
 }

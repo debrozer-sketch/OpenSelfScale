@@ -22,15 +22,6 @@ pub fn admin_rows(
         .collect()
 }
 
-pub fn admin_rows_set(
-    ui: &crate::MainWindow,
-    conn: &rusqlite::Connection,
-    palette: &[(u32, u32)],
-    palette_names: &[String],
-) {
-    let rows = admin_rows(conn, palette, palette_names);
-    ui.set_admin_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
-}
 pub(crate) const PALETTE_NAMES: [&str; 8] = [
     "Зелёный",
     "Янтарный",
