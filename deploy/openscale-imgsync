@@ -8,7 +8,9 @@ LOCK=/run/openscale-imgsync.lock
 mkdir -p "$local_dir"
 exec 9>"$LOCK"
 flock -n 9 || exit 0
-lftp -u "$user","$password" "$host" \
+# S8: пароль не в argv (виден в ps) — передаётся через окружение lftp.
+export LFTP_PASSWORD="$password"
+lftp --env-password -u "$user" "$host" \
     -e "set net:timeout 30; set net:max-retries 2; \
         mirror --only-newer --no-perms $remote_path $local_dir; bye" \
     2>&1 | logger -t openscale-imgsync

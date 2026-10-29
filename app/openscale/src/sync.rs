@@ -249,6 +249,9 @@ fn connect(cfg: &crate::config::CenterProfile) -> Result<FtpStream, String> {
 /// Лимит размера XML из выгрузки: центр может отдать ошибку HTML-страницей
 /// или мусор — гигантский буфер не должен накапливаться в памяти весов.
 const MAX_XML_BYTES: usize = 64 * 1024 * 1024;
+/// Лимит одной картинки из выгрузки (S8): карточка 128×128 не бывает такой
+/// большой; защита от декодирования огромного файла в UI-потоке.
+const MAX_IMG_BYTES: u64 = 4 * 1024 * 1024;
 fn fetch_string(ftp: &mut FtpStream, path: &str) -> Result<String, String> {
     let bytes = ftp.retr_as_buffer(path).map_err(|e| format!("{path}: {e}"))?;
     let bytes = bytes.into_inner();
@@ -512,8 +515,20 @@ pub fn run(cfg: &Config) -> Result<String, String> {
             if !(name.ends_with(".jpg") || name.ends_with(".png")) {
                 continue;
             }
+            // S8: имя из FTP-листинга не должно выходить за каталог приёма.
+            if name.contains('/') || name.contains('\\') || name.contains("..") {
+                log::warn!("выгрузка: подозрительное имя файла «{name}» — пропуск");
+                continue;
+            }
             let local_path = local.join(name);
             let remote = format!("{}/{}", c.img_dir.trim_end_matches('/'), name);
+            // S8: принимаем только файлы разумного размера.
+            if let Ok(remote_len) = ftp.size(&remote) {
+                if remote_len as u64 > MAX_IMG_BYTES {
+                    log::warn!("выгрузка: {name}: {remote_len} байт — больше лимита, пропуск");
+                    continue;
+                }
+            }
             let skip = match (std::fs::metadata(&local_path).map(|m| m.len()).ok(), ftp.size(&remote)) {
                 (Some(local_len), Ok(remote_len)) => local_len == remote_len as u64,
                 (Some(_), Err(_)) => true,
