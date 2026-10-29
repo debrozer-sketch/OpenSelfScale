@@ -1,5 +1,4 @@
 
-use std::time::Instant;
 use crate::admin;
 use crate::cfgio;
 use crate::context::AppContext;
@@ -140,27 +139,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_role(0);
                 ui.set_pin_mask("".into());
-            }
-        }
-    });
-    ui.on_admin_tap({
-        let kiosk = kiosk.clone();
-        let ui_handle = ui_handle.clone();
-        move || {
-            let mut k = kiosk.borrow_mut();
-            if k.phase >= 2 {
-                k.admin_taps = 0;
-                k.admin_tap_last = None;
-                return;
-            }
-            if k.admin_tap(Instant::now()) {
-                k.admin_stage = 1;
-                k.admin_open = true;
-                k.admin_pin_buf.clear();
-                if let Some(ui) = ui_handle.upgrade() {
-                    ui.set_ip_note(format!("IP: {}", net::read_live().ip).into());
-                }
-                log::info!("вход в настройки: запрошен пароль");
             }
         }
     });

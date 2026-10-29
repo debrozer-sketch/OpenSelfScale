@@ -116,12 +116,12 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             let back = catalog_back.get();
             let pages_total = tiles::items_pages(items_all.borrow().len(), cap, back);
             let page = page.min(pages_total - 1);
-            let (skip, take, step) = if page == 0 {
-                (0, cap - 1, cap - 1)
+            let (skip, take) = if page == 0 {
+                (0, cap - 1)
             } else if back {
-                (cap - 1 + (page - 1) * (cap - 2), cap - 2, cap - 2)
+                (cap - 1 + (page - 1) * (cap - 2), cap - 2)
             } else {
-                (cap - 1 + (page - 1) * (cap - 1), cap - 1, cap - 1)
+                (cap - 1 + (page - 1) * (cap - 1), cap - 1)
             };
             let tiles: Vec<PluTile> = items_all
                 .borrow()

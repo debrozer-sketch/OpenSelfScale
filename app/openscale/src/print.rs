@@ -539,8 +539,8 @@ pub struct PrinterDiagnostics {
     pub serial: Option<String>,
 }
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 static PRINTER_TX: std::sync::OnceLock<mpsc::Sender<PrinterRequest>> =
     std::sync::OnceLock::new();
 static HEALTH: std::sync::OnceLock<std::sync::Mutex<PrinterHealth>> =

@@ -1,6 +1,4 @@
 
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 pub const DONE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
@@ -47,8 +45,6 @@ pub struct Kiosk {
     pub idle_since: Option<Instant>,
     pub dept_page: usize,
     pub header_dept_page: usize,
-    pub admin_taps: u32,
-    pub admin_tap_last: Option<Instant>,
     pub item_page: usize,
     pub pending: Option<datastore::PluEntry>,
     pub admin_open: bool,
@@ -77,25 +73,6 @@ pub struct Kiosk {
     pub admin_idle: Option<Instant>,
 }
 impl Kiosk {
-    pub fn reset_admin_taps(&mut self) {
-        self.admin_taps = 0;
-        self.admin_tap_last = None;
-    }
-    pub fn admin_tap(&mut self, now: Instant) -> bool {
-        const WINDOW: Duration = Duration::from_secs(3);
-        const NEEDED: u32 = 5;
-        match self.admin_tap_last {
-            Some(t) if now.duration_since(t) < WINDOW => self.admin_taps += 1,
-            _ => self.admin_taps = 1,
-        }
-        self.admin_tap_last = Some(now);
-        if self.admin_taps >= NEEDED {
-            self.admin_taps = 0;
-            self.admin_tap_last = None;
-            return true;
-        }
-        false
-    }
     pub fn new() -> Self {
         Kiosk {
             phase: 0,
@@ -108,8 +85,6 @@ impl Kiosk {
             idle_since: None,
             dept_page: 0,
             header_dept_page: 0,
-            admin_taps: 0,
-            admin_tap_last: None,
             item_page: 0,
             pending: None,
             admin_open: false,
@@ -218,20 +193,6 @@ mod tests {
         assert!(k.print_weight_g.is_none());
         assert!(k.idle_since.is_none());
         assert_eq!(k.print_op, 1, "поздние результаты печати инвалидируются");
-    }
-    #[test]
-    fn admin_tap_series_and_reset() {
-        let mut k = Kiosk::new();
-        let t0 = Instant::now();
-        for i in 1..=4 {
-            assert!(!k.admin_tap(t0 + Duration::from_millis(500 * i)));
-        }
-        assert!(!k.admin_tap(t0 + Duration::from_secs(5)));
-        for i in 1..=3 {
-            assert!(!k.admin_tap(t0 + Duration::from_secs(5) + Duration::from_millis(500 * i)));
-        }
-        assert!(k.admin_tap(t0 + Duration::from_secs(7)));
-        assert!(!k.admin_tap(t0 + Duration::from_secs(8)));
     }
     #[test]
     fn weight_state_thresholds() {

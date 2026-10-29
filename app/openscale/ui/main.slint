@@ -281,7 +281,6 @@ export component MainWindow inherits Window {
     callback dept-prev();
     callback up();
     in-out property <bool> logo-pressed: false;
-    callback admin-tap();
     callback search-open();
     callback key-tapped(string);
     callback search-clear();
@@ -448,7 +447,7 @@ export component MainWindow inherits Window {
          y: 44px + (112px - root.logo-h) / 2;
          width: root.width - 496px;
          height: root.logo-h;
-         enabled: root.screen == 0 && root.logo-has;
+         enabled: root.screen == 0;
          pointer-event(ev) => {
              if ev.kind == PointerEventKind.down {
                  root.logo-pressed = true;
