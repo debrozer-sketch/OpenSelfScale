@@ -246,14 +246,33 @@ fn connect(cfg: &crate::config::CenterProfile) -> Result<FtpStream, String> {
         .map_err(|e| format!("таймаут записи: {e}"))?;
     Ok(ftp)
 }
+/// Лимит размера XML из выгрузки: центр может отдать ошибку HTML-страницей
+/// или мусор — гигантский буфер не должен накапливаться в памяти весов.
+const MAX_XML_BYTES: usize = 64 * 1024 * 1024;
 fn fetch_string(ftp: &mut FtpStream, path: &str) -> Result<String, String> {
     let bytes = ftp.retr_as_buffer(path).map_err(|e| format!("{path}: {e}"))?;
-    String::from_utf8(bytes.into_inner()).map_err(|_| format!("{path}: не UTF-8"))
+    let bytes = bytes.into_inner();
+    if bytes.len() > MAX_XML_BYTES {
+        return Err(format!(
+            "{path}: {} МБ — больше лимита {} МБ, выгрузка отклонена",
+            bytes.len() / 1024 / 1024,
+            MAX_XML_BYTES / 1024 / 1024
+        ));
+    }
+    String::from_utf8(bytes).map_err(|_| format!("{path}: не UTF-8"))
 }
 fn fetch_bytes(ftp: &mut FtpStream, path: &str) -> Result<Vec<u8>, String> {
-    ftp.retr_as_buffer(path)
+    let bytes = ftp
+        .retr_as_buffer(path)
         .map(|b| b.into_inner())
-        .map_err(|e| format!("{path}: {e}"))
+        .map_err(|e| format!("{path}: {e}"))?;
+    if bytes.len() > MAX_XML_BYTES {
+        return Err(format!(
+            "{path}: {} МБ — больше лимита, файл отклонён",
+            bytes.len() / 1024 / 1024
+        ));
+    }
+    Ok(bytes)
 }
 fn apply_upload(
     cfg: &Config,

@@ -40,6 +40,7 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
     }
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
          CREATE TABLE IF NOT EXISTS plucodes (
              plu        TEXT PRIMARY KEY NOT NULL,
              price      INTEGER NOT NULL,
