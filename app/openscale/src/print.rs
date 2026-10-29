@@ -458,6 +458,19 @@ fn utc_stamp(secs: i64) -> (String, String) {
     )
 }
 pub fn local_hms(ts: i64) -> String {
+    #[cfg(unix)]
+    {
+        unsafe {
+            let mut tm: libc::tm = std::mem::zeroed();
+            let t: libc::time_t = ts as libc::time_t;
+            if !libc::localtime_r(&t, &mut tm).is_null() {
+                return format!(
+                    "{:02}:{:02}:{:02}",
+                    tm.tm_hour, tm.tm_min, tm.tm_sec
+                );
+            }
+        }
+    }
     utc_stamp(ts).1
 }
 pub fn today_start() -> i64 {
