@@ -313,6 +313,39 @@ component AppButton inherits Rectangle {
     }
 }
 
+component MenuPage inherits Rectangle {
+    in property <[MenuRow]> rows;
+    in property <int> role;
+    callback page-tap(string);
+    for r[i] in root.rows : Rectangle {
+        x: 8px;
+        y: 12px + i * 82px;
+        width: parent.width - 16px;
+        height: 74px;
+        border-radius: 12px;
+        border-width: 2px;
+        border-color: Theme.border;
+        background: mp-ta.pressed ? Theme.pressed : Theme.surface;
+        opacity: role == 1 || !r.admin ? 1.0 : 0.45;
+        Text {
+            x: 24px;
+            width: parent.width - 48px;
+            height: parent.height;
+            text: r.label + (r.admin && role != 1 ? " · только администратор" : "");
+            font-size: Theme.font-h3;
+            font-weight: 700;
+            color: Theme.ink;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        mp-ta := TouchArea {
+            clicked => {
+                (role == 1 || !r.admin) ? root.page-tap(r.id) : {};
+            }
+        }
+    }
+}
+
 export component MainWindow inherits Window {
     title: "OpenScale";
     in property <length> screen-w: 1024px;
@@ -1768,11 +1801,11 @@ export component MainWindow inherits Window {
                 }
             }
         }
-        if root.screen == 12 : Rectangle {
+if root.screen == 12 : MenuPage {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-            property <[MenuRow]> rows: [
+            rows: [
                 { label: "Состояние", id: "status", admin: true },
                 { label: "Товары и выгрузка", id: "goods", admin: true },
                 { label: "Экран покупателя", id: "custscreen", admin: true },
@@ -1783,33 +1816,8 @@ export component MainWindow inherits Window {
                 { label: "Доступ и безопасность", id: "access", admin: true },
                 { label: "Обслуживание", id: "maint", admin: true },
             ];
-            for r[i] in rows : Rectangle {
-                x: 8px;
-                y: 12px + i * 82px;
-                width: parent.width - 16px;
-                height: 74px;
-                border-radius: 12px;
-                border-width: 2px;
-                border-color: Theme.border;
-                background: hub-ta.pressed ? Theme.pressed : Theme.surface;
-                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
-                Text {
-                    x: 24px;
-                    width: parent.width - 48px;
-                    height: parent.height;
-                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-                hub-ta := TouchArea {
-                    clicked => {
-                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
-                    }
-                }
-            }
+            role: root.role;
+            page-tap(id) => { root.menu-tap(id); }
         }
         if root.screen == 13 : Rectangle {
             x: 0; y: 84px;
@@ -1915,63 +1923,16 @@ export component MainWindow inherits Window {
                 }
             }
         }
-        if root.screen == 14 : Rectangle {
+if root.screen == 14 : MenuPage {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-            property <[MenuRow]> rows: [
+            rows: [
                 { label: "Округление цены", id: "rounding", admin: true },
                 { label: "Минимальный вес печати", id: "minweight", admin: true },
             ];
-            for r[i] in rows : Rectangle {
-                x: 8px;
-                y: 12px + i * 82px;
-                width: parent.width - 16px;
-                height: 74px;
-                border-radius: 12px;
-                border-width: 2px;
-                border-color: Theme.border;
-                background: trade-ta.pressed ? Theme.pressed : Theme.surface;
-                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
-                Text {
-                    x: 24px;
-                    width: parent.width - 260px;
-                    height: parent.height;
-                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-                if r.id == "rounding" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.trade-rounding;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                if r.id == "minweight" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.trade-minw;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                trade-ta := TouchArea {
-                    clicked => {
-                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
-                    }
-                }
-            }
+            role: root.role;
+            page-tap(id) => { root.menu-tap(id); }
         }
         if root.screen == 16 : Rectangle {
             x: 0; y: 84px;
@@ -2337,83 +2298,33 @@ export component MainWindow inherits Window {
                 }
             }
         }
-        if root.screen == 26 : Rectangle {
+if root.screen == 26 : MenuPage {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-            property <[MenuRow]> rows: [
+            rows: [
                 { label: "Пароль администратора", id: "changepin", admin: true },
                 { label: "Пароль кассира", id: "createstaff", admin: true },
                 { label: "Удалённый доступ (VNC)", id: "vnctoggle", admin: true },
                 { label: "Сбросить PIN ключом с USB", id: "resetkey", admin: true },
                 { label: "Журнал действий", id: "actionlog", admin: true },
             ];
-            for r[i] in rows : Rectangle {
-                x: 8px;
-                y: 12px + i * 82px;
-                width: parent.width - 16px;
-                height: 74px;
-                border-radius: 12px;
-                border-width: 2px;
-                border-color: Theme.border;
-                background: acc-ta.pressed ? Theme.pressed : Theme.surface;
-                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
-                Text {
-                    x: 24px;
-                    width: parent.width - 48px;
-                    height: parent.height;
-                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-                acc-ta := TouchArea {
-                    clicked => {
-                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
-                    }
-                }
-            }
+            role: root.role;
+            page-tap(id) => { root.menu-tap(id); }
         }
-        if root.screen == 27 : Rectangle {
+if root.screen == 27 : MenuPage {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-            property <[MenuRow]> rows: [
+            rows: [
                 { label: "Отчёты", id: "reports", admin: true },
                 { label: "Экспорт конфигурации", id: "export", admin: true },
                 { label: "Импорт конфигурации", id: "import", admin: true },
                 { label: "Мастер настройки", id: "setup", admin: true },
                 { label: "Перезагрузка весов", id: "restart", admin: true },
             ];
-            for r[i] in rows : Rectangle {
-                x: 8px;
-                y: 12px + i * 82px;
-                width: parent.width - 16px;
-                height: 74px;
-                border-radius: 12px;
-                border-width: 2px;
-                border-color: Theme.border;
-                background: mnt-ta.pressed ? Theme.pressed : Theme.surface;
-                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
-                Text {
-                    x: 24px;
-                    width: parent.width - 48px;
-                    height: parent.height;
-                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-                mnt-ta := TouchArea {
-                    clicked => {
-                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
-                    }
-                }
-            }
+            role: root.role;
+            page-tap(id) => { root.menu-tap(id); }
         }
 
 

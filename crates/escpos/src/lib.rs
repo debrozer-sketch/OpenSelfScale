@@ -58,8 +58,12 @@ pub fn to_cp866(text: &str) -> Result<Vec<u8>, EscPosError> {
                 Ok(0xDE) 
             } else if code == 0x2584 {
                 Ok(0xDF) 
+            } else if code == 0x2116 {
+                Ok(0xFC) // №
+            } else if code == 0x00B0 {
+                Ok(0xF8) // °
             } else if code == 0x2588 {
-                Ok(0xDB) 
+                Ok(0xDB)
             } else {
                 Ok(b'?')
             }
@@ -144,7 +148,12 @@ impl LabelJob {
         if data.is_empty() || !data.len().is_multiple_of(band) {
             return Err(EscPosError::RasterSize);
         }
-        let height_units = (data.len() / band) as u8;
+        // GS * кодирует высоту одним байтом — переполнение молча сдвинуло бы печать.
+        let height_units = (data.len() / band) as u16;
+        if height_units > 255 {
+            return Err(EscPosError::RasterSize);
+        }
+        let height_units = height_units as u8;
         let [xl, xh] = le16(x);
         let [yl, yh] = le16(y);
         self.buf.extend_from_slice(&[ESC, b'$', xl, xh]);
@@ -241,7 +250,23 @@ impl<P: Read + Write> EscPosPrinter<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+        #[test]
+    fn to_cp866_prints_no_and_degree() {
+        let bytes = to_cp866("5 кг\u{b0} №12").unwrap();
+        assert!(bytes.contains(&0xF8), "degree missing: {bytes:?}");
+        assert!(bytes.contains(&0xFC), "numero sign missing: {bytes:?}");
+    }
     #[test]
+    fn raster_rejects_height_over_255() {
+        use super::*;
+        let mut job = LabelJob::begin((0, 0));
+        let band = 8usize;
+        let data = vec![0u8; band * 256];
+        assert!(job.raster(0, 0, 1, &data).is_err());
+        let ok = vec![0u8; band * 8];
+        assert!(job.raster(0, 0, 1, &ok).is_ok());
+    }
+#[test]
     fn field_dbl_uses_double_wide_and_double_high() {
         let mut job = LabelJob::begin((448, 232));
         job.field(10, 20, FieldStyle::Dbl, "СУММА").unwrap();
