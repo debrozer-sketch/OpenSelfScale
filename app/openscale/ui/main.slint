@@ -54,6 +54,7 @@ component DeptTile inherits Rectangle {
     in property <length> font;
     in property <DeptDef> d;
     in property <bool> active: true;
+    in property <bool> cell: false;
     callback tapped(string);
     callback next-page;
     callback prev-page;
@@ -64,8 +65,18 @@ component DeptTile inherits Rectangle {
     border-radius: 24px;
     border-width: 2px;
     border-color: Theme.border;
-    background: ta.pressed ? d.bg-pressed : d.bg;
-    if d.has-img : Rectangle {
+    background: root.cell
+        ? (ta.pressed ? d.bg.mix(#FFFFFF, 78%) : d.bg.mix(#FFFFFF, 86%))
+        : (ta.pressed ? d.bg-pressed : d.bg);
+    if root.cell : Rectangle {
+        x: 0;
+        y: 12px;
+        width: 8px;
+        height: parent.height - 24px;
+        border-radius: 4px;
+        background: d.bg;
+    }
+    if !root.cell && d.has-img : Rectangle {
         x: 8px;
         y: 8px;
         width: parent.width - 16px;
@@ -79,7 +90,7 @@ component DeptTile inherits Rectangle {
             source: d.img;
         }
     }
-    if !d.has-img : Rectangle {
+    if !root.cell && !d.has-img : Rectangle {
         x: 8px;
         y: 8px;
         width: parent.width - 16px;
@@ -88,16 +99,18 @@ component DeptTile inherits Rectangle {
         background: Theme.scrim;
     }
     Text {
+        property <length> ty: root.cell ? 0px : parent.height - 110px;
         x: 8px;
-        y: parent.height - 110px;
+        y: ty;
         width: parent.width - 16px;
-        height: 90px;
+        height: root.cell ? parent.height : 90px;
         text: d.name;
-        font-size: root.font;
+        font-size: root.cell ? 28px : root.font;
         font-weight: 700;
         color: d.fg;
         horizontal-alignment: center;
         vertical-alignment: center;
+        overflow: elide;
     }
     ta := TouchArea {
         enabled: root.active;
@@ -391,6 +404,8 @@ export component MainWindow inherits Window {
     in property <bool> logo-has: false;
     in property <length> col-w: 195px; 
     in property <length> tile-h: 592px; 
+    in property <bool> dept-cell: false;
+    in property <string> goods-deptview: "колонки";
     in property <[DeptDef]> depts;         
     in property <[DeptDef]> header-depts;  
     in property <[PluTile]> items;        
@@ -587,6 +602,7 @@ export component MainWindow inherits Window {
         width: root.width;
         height: root.height - 160px;
         for d[i] in root.depts : DeptTile {
+            cell: root.dept-cell;
             idx: i;
             col-w: root.col-w;
             tile-h: root.tile-h;
@@ -1827,6 +1843,7 @@ if root.screen == 12 : MenuPage {
                 { label: "Компоновка разделов", id: "layout", admin: true },
                 { label: "Колонок на экране", id: "cols", admin: true },
                 { label: "Порядок отделов", id: "sortalpha", admin: true },
+                { label: "Вид отделов", id: "deptview", admin: true },
                 { label: "Столбцов с товарами", id: "itemscols", admin: true },
             ];
             for r[i] in rows : Rectangle {
@@ -1861,11 +1878,11 @@ if root.screen == 12 : MenuPage {
                     horizontal-alignment: right;
                     vertical-alignment: center;
                 }
-                if r.id == "sortalpha" : Text {
+                if r.id == "deptview" : Text {
                     x: parent.width - 230px;
                     width: 190px;
                     height: parent.height;
-                    text: root.goods-sort;
+                    text: root.goods-deptview;
                     font-size: Theme.font-h3;
                     font-weight: 700;
                     color: Theme.ink-soft;

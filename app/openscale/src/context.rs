@@ -13,6 +13,7 @@ use crate::{DeptDef, MainWindow, PluTile};
 pub struct TradeSettings {
     pub cols: Rc<std::cell::Cell<usize>>,
     pub sort_alpha: Rc<std::cell::Cell<bool>>,
+    pub dept_cell: Rc<std::cell::Cell<bool>>,
     pub rounding: Rc<std::cell::Cell<i64>>,
     pub min_weight_g: Rc<std::cell::Cell<f64>>,
     pub card_show_name: Rc<std::cell::Cell<bool>>,

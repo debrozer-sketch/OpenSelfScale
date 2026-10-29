@@ -10,6 +10,7 @@ pub struct ConfigFile {
     pub dept_cols: Option<i64>,
     #[serde(default)]
     pub dept_sort_alpha: Option<bool>,
+    pub dept_cell: Option<bool>,
     #[serde(default)]
     pub idle_timeout_secs: Option<i64>,
     #[serde(default)]
@@ -117,6 +118,7 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
         format: FORMAT,
         dept_cols: Some(cols.clamp(1, 10)),
         dept_sort_alpha: Some(sort != 0),
+        dept_cell: Some(cal("dept_cell").unwrap_or(0) != 0),
         idle_timeout_secs: Some(idle),
         price_rounding: Some(rounding.clamp(0, 2)),
         min_weight_g: Some(minw.clamp(10, 1000)),
@@ -242,6 +244,9 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
     }
     if let Some(v) = f.dept_sort_alpha {
         datastore::set_calibration(&tx, "dept_sort_alpha", i64::from(v)).map_err(|e| e.to_string())?;
+    }
+    if let Some(v) = f.dept_cell {
+        datastore::set_calibration(&tx, "dept_cell", i64::from(v)).map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.idle_timeout_secs {
         datastore::set_calibration(&tx, "idle_timeout_secs", v.clamp(10, 60)).map_err(|e| e.to_string())?;
@@ -423,6 +428,7 @@ mod tests {
             format: FORMAT,
             dept_cols: Some(3),
             dept_sort_alpha: Some(false),
+            dept_cell: Some(true),
             idle_timeout_secs: Some(90),
             price_rounding: Some(1),
             min_weight_g: Some(20),
@@ -444,6 +450,7 @@ mod tests {
         let back: ConfigFile = toml::from_str(&s).unwrap();
         assert_eq!(back.dept_cols, Some(3));
         assert_eq!(back.dept_sort_alpha, Some(false));
+        assert_eq!(back.dept_cell, Some(true));
         assert_eq!(back.depts.len(), 2);
         assert_eq!(back.depts[0].name(), "ОВОЩИ");
         match &back.depts[1] {
@@ -474,6 +481,7 @@ mod tests {
             format: 1,
             dept_cols: Some(9),
             dept_sort_alpha: None,
+            dept_cell: None,
             idle_timeout_secs: Some(1),
             price_rounding: Some(5),
             min_weight_g: Some(0),

@@ -228,6 +228,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let depts_all = depts_all.clone();
         let kiosk = kiosk.clone();
         let cols = ctx.trade.cols.clone();
+        let dept_cell = ctx.trade.dept_cell.clone();
         let set_header_slice = set_header_slice.clone();
         move |page: usize| {
             let Some(ui) = ui_handle.upgrade() else { return };
@@ -241,6 +242,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 .cloned()
                 .collect();
             ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+            ui.set_dept_cell(dept_cell.get());
             ui.set_page_no(page as i32);
             ui.set_pages_total(pages_total as i32);
             kiosk.borrow_mut().dept_page = page;

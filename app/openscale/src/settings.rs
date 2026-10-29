@@ -38,6 +38,8 @@ fn refresh_setting_labels(
         ui.set_goods_sort(
             if trade.sort_alpha.get() { "по алфавиту" } else { "вручную" }.into(),
         );
+        ui.set_goods_deptview(if trade.dept_cell.get() { "ячейки" } else { "колонки" }.into());
+        ui.set_dept_cell(trade.dept_cell.get());
         ui.set_goods_idle(format!("{} с", idle_secs.get()).into());
         ui.set_goods_cardname(if trade.card_show_name.get() { "ВКЛ" } else { "ВЫКЛ" }.into());
         ui.set_card_show_name(trade.card_show_name.get());
@@ -825,6 +827,20 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         log::info!("меню: колонок на экране: {v}");
                     });
                 }
+                "deptview" => {
+                    let next = !trade.dept_cell.get();
+                    let ui_handle = ui_handle.clone();
+                    let trade = trade.clone();
+                    save_setting(&cfg.db_path, "dept_cell", i64::from(next), move |v| {
+                        trade.dept_cell.set(v != 0);
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_dept_cell(v != 0);
+                            ui.set_goods_deptview(if v != 0 { "ячейки" } else { "колонки" }.into());
+                        }
+                        log::info!("меню: вид отделов: {}", if v != 0 { "ячейки" } else { "колонки" });
+                    });
+                    log_action(&cfg.db_path, "Вид отделов", if next { "ячейки" } else { "колонки" }.into());
+                }
                 "sortalpha" => {
                     let next = !trade.sort_alpha.get();
                     let relayout = relayout.clone();
@@ -1531,6 +1547,13 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     );
                     if let Some(v) = f.dept_cols {
                         trade.cols.set(v.clamp(1, 10) as usize);
+                    }
+                    if let Some(v) = f.dept_cell {
+                        trade.dept_cell.set(v);
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_dept_cell(v);
+                            ui.set_goods_deptview(if v { "ячейки" } else { "колонки" }.into());
+                        }
                     }
                     if let Some(v) = f.dept_sort_alpha {
                         trade.sort_alpha.set(v);
