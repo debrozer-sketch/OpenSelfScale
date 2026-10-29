@@ -14,23 +14,25 @@ pub const SCREENS: &[Screen] = &[
     Screen { stage: 2, slint: 6, title: "МЕНЮ НАСТРОЕК", parent: EXIT, back: false },
     Screen { stage: 3, slint: 4, title: "НАСТРОЙКИ · ОТДЕЛЫ", parent: 11, back: true },
     Screen { stage: 4, slint: 7, title: "ДИАГНОСТИКА", parent: 6, back: true },
-    Screen { stage: 5, slint: 8, title: "НАСТРОЙКИ · СЕТЬ", parent: EXIT, back: true },
-    Screen { stage: 6, slint: 9, title: "НАСТРОЙКИ · ОБОРУДОВАНИЕ", parent: EXIT, back: true },
+    Screen { stage: 5, slint: 8, title: "НАСТРОЙКИ · СЕТЬ И ВРЕМЯ", parent: 11, back: true },
+    Screen { stage: 6, slint: 9, title: "НАСТРОЙКИ · ОБОРУДОВАНИЕ", parent: 11, back: true },
     Screen { stage: 7, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 14, back: false },
     Screen { stage: 8, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 14, back: false },
     Screen { stage: 9, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 14, back: false },
     Screen { stage: 10, slint: 7, title: "ДИАГНОСТИКА", parent: 12, back: false },
     Screen { stage: 11, slint: 12, title: "НАСТРОЙКИ ВЕСОВ", parent: EXIT, back: true },
-    Screen { stage: 12, slint: 13, title: "НАСТРОЙКИ · ТОВАРЫ И ЭКРАН", parent: 11, back: true },
+    Screen { stage: 12, slint: 13, title: "ТОВАРЫ И ВЫГРУЗКА", parent: 11, back: true },
     Screen { stage: 13, slint: 14, title: "НАСТРОЙКИ · ТОРГОВЫЕ ПРАВИЛА", parent: 11, back: true },
-    Screen { stage: 14, slint: 15, title: "НАСТРОЙКИ · ОБСЛУЖИВАНИЕ", parent: 11, back: true },
-    Screen { stage: 15, slint: 16, title: "НАСТРОЙКИ · ИМПОРТ", parent: 12, back: true },
-    Screen { stage: 16, slint: 17, title: "ОТЧЁТЫ", parent: 14, back: true },
+    Screen { stage: 15, slint: 16, title: "НАСТРОЙКИ · ИМПОРТ", parent: 26, back: true },
+    Screen { stage: 16, slint: 17, title: "ОТЧЁТЫ", parent: 26, back: true },
     Screen { stage: 17, slint: 18, title: "ПРИНТЕР · ДИАГНОСТИКА", parent: 6, back: true },
     Screen { stage: 20, slint: 19, title: "НАСТРОЙКА ВЕСОВ", parent: EXIT, back: false },
-    Screen { stage: 21, slint: 20, title: "ЭТИКЕТКИ", parent: EXIT, back: true },
-    Screen { stage: 22, slint: 23, title: "ЖУРНАЛ ДЕЙСТВИЙ", parent: 14, back: true },
-    Screen { stage: 23, slint: 24, title: "СОСТОЯНИЕ", parent: 2, back: true },
+    Screen { stage: 21, slint: 20, title: "ЭТИКЕТКИ", parent: 11, back: true },
+    Screen { stage: 22, slint: 23, title: "ЖУРНАЛ ДЕЙСТВИЙ", parent: 25, back: true },
+    Screen { stage: 23, slint: 24, title: "СОСТОЯНИЕ", parent: 11, back: true },
+    Screen { stage: 24, slint: 25, title: "ЭКРАН ПОКУПАТЕЛЯ", parent: 11, back: true },
+    Screen { stage: 25, slint: 26, title: "ДОСТУП И БЕЗОПАСНОСТЬ", parent: 11, back: true },
+    Screen { stage: 26, slint: 27, title: "НАСТРОЙКИ · ОБСЛУЖИВАНИЕ", parent: 11, back: true },
     Screen { stage: 30, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
     Screen { stage: 31, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
     Screen { stage: 32, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
@@ -84,6 +86,9 @@ mod tests {
         assert_eq!(screen_slint(3), 4);
         assert_eq!(screen_slint(22), 23);
         assert_eq!(screen_slint(23), 24);
+        assert_eq!(screen_slint(24), 25);
+        assert_eq!(screen_slint(25), 26);
+        assert_eq!(screen_slint(26), 27);
         assert_eq!(screen_title(22), "ЖУРНАЛ ДЕЙСТВИЙ");
         assert_eq!(screen_title(3), "НАСТРОЙКИ · ОТДЕЛЫ");
         assert_eq!(screen_parent(3), 11);

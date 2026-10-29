@@ -122,6 +122,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let ui_handle = ui_handle.clone();
         move || {
             let mut k = kiosk.borrow_mut();
+            if k.admin_stage == 23 && k.status_from != 0 {
+                k.admin_stage = k.status_from;
+                k.status_from = 0;
+                return;
+            }
             let parent = crate::nav::screen_parent(k.admin_stage);
             if parent != 0 {
                 match k.admin_stage {
@@ -289,10 +294,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             }
                             return;
                         }
-                        k.admin_stage = 2;
+                        k.admin_stage = if role == datastore::auth::Role::Admin { 11 } else { 2 };
                         k.pending = None;
+                        k.role = if role == datastore::auth::Role::Admin { 1 } else { 0 };
                         if let Some(ui) = ui_handle.upgrade() {
-                            ui.set_role(if role == datastore::auth::Role::Admin { 1 } else { 0 });
+                            ui.set_role(i32::from(k.role));
                             ui.set_pin_forced(false);
                             ui.set_popup_open(false);
                         }
@@ -759,7 +765,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let trade = trade.clone();
         let relayout = flow.relayout.clone();
         move |id: slint::SharedString| {
-            const ADMIN_TAPS: [&str; 5] = ["scaleset", "createstaff", "net", "restart", "actionlog"];
+            const ADMIN_TAPS: [&str; 9] = [
+                "scaleset", "createstaff", "net", "restart", "actionlog",
+                "custscreen", "access", "maint", "equip",
+            ];
             if ADMIN_TAPS.contains(&id.as_str()) && kiosk.borrow().role != 1 {
                 log::warn!("меню: отказ: «{id}» только для администратора");
                 return;
@@ -1008,6 +1017,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     kiosk.borrow_mut().admin_stage = 22;
                 }
                 "status" => {
+                    kiosk.borrow_mut().status_from = kiosk.borrow().admin_stage;
                     let app_state = app_state.clone();
                     let cfg_s = cfg.clone();
                     let ui_handle = ui_handle.clone();
@@ -1035,6 +1045,15 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         },
                     );
                     kiosk.borrow_mut().admin_stage = 23;
+                }
+                "custscreen" => {
+                    kiosk.borrow_mut().admin_stage = 24;
+                }
+                "access" => {
+                    kiosk.borrow_mut().admin_stage = 25;
+                }
+                "maint" => {
+                    kiosk.borrow_mut().admin_stage = 26;
                 }
                 "changepin" => {
                     let mut k = kiosk.borrow_mut();
