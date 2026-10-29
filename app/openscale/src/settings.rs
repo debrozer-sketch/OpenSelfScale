@@ -558,7 +558,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     3 => {
                         if let Some(ui) = ui_handle.upgrade() {
                             k.net_dhcp = net::read_mode();
-                            k.net_buf = net::read_live().fields();
+                            k.net_buf = net::read_cached().fields();
                             k.net_focus = 0;
                             ui.set_net_dhcp(k.net_dhcp);
                             ui.set_net_popup_open(false);
@@ -984,7 +984,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     let (ui, mut k) = (ui_handle.upgrade(), kiosk.borrow_mut());
                     if let Some(ui) = ui {
                         k.net_dhcp = net::read_mode();
-                        k.net_buf = net::read_live().fields();
+                        k.net_buf = net::read_cached().fields();
                         k.net_focus = 0;
                         ui.set_net_dhcp(k.net_dhcp);
                         ui.set_net_popup_open(false);
@@ -1176,7 +1176,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         move |dhcp: bool| {
             let mut k = kiosk.borrow_mut();
             k.net_dhcp = dhcp;
-            k.net_buf = net::read_live().fields();
+            k.net_buf = net::read_cached().fields();
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_net_dhcp(dhcp);
                 ui.set_net_popup_open(false);
@@ -1292,7 +1292,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         move || {
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_net_popup_open(false);
-                kiosk.borrow_mut().net_buf = net::read_live().fields();
+                kiosk.borrow_mut().net_buf = net::read_cached().fields();
                 let k = kiosk.borrow();
                 net_rows_set(&ui, &k);
             }

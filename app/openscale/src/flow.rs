@@ -305,7 +305,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 let data = (|| -> Option<(Vec<datastore::DeptRow>, Vec<(String, String)>, Vec<(String, i64)>)> {
                     let conn = datastore::open(&cfg2.db_path).ok()?;
                     let depts = datastore::depts_list(&conn).ok()?;
-                    let mut gd_map: std::collections::HashMap<String, String> =
+                    let gd_map: std::collections::HashMap<String, String> =
                         datastore::group_depts(&conn).ok()?.into_iter().collect();
                     let all_groups = datastore::groups_alpha(&conn).ok()?;
                     let unmapped = all_groups

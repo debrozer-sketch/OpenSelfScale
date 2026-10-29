@@ -368,6 +368,7 @@ fn run_kiosk(cfg: config::Config) {
     }
     let sync_rx = sync::spawn_auto_sync(&cfg);
     print::spawn_daemon(&cfg);
+    net::spawn_live_monitor();
     let timer = tick::start(&ctx, flow_handles.go_root, flow_handles.refresh_data, sync_rx);
     ui.run().expect("UI loop failed");
     drop(timer);

@@ -53,6 +53,31 @@ pub fn prefix_to_mask(pre: u8) -> String {
     let v = if pre == 0 { 0u32 } else { u32::MAX << (32 - pre as u32) };
     Ipv4Addr::from(v).to_string()
 }
+static LIVE_CACHE: std::sync::RwLock<Option<NetConfig>> = std::sync::RwLock::new(None);
+/// Кэшированная копия сетевой конфигурации: фоновый монитор обновляет её
+/// раз в 3 с, UI-поток не запускает subprocess. Первый вызов — синхронный.
+pub fn read_cached() -> NetConfig {
+    if let Ok(c) = LIVE_CACHE.read() {
+        if let Some(c) = &*c {
+            return c.clone();
+        }
+    }
+    let c = read_live();
+    if let Ok(mut w) = LIVE_CACHE.write() {
+        *w = Some(c.clone());
+    }
+    c
+}
+/// Фоновый монитор сетевой конфигурации (запускать один раз при старте).
+pub fn spawn_live_monitor() {
+    std::thread::spawn(|| loop {
+        let c = read_live();
+        if let Ok(mut w) = LIVE_CACHE.write() {
+            *w = Some(c);
+        }
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    });
+}
 pub fn read_live() -> NetConfig {
     let addr_out = run("ip", &["-4", "addr", "show", "dev", IFACE]);
     let mut ip = String::new();
