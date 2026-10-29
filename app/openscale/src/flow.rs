@@ -11,6 +11,7 @@ pub struct FlowHandles {
     pub relayout: Rc<dyn Fn()>,
 }
 struct FlowRc {
+    trade: crate::context::TradeSettings,
     kiosk: Rc<RefCell<crate::session::Kiosk>>,
     depts_all: Rc<RefCell<Vec<DeptDef>>>,
     group_dept: Rc<RefCell<std::collections::HashMap<String, String>>>,
@@ -288,100 +289,109 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
     let relayout = {
         let ui_handle = ui_handle.clone();
         let cfg = ctx.cfg.clone();
-        let trade = ctx.trade.clone();
-        let kiosk = kiosk.clone();
-        let depts_all = depts_all.clone();
-        let group_dept = group_dept.clone();
-        let img_dir = img_dir.clone();
         let palette = ctx.palette.clone();
-        let set_header_slice = set_header_slice.clone();
-        let show_items_page = show_items_page.clone();
         move || {
-            let Some(ui) = ui_handle.upgrade() else { return };
-            let (depts, gd_pairs, all_groups) = match datastore::open(&cfg.db_path) {
-                Ok(conn) => match (
-                    datastore::depts_list(&conn),
-                    datastore::group_depts(&conn),
-                    datastore::groups_alpha(&conn),
-                ) {
-                    (Ok(d), Ok(g), Ok(gr)) => (d, g, gr),
-                    (a, b, c) => {
-                        for (name, e) in
-                            [("отделы", a.err()), ("привязки", b.err()), ("группы", c.err())]
-                        {
-                            if let Some(e) = e {
-                                log::error!("раскладка: {name}: {e}");
+            // I1: чтение отделов/групп — в рабочем потоке, вёрстка — в UI.
+            static RELAYOUT_BUSY: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if RELAYOUT_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                log::info!("раскладка: обновление уже идёт, запрос пропущен");
+                return;
+            }
+            let cfg2 = cfg.clone();
+            let ui_handle2 = ui_handle.clone();
+            let palette2: Vec<(u32, u32)> = palette.iter().cloned().collect();
+            std::thread::spawn(move || {
+                let data = (|| -> Option<(Vec<datastore::DeptRow>, Vec<(String, String)>, Vec<(String, i64)>)> {
+                    let conn = datastore::open(&cfg2.db_path).ok()?;
+                    let depts = datastore::depts_list(&conn).ok()?;
+                    let mut gd_map: std::collections::HashMap<String, String> =
+                        datastore::group_depts(&conn).ok()?.into_iter().collect();
+                    let all_groups = datastore::groups_alpha(&conn).ok()?;
+                    let unmapped = all_groups
+                        .iter()
+                        .filter(|(g, n)| *n > 0 && !gd_map.contains_key(g))
+                        .count();
+                    match datastore::route_unmapped_groups(&conn, &mut gd_map, &all_groups) {
+                        Ok(un) if !un.is_empty() => {
+                            for g in &un {
+                                log::warn!("группа без отдела: {g} → {}", datastore::FALLBACK_DEPT);
                             }
                         }
-                        return;
+                        Ok(_) => {}
+                        Err(e) => log::error!("раскладка: группы без отдела: {e}"),
                     }
-                },
-                Err(e) => {
-                    log::error!("раскладка: база: {e}");
+                    let _ = unmapped;
+                    let depts = if depts.is_empty() {
+                        datastore::depts_list(&conn).unwrap_or(depts)
+                    } else {
+                        depts
+                    };
+                    Some((depts, gd_map.into_iter().collect(), all_groups))
+                })();
+                RELAYOUT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                let Some((depts, gd_pairs, all_groups)) = data else {
+                    log::error!("раскладка: база недоступна");
                     return;
-                }
-            };
-            let mut gd_map: std::collections::HashMap<String, String> =
-                gd_pairs.into_iter().collect();
-            let mut depts = depts;
-            if let Ok(conn) = datastore::open(&cfg.db_path) {
-                match datastore::route_unmapped_groups(&conn, &mut gd_map, &all_groups) {
-                    Ok(un) if !un.is_empty() => {
-                        for g in &un {
-                            log::warn!("группа без отдела: {g} → {}", datastore::FALLBACK_DEPT);
-                        }
-                        if let Ok(d) = datastore::depts_list(&conn) {
-                            depts = d;
-                        }
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle2.upgrade() {
+                        FLOW_RC.with(|c| {
+                            let st = c.borrow();
+                            let st = st.as_ref().expect("flow state");
+                            let mut gd_map: std::collections::HashMap<String, String> =
+                                gd_pairs.into_iter().collect();
+                            let mut depts = depts;
+                            if st.trade.sort_alpha.get() {
+                                depts.sort_by(|a, b| a.name.cmp(&b.name));
+                            }
+                            *st.group_dept.borrow_mut() = gd_map;
+                            let gd = st.group_dept.borrow();
+                            *st.depts_all.borrow_mut() =
+                                tiles::dept_tiles(&depts, &gd, &all_groups, &st.img_dir, &palette2);
+                            drop(gd);
+                            let cols = st.trade.cols.get().max(1);
+                            let n = st.depts_all.borrow().len();
+                            let pages_total = n.div_ceil(cols).max(1);
+                            let win_w = ui.get_screen_w() as i32;
+                            let win_h = ui.get_screen_h() as i32;
+                            let row_w = win_w - 16;
+                            let pager_h: i32 = if pages_total > 1 { 64 } else { 0 };
+                            let tile_h = win_h - 160 - 16 - pager_h;
+                            let colw = (row_w - (cols as i32 - 1) * 8) / cols as i32;
+                            ui.set_col_w(colw as f32);
+                            ui.set_tile_h(tile_h as f32);
+                            let maxlen = st
+                                .depts_all
+                                .borrow()
+                                .iter()
+                                .map(|d| d.name.chars().count())
+                                .max()
+                                .unwrap_or(4) as f32;
+                            let font_px = ((colw - 32) as f32 / (maxlen * 0.82)).floor().clamp(18.0, 60.0);
+                            ui.set_dept_font(font_px);
+                            log::info!("отделы: {cols} колонок × {colw} px, шрифт {font_px} px");
+                            let page = st.kiosk.borrow().dept_page.min(pages_total - 1);
+                            let tiles: Vec<DeptDef> = st
+                                .depts_all
+                                .borrow()
+                                .iter()
+                                .skip(page * cols)
+                                .take(cols)
+                                .cloned()
+                                .collect();
+                            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+                            ui.set_page_no(page as i32);
+                            ui.set_pages_total(pages_total as i32);
+                            st.kiosk.borrow_mut().dept_page = page;
+                            let hpage = st.kiosk.borrow().header_dept_page;
+                            (st.set_header)(hpage);
+                            let ipage = st.kiosk.borrow().item_page;
+                            (st.show_items)(ipage);
+                        });
                     }
-                    Ok(_) => {}
-                    Err(e) => log::error!("раскладка: группы без отдела: {e}"),
-                }
-            }
-            if trade.sort_alpha.get() {
-                depts.sort_by(|a, b| a.name.cmp(&b.name));
-            }
-            *group_dept.borrow_mut() = gd_map;
-            let gd = group_dept.borrow();
-            *depts_all.borrow_mut() =
-                tiles::dept_tiles(&depts, &gd, &all_groups, &img_dir, &palette);
-            drop(gd);
-            let cols = trade.cols.get().max(1);
-            let n = depts_all.borrow().len();
-            let pages_total = n.div_ceil(cols).max(1);
-            let win_w = ui.get_screen_w() as i32;
-            let win_h = ui.get_screen_h() as i32;
-            let row_w = win_w - 16;
-            let pager_h: i32 = if pages_total > 1 { 64 } else { 0 };
-            let tile_h = win_h - 160 - 16 - pager_h;
-            let colw = (row_w - (cols as i32 - 1) * 8) / cols as i32;
-            ui.set_col_w(colw as f32);
-            ui.set_tile_h(tile_h as f32);
-            let maxlen = depts_all
-                .borrow()
-                .iter()
-                .map(|d| d.name.chars().count())
-                .max()
-                .unwrap_or(4) as f32;
-            let font_px = ((colw - 32) as f32 / (maxlen * 0.82)).floor().clamp(18.0, 60.0);
-            ui.set_dept_font(font_px);
-            log::info!("отделы: {cols} колонок × {colw} px, шрифт {font_px} px");
-            let page = kiosk.borrow().dept_page.min(pages_total - 1);
-            let tiles: Vec<DeptDef> = depts_all
-                .borrow()
-                .iter()
-                .skip(page * cols)
-                .take(cols)
-                .cloned()
-                .collect();
-            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
-            ui.set_page_no(page as i32);
-            ui.set_pages_total(pages_total as i32);
-            kiosk.borrow_mut().dept_page = page;
-            let hpage = kiosk.borrow().header_dept_page;
-            set_header_slice(hpage);
-            let ipage = kiosk.borrow().item_page;
-            show_items_page(ipage);
+                });
+            });
         }
     };
     let relayout: Rc<dyn Fn()> = Rc::new(relayout);
@@ -599,6 +609,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         // данные через thread_local-хранилище (invoke выполняется в UI-потоке).
         FLOW_RC.with(|c| {
             *c.borrow_mut() = Some(FlowRc {
+                trade: ctx.trade.clone(),
                 kiosk: kiosk.clone(),
                 group_dept: group_dept.clone(),
                 depts_all: depts_all.clone(),
@@ -613,7 +624,6 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             });
         });
         move || {
-            let Some(ui) = ui_handle.upgrade() else { return };
             tiles::clear_img_cache();
             // I1: полный каталог читается в рабочем потоке; UI-поток
             // получает готовый вектор и только раскладывает модели.
