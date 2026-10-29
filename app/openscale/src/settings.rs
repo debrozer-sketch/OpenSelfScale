@@ -55,10 +55,24 @@ fn refresh_setting_labels(
         ui.set_trade_minw(format!("{} г", trade.min_weight_g.get() as i64).into());
     }
 }
+fn log_action(db_path: &std::path::Path, action: &str, details: String) {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    if let Ok(conn) = datastore::open(db_path) {
+        if let Err(e) = datastore::action_log_add(&conn, ts, 1, action, &details) {
+            log::warn!("журнал действий: запись: {e}");
+        }
+    }
+}
 fn save_setting(db_path: &std::path::Path, key: &str, value: i64, apply: impl FnOnce(i64)) {
     match datastore::open(db_path) {
         Ok(conn) => match datastore::set_calibration(&conn, key, value) {
-            Ok(()) => apply(value),
+            Ok(()) => {
+                log_action(db_path, "настройка", format!("{key} = {value}"));
+                apply(value);
+            }
             Err(e) => log::error!("меню: {key}: запись: {e}"),
         },
         Err(e) => log::error!("меню: {key}: база: {e}"),
@@ -328,6 +342,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         };
                         match res {
                             Ok(Ok(())) => {
+                                log_action(&cfg.db_path, "PIN создан", role_name.into());
                                 log::info!("настройка: PIN {role_name} создан");
                                 k.setup_pin_stage = 0;
                                 if k.setup_active {
@@ -408,7 +423,13 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
             let old = std::mem::take(&mut k.pin_pending);
             let res = match datastore::open(&cfg.db_path) {
-                Ok(conn) => datastore::auth::change_pin(&conn, 1, &old, &pin),
+                Ok(conn) => {
+                    let r = datastore::auth::change_pin(&conn, 1, &old, &pin);
+                    if matches!(&r, Ok(Ok(()))) {
+                        log_action(&cfg.db_path, "PIN изменён", "администратор".into());
+                    }
+                    r
+                }
                 Err(e) => {
                     log::error!("смена пароля: база: {e}");
                     return;
@@ -1138,6 +1159,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         );
                     } else {
                         app_state.request_zero();
+                        log_action(&cfg.db_path, "обнуление весов", "запрошено из меню".into());
                         log::info!("меню: запрошено обнуление весов");
                         let mut k = kiosk.borrow_mut();
                         k.admin_open = false;
@@ -1230,6 +1252,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     ui.on_net_apply({
         let kiosk = kiosk.clone();
         let show_net_result = show_net_result.clone();
+        let cfg_log = cfg.clone();
         move || {
             if NET_APPLYING.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 log::info!("сеть: применение уже идёт, повторное нажатие проигнорировано");
@@ -1241,6 +1264,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             };
             let show = show_net_result.clone();
             let show_panic = show_net_result.clone();
+            let cfg_task = cfg_log.clone();
             spawn_menu_task(
                 "сеть",
                 move |msg| {
@@ -1250,6 +1274,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 let (ok, text) = if dhcp {
                     match net::apply_dhcp() {
                         Ok(()) => {
+                            log_action(&cfg_task.db_path, "сеть", "DHCP применён".into());
                             log::info!("сеть: DHCP применён");
                             (true, net_popup_text(&net::read_live()))
                         }
@@ -1263,6 +1288,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         Ok((ip, pre, gw, dns)) => {
                             match net::apply(&ip.to_string(), pre, &gw.to_string(), &dns.to_string()) {
                                 Ok(()) => {
+                                    log_action(
+                                        &cfg_task.db_path,
+                                        "сеть",
+                                        format!("статика {ip}/{pre} шлюз {gw} dns {dns}"),
+                                    );
                                     log::info!("сеть: применено {ip}/{pre} шлюз {gw} dns {dns}");
                                     (true, net_popup_text(&net::read_live()))
                                 }
@@ -1359,13 +1389,24 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 .and_then(|f| cfgio::apply(&cfg, &f).map(|_| f))
             {
                 Ok(f) => {
+                    log_action(
+                        &cfg.db_path,
+                        "импорт конфигурации",
+                        format!(
+                            "отделов {}, привязок групп {}, раскладок {} ({})",
+                            f.depts.len(),
+                            f.group_depts.len(),
+                            f.label_layouts.len(),
+                            path.rsplit(['/', '\\']).next().unwrap_or("?")
+                        ),
+                    );
                     log::info!(
                         "меню: импорт применён: отделов {}, колонок {:?}",
                         f.depts.len(),
                         f.dept_cols
                     );
                     if let Some(v) = f.dept_cols {
-                        trade.cols.set(v.clamp(1, 5) as usize);
+                        trade.cols.set(v.clamp(1, 10) as usize);
                     }
                     if let Some(v) = f.dept_sort_alpha {
                         trade.sort_alpha.set(v);

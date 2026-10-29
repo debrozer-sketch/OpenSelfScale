@@ -77,6 +77,13 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              height_mm INTEGER NOT NULL,
              json      TEXT NOT NULL
          );
+         CREATE TABLE IF NOT EXISTS action_log (
+             id      INTEGER PRIMARY KEY AUTOINCREMENT,
+             ts      INTEGER NOT NULL,
+             role    INTEGER NOT NULL,
+             action  TEXT NOT NULL,
+             details TEXT NOT NULL
+         );
          CREATE INDEX IF NOT EXISTS idx_print_log_ts ON print_log (ts);",
     )?;
     let has_card: bool = conn
@@ -528,6 +535,50 @@ pub fn print_log_count_all(conn: &Connection) -> Result<i64, StoreError> {
     conn.query_row("SELECT COUNT(*) FROM print_log WHERE ok = 1", [], |r| r.get(0))
         .map_err(StoreError::from)
 }
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActionLogRow {
+    pub ts: i64,
+    pub role: u8,
+    pub action: String,
+    pub details: String,
+}
+pub fn action_log_add(
+    conn: &Connection,
+    ts: i64,
+    role: u8,
+    action: &str,
+    details: &str,
+) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO action_log (ts, role, action, details) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![ts, role as i64, action, details],
+    )?;
+    // Ротация: журнал действий не должен расти бесконечно.
+    conn.execute(
+        "DELETE FROM action_log WHERE id NOT IN (SELECT id FROM action_log ORDER BY id DESC LIMIT 1000)",
+        [],
+    )?;
+    Ok(())
+}
+pub fn action_log_recent(
+    conn: &Connection,
+    limit: usize,
+) -> Result<Vec<ActionLogRow>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT ts, role, action, details FROM action_log ORDER BY id DESC LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map([limit as i64], |r| {
+            Ok(ActionLogRow {
+                ts: r.get(0)?,
+                role: r.get::<_, i64>(1)? as u8,
+                action: r.get(2)?,
+                details: r.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
 pub fn print_log_recent(conn: &Connection, limit: usize) -> Result<Vec<PrintLogRow>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT ts, plu, name, weight_g, sum_kop, ok
@@ -887,6 +938,19 @@ pub fn apply_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn action_log_adds_and_rotates() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        for i in 0..1100 {
+            action_log_add(&conn, 1000 + i, 1, "настройка", "ключ").unwrap();
+        }
+        let recent = action_log_recent(&conn, 50).unwrap();
+        assert_eq!(recent.len(), 50);
+        assert_eq!(recent[0].ts, 2099, "последние — сверху");
+        // Ротация: старше 1000 удалены.
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM action_log", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1000);
+    }
     #[test]
     fn ean_code5_collisions_are_detected() {
         let conn = open(":memory:".as_ref()).unwrap();
