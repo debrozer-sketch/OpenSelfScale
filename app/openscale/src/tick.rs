@@ -153,7 +153,10 @@ pub fn start(
                     k.selected = None;
                     k.pending = None;
                 }
-                if k.phase == 2 && k.print_weight_g.is_none() {
+                // B16: пока принтер ждёт снятия этикетки или бумага кончилась —
+                // новую этикетку не выдаём, покупатель должен забрать предыдущую.
+                let tray_blocked = ph.label_waiting || ph.paper_end;
+                if k.phase == 2 && !tray_blocked && k.print_weight_g.is_none() {
                     let weight_g = (snap.mass_kg * 1000.0).round() as i64;
                     if weight_g <= 0 || ws != 2 {
                         k.phase = 1;
