@@ -1,4 +1,5 @@
 
+use std::cell::RefCell;
 use crate::admin;
 use crate::cfgio;
 use crate::context::AppContext;
@@ -65,6 +66,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     let ui = ctx.ui.upgrade().expect("UI init");
     let ui_handle = ctx.ui.clone();
     let kiosk = ctx.kiosk.clone();
+    KIOSK_RC.with(|c| *c.borrow_mut() = Some(kiosk.clone()));
     let cfg = ctx.cfg.clone();
     let app_state = ctx.app_state.clone();
     let idle_secs = ctx.idle_secs.clone();
@@ -366,29 +368,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         let (yy, rest) = rest.split_at(4);
                         let (hh, mi) = rest.split_at(2);
                         let arg = format!("{dd}.{mm}.{yy} {hh}:{mi}");
-                        let Ok(conn) = datastore::open(&cfg.db_path) else { return };
-                        let next = setup::advance(setup::stage(&conn), setup::Action::Next);
-                        setup::set_stage(&conn, next);
-                        k.setup_pin_stage = 0;
-                        k.admin_stage = 20;
                         drop(k);
-                        spawn_settime(&cfg, &[arg.as_str()], ui_handle.clone(), "время установлено");
-                        let (mode, note, action, enabled, skip, skip_label, next_vis) =
-                            wizard_step_ui(next, 0, false);
-                        let ui_handle2 = ui_handle.clone();
-                        slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = ui_handle2.upgrade() {
-                                ui.set_setup_mode(mode);
-                                ui.set_setup_stage(i32::from(next));
-                                ui.set_setup_note(note.into());
-                                ui.set_setup_action_label(action.into());
-                                ui.set_setup_action_enabled(enabled);
-                                ui.set_setup_skip_visible(skip);
-                                ui.set_setup_skip_label(skip_label.into());
-                                ui.set_setup_next_visible(next_vis);
-                            }
-                        })
-                        .ok();
+                        spawn_settime_then_advance(
+                            &cfg,
+                            &[arg.as_str()],
+                            ui_handle.clone(),
+                        );
                     }
                 }
                 return;
@@ -2110,6 +2095,27 @@ fn calibrate_label_text(cfg: &Config) -> (String, Option<i64>) {
         }
     }
 }
+fn run_settime(args: &[String]) -> Result<(), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Result<bool, String>>();
+    let args = args.to_vec();
+    std::thread::spawn(move || {
+        let res = std::process::Command::new("sudo")
+            .arg("/usr/local/bin/openscale-settime")
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .output();
+        let _ = tx.send(match res {
+            Ok(o) => Ok(o.status.success()),
+            Err(e) => Err(e.to_string()),
+        });
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        Ok(Ok(true)) => Ok(()),
+        Ok(Ok(false)) => Err("хелпер сообщил об ошибке".into()),
+        Ok(Err(e)) => Err(format!("запуск хелпера не удался: {e}")),
+        Err(_) => Err("хелпер не ответил за 5 с".into()),
+    }
+}
 fn spawn_settime(
     _cfg: &Config,
     args: &[&str],
@@ -2118,23 +2124,9 @@ fn spawn_settime(
 ) {
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     std::thread::spawn(move || {
-        let (tx, rx) = std::sync::mpsc::channel::<Result<bool, String>>();
-        std::thread::spawn(move || {
-            let res = std::process::Command::new("sudo")
-                .arg("/usr/local/bin/openscale-settime")
-                .args(&args)
-                .stdin(std::process::Stdio::null())
-                .output();
-            let _ = tx.send(match res {
-                Ok(o) => Ok(o.status.success()),
-                Err(e) => Err(e.to_string()),
-            });
-        });
-        let outcome = match rx.recv_timeout(std::time::Duration::from_secs(5)) {
-            Ok(Ok(true)) => format!("ок: {note}"),
-            Ok(Ok(false)) => format!("хелпер сообщил об ошибке: {note}"),
-            Ok(Err(e)) => format!("запуск хелпера не удался: {e}"),
-            Err(_) => "хелпер не ответил за 5 с — значение не применено".to_string(),
+        let outcome = match run_settime(&args) {
+            Ok(()) => format!("ок: {note}"),
+            Err(e) => format!("{e} — {note} не применено"),
         };
         log::info!("настройка: время: {outcome}");
         slint::invoke_from_event_loop(move || {
@@ -2143,5 +2135,84 @@ fn spawn_settime(
             }
         })
         .ok();
+    });
+}
+thread_local! {
+    static KIOSK_RC: RefCell<Option<std::rc::Rc<RefCell<crate::session::Kiosk>>>> =
+        const { RefCell::new(None) };
+}
+fn spawn_settime_then_advance(
+    cfg: &Config,
+    args: &[&str],
+    ui_handle: slint::Weak<MainWindow>,
+) {
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let cfg = cfg.clone();
+    std::thread::spawn(move || {
+        match run_settime(&args) {
+            Ok(()) => {
+                let rendered = (|| -> Option<(i32, i32, String, String, bool, bool, String, bool)> {
+                    let conn = datastore::open(&cfg.db_path).ok()?;
+                    let next = crate::setup::advance(crate::setup::stage(&conn), crate::setup::Action::Next);
+                    crate::setup::set_stage(&conn, next);
+                    let (mode, note, action, enabled, skip, skip_label, next_vis) =
+                        wizard_step_ui(next, 0, false);
+                    Some((i32::from(next), mode, note, action, enabled, skip, skip_label, next_vis))
+                })();
+                let Some((next, mode, _note, action, enabled, skip, skip_label, next_vis)) = rendered else {
+                    log::error!("настройка: время: база недоступна, мастер не продвинут");
+                    return;
+                };
+                log::info!("настройка: время установлено, мастер на шаге {next}");
+                slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle.upgrade() {
+                        KIOSK_RC.with(|c| {
+                            if let Some(krc) = &*c.borrow() {
+                                let mut k = krc.borrow_mut();
+                                k.setup_pin_stage = 0;
+                                k.admin_stage = 20;
+                            }
+                        });
+                        ui.set_setup_stage(next);
+                        ui.set_setup_note("Дата и время: ок: время установлено".into());
+                        ui.set_setup_mode(mode);
+                        ui.set_setup_action_label(action.into());
+                        ui.set_setup_action_enabled(enabled);
+                        ui.set_setup_skip_visible(skip);
+                        ui.set_setup_skip_label(skip_label.into());
+                        ui.set_setup_next_visible(next_vis);
+                    }
+                })
+                .ok();
+            }
+            Err(e) => {
+                log::warn!("настройка: время не применено: {e} — мастер остаётся на шаге");
+                slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle.upgrade() {
+                        KIOSK_RC.with(|c| {
+                            if let Some(krc) = &*c.borrow() {
+                                let mut k = krc.borrow_mut();
+                                k.setup_pin_stage = 0;
+                                k.admin_stage = 20;
+                            }
+                        });
+                        let (mode, _note, action, enabled, skip, skip_label, next_vis) =
+                            wizard_step_ui(7, 0, false);
+                        ui.set_setup_stage(7);
+                        ui.set_setup_mode(mode);
+                        ui.set_setup_note(
+                            format!("Дата и время: {e} — время не применено, повторите ввод или ПРОПУСТИТЕ")
+                                .into(),
+                        );
+                        ui.set_setup_action_label(action.into());
+                        ui.set_setup_action_enabled(enabled);
+                        ui.set_setup_skip_visible(skip);
+                        ui.set_setup_skip_label(skip_label.into());
+                        ui.set_setup_next_visible(next_vis);
+                    }
+                })
+                .ok();
+            }
+        }
     });
 }
