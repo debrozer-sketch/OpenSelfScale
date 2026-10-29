@@ -990,6 +990,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     kiosk.borrow_mut().admin_stage = 17;
                     refresh_printer_diag(&cfg, &ui_handle);
                 }
+                "actionlog" => {
+                    refresh_action_log(&cfg, &ui_handle);
+                    kiosk.borrow_mut().admin_stage = 22;
+                }
                 "changepin" => {
                     let mut k = kiosk.borrow_mut();
                     k.pin_pending.clear();
@@ -1851,6 +1855,52 @@ fn show_labels_popup(
             ui.set_labels_popup_text(text.into());
             ui.set_labels_popup_open(true);
         }
+    });
+}
+fn refresh_action_log(cfg: &crate::config::Config, ui_handle: &slint::Weak<MainWindow>) {
+    let db_path = cfg.db_path.clone();
+    let ui_handle = ui_handle.clone();
+    std::thread::spawn(move || {
+        let rows = match datastore::open(&db_path) {
+            Ok(conn) => datastore::action_log_recent(&conn, 50).unwrap_or_default(),
+            Err(e) => {
+                log::error!("меню: журнал действий: база: {e}");
+                Vec::new()
+            }
+        };
+        let lines: Vec<slint::SharedString> = rows
+            .iter()
+            .map(|r| {
+                // ts — unix-время; локальная дата из календарных функций print::now_stamp не
+                // годится для произвольного ts, поэтому простой UTC-формат.
+                let days = r.ts / 86400;
+                let secs = r.ts % 86400;
+                let (h, m) = (secs / 3600, (secs % 3600) / 60);
+                // Гражданская дата: алгоритм дней с 1970-01-01.
+                let z = days + 719_468;
+                let era = z / 146_097;
+                let doe = z % 146_097;
+                let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+                let y = yoe + era * 400;
+                let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+                let mp = (5 * doy + 2) / 153;
+                let d = doy - (153 * mp + 2) / 5 + 1;
+                let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+                let y = if mo <= 2 { y + 1 } else { y };
+                format!(
+                    "{y:04}-{mo:02}-{d:02} {h:02}:{m:02}  {}  {} — {}",
+                    if r.role == 1 { "АДМ" } else { "КАС" },
+                    r.action,
+                    r.details
+                )
+                .into()
+            })
+            .collect();
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_actionlog_rows(slint::ModelRc::new(slint::VecModel::from(lines)));
+            }
+        });
     });
 }
 fn refresh_report(

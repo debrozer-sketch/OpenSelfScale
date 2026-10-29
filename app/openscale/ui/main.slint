@@ -438,6 +438,8 @@ export component MainWindow inherits Window {
     in property <string> report-text;
     in property <string> report-period: "Сегодня";
     in property <string> report-kind: "Все события";
+    in property <[string]> actionlog-rows;
+    callback actionlog-refresh();
     in property <[string]> labels-rows;
     in property <[string]> labels-files;
     in property <string> labels-status;
@@ -1992,6 +1994,7 @@ export component MainWindow inherits Window {
             property <[MenuRow]> rows: [
                 { label: "Сменить пароль", id: "changepin", admin: false },
                 { label: "Отчёты", id: "reports", admin: false },
+                { label: "Журнал действий", id: "actionlog", admin: true },
             ];
             for r[i] in rows : Rectangle {
                 x: 8px;
@@ -2225,6 +2228,47 @@ export component MainWindow inherits Window {
                 }
             }
         }
+        if root.screen == 23 : Rectangle {
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+            Rectangle {
+                x: 8px; y: 8px;
+                width: 200px;
+                height: 52px;
+                border-radius: 12px;
+                border-width: 2px;
+                border-color: Theme.border;
+                background: al-r-ta.pressed ? Theme.pressed : Theme.surface;
+                Text {
+                    text: "Обновить";
+                    font-size: Theme.font-body;
+                    font-weight: 700;
+                    color: Theme.ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                al-r-ta := TouchArea { clicked => { root.actionlog-refresh(); } }
+            }
+            Flickable {
+                x: 8px; y: 68px;
+                width: parent.width - 16px;
+                height: parent.height - 76px;
+                viewport-width: self.width;
+                viewport-height: al-col.preferred-height;
+                al-col := VerticalLayout {
+                    spacing: 4px;
+                    for row in root.actionlog-rows : Text {
+                        text: row;
+                        font-size: Theme.font-sm;
+                        font-family: "DejaVu Sans Mono";
+                        color: Theme.ink;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
         if root.screen == 17 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
