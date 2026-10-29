@@ -62,8 +62,8 @@ component DeptTile inherits Rectangle {
     x: 8px + self.idx * (root.col-w + 8px);
     y: 8px;
     height: root.tile-h;
-    border-radius: 24px;
-    border-width: 2px;
+    border-radius: Theme.r-card;
+    border-width: 1px;
     border-color: Theme.border;
     background: root.cell
         ? (ta.pressed ? d.bg.mix(#FFFFFF, 78%) : d.bg.mix(#FFFFFF, 86%))
@@ -81,7 +81,7 @@ component DeptTile inherits Rectangle {
         y: 8px;
         width: parent.width - 16px;
         height: parent.height - 110px - 16px;
-        border-radius: 20px;
+        border-radius: Theme.r-panel;
         clip: true;
         Image {
             width: 100%;
@@ -95,7 +95,7 @@ component DeptTile inherits Rectangle {
         y: 8px;
         width: parent.width - 16px;
         height: parent.height - 110px - 16px;
-        border-radius: 20px;
+        border-radius: Theme.r-panel;
         background: Theme.scrim;
     }
     Text {
@@ -143,14 +143,14 @@ component PluCard inherits Rectangle {
     height: 178px;
     x: 8px + Math.mod(self.idx + self.cell-offset, self.cols) * (root.col-w + 8px);
     y: 56px + Math.floor((self.idx + self.cell-offset) / self.cols) * 182px;
-    border-radius: 12px;
+    border-radius: Theme.r-button;
     background: !root.active ? Theme.chip : ta.pressed ? Theme.pressed : Theme.surface;
     Rectangle {
         x: 2px;
         y: root.card-show-name ? 2px : 21px;
         width: parent.width - 4px;
         height: 104px;
-        border-radius: 10px;
+        border-radius: Theme.r-inner;
         clip: true;
         background: Theme.chip;
         if root.p.has-img : Image {
@@ -221,8 +221,8 @@ component KbKey inherits Rectangle {
     x: root.kx;
     width: root.kw;
     height: 58px;
-    border-radius: 12px;
-    border-width: 2px;
+    border-radius: Theme.r-button;
+    border-width: 1px;
     border-color: Theme.border;
     background: k-ta.pressed ? Theme.pressed : Theme.surface;
     Text {
@@ -240,53 +240,61 @@ component KbKey inherits Rectangle {
     }
 }
 global Theme {
-    // Поверхности и слои
-    in property <color> bg: #F6F7F9;           // фон окна
+    // Поверхности и слои (тема v2 по docs/theme-proposal.slint — тёплые нейтральные)
+    in property <color> bg: #F4F4F2;           // фон окна
     in property <color> surface: #FFFFFF;      // карточки, попапы
-    in property <color> chip: #EDF0F3;         // клавиши, чипы, вторичные кнопки
-    in property <color> pressed: #E4E8ED;      // нажатое состояние surface
-    in property <color> pressed-deep: #DDE3EA; // нажатое состояние surface-белого
+    in property <color> chip: #EEEEEA;         // клавиши, чипы, вторичные кнопки
+    in property <color> pressed: #E2E3DF;      // нажатое состояние surface
+    in property <color> pressed-deep: #D6D7D2; // нажатое состояние surface-белого
     // Текст
-    in property <color> ink: #1A1E24;
-    in property <color> ink-soft: #4A5460;
-    in property <color> ink-faint: #A6ADB8;
-    // Границы
-    in property <color> border: #C9CFD7;
-    in property <color> border-soft: #DDE1E6;
+    in property <color> ink: #16181D;
+    in property <color> ink-soft: #515866;
+    in property <color> ink-faint: #6B7280;    // подписи (ink-mute по proposal)
+    in property <color> disabled: #9AA1AB;     // недоступное (было accent-disabled)
+    // Границы (1px, светлые: пространство разделяет, не линии)
+    in property <color> border: #E3E4E0;
+    in property <color> border-soft: #EAEBE7;
     // Акцент (синий, администрирование)
-    in property <color> accent: #2F6FED;
-    in property <color> accent-pressed: #2456C4;
-    in property <color> accent-disabled: #C3CAD3;
+    in property <color> accent: #1F5BE0;
+    in property <color> accent-pressed: #1748B8;
+    in property <color> accent-disabled: #9AA1AB;
     // Успех (зелёный)
-    in property <color> success: #2E7D57;
-    in property <color> success-bright: #2FA36B;
-    in property <color> success-dark: #1E4D3A;
-    in property <color> success-soft: #F0F7F2;
+    in property <color> success: #17803D;
+    in property <color> success-bright: #17803D;
+    in property <color> success-dark: #14532D;
+    in property <color> success-soft: #E8F5EC;
     // Опасность (красный)
-    in property <color> danger: #B3261E;
-    in property <color> danger-bright: #E23B3B;
-    in property <color> danger-pressed: #F2B8B5;
-    in property <color> danger-soft: #F6DEDD;
-    in property <color> danger-ink: #7A2E2E;
-    // Предупреждение (жёлтый)
-    in property <color> warning: #E8A13D;
-    in property <color> warning-strong: #E0A100;
-    in property <color> warning-deep: #C77700;
-    in property <color> warning-soft: #F6D9A0;
-    in property <color> warning-ink: #6B4A1B;
+    in property <color> danger: #C62828;
+    in property <color> danger-bright: #C62828;
+    in property <color> danger-pressed: #F3C1BF;
+    in property <color> danger-soft: #FDECEA;
+    in property <color> danger-ink: #7A1C1C;
+    // Предупреждение (янтарь)
+    in property <color> warning: #9A5B00;
+    in property <color> warning-strong: #B47700;
+    in property <color> warning-deep: #9A5B00;
+    in property <color> warning-soft: #FFF3D6;
+    in property <color> warning-ink: #6B4400;
     // Затемнение под попапами
-    in property <color> overlay: rgba(10, 14, 20, 0.45);
-    in property <color> overlay-strong: rgba(10, 14, 20, 0.6);
-    in property <color> scrim: rgba(255, 255, 255, 0.75);
-    // Шрифтовая шкала
-    in property <length> font-display: 96px;
-    in property <length> font-h1: 40px;
-    in property <length> font-h2: 32px;
-    in property <length> font-h3: 26px;
+    in property <color> overlay: rgba(9, 9, 11, 0.5);
+    in property <color> overlay-strong: rgba(9, 9, 11, 0.65);
+    in property <color> scrim: rgba(255, 255, 255, 0.8);
+    // Радиусы (концентрические: внутренний = внешний минус отступ)
+    in property <length> r-panel: 20px;
+    in property <length> r-card: 14px;
+    in property <length> r-button: 12px;
+    in property <length> r-inner: 8px;
+    // Шрифт: IBM Plex Sans; при отсутствии шрифта в системе — fallback системный
+    in property <string> family: "IBM Plex Sans";
+    // Шрифтовая шкала (маппинг на t-* из proposal: display 92, title 30, headline 24, body 20, label 16)
+    in property <length> font-display: 92px;
+    in property <length> font-h1: 30px;
+    in property <length> font-h2: 30px;
+    in property <length> font-h3: 24px;
     in property <length> font-lg: 24px;
-    in property <length> font-body: 22px;
-    in property <length> font-sm: 20px;
-    in property <length> font-md: 18px;
+    in property <length> font-body: 20px;
+    in property <length> font-sm: 18px;
+    in property <length> font-md: 16px;
     in property <length> font-xs: 16px;
 }
 
@@ -307,7 +315,7 @@ component AppButton inherits Rectangle {
         : kind == 2 ? Theme.success-dark
         : kind == 3 ? Theme.danger-pressed
         : Theme.pressed;
-    border-radius: 12px;
+    border-radius: Theme.r-button;
     background: !enabled ? Theme.border-soft : ta.pressed ? hit : base;
     Text {
         text: root.label;
@@ -335,8 +343,8 @@ component MenuPage inherits Rectangle {
         y: 12px + i * 82px;
         width: parent.width - 16px;
         height: 74px;
-        border-radius: 12px;
-        border-width: 2px;
+        border-radius: Theme.r-button;
+        border-width: 1px;
         border-color: Theme.border;
         background: mp-ta.pressed ? Theme.pressed : Theme.surface;
         opacity: role == 1 || !r.admin ? 1.0 : 0.45;
@@ -360,13 +368,13 @@ component MenuPage inherits Rectangle {
 }
 
 export component MainWindow inherits Window {
+    default-font-family: Theme.family;
     title: "OpenScale";
     in property <length> screen-w: 1024px;
     in property <length> screen-h: 768px;
     width: screen-w;
     height: screen-h;
     background: Theme.bg;
-    default-font-family: "DejaVu Sans";
     in property <string> weight-text: "0.000";
     in property <int> weight-state: 0;
     in property <bool> scales-ok: false;
@@ -624,8 +632,8 @@ export component MainWindow inherits Window {
             y: 0;
             width: 200px;
             height: 56px;
-            border-radius: 16px;
-            border-width: 2px;
+            border-radius: Theme.r-card;
+            border-width: 1px;
             border-color: Theme.border;
             background: pager-back-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
@@ -643,8 +651,8 @@ export component MainWindow inherits Window {
             y: 0;
             width: 200px;
             height: 56px;
-            border-radius: 16px;
-            border-width: 2px;
+            border-radius: Theme.r-card;
+            border-width: 1px;
             border-color: Theme.border;
             background: pager-more-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
@@ -671,7 +679,7 @@ export component MainWindow inherits Window {
                 y: 8px;
                 width: 110px;
                 height: 40px;
-                border-radius: 12px;
+                border-radius: Theme.r-button;
                 background: d.name == root.screen-title ? Theme.pressed-deep
                          : hd-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -695,7 +703,7 @@ export component MainWindow inherits Window {
                 y: 8px;
                 width: 62px;
                 height: 40px;
-                border-radius: 12px;
+                border-radius: Theme.r-button;
                 background: dept-prev-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     text: "НАЗАД";
@@ -713,7 +721,7 @@ export component MainWindow inherits Window {
                 y: 8px;
                 width: 62px;
                 height: 40px;
-                border-radius: 12px;
+                border-radius: Theme.r-button;
                 background: dept-next-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
                     text: "ДАЛЕЕ";
@@ -731,7 +739,7 @@ export component MainWindow inherits Window {
             y: 8px;
             width: 110px;
             height: 40px;
-            border-radius: 12px;
+            border-radius: Theme.r-button;
             background: cat-back-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 width: parent.width;
@@ -751,8 +759,8 @@ export component MainWindow inherits Window {
         Rectangle {
             x: root.width - 308px; y: 8px;
             width: 300px; height: 40px;
-            border-radius: 12px;
-            border-width: 2px;
+            border-radius: Theme.r-button;
+            border-width: 1px;
             border-color: Theme.border;
             background: search2-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
@@ -773,7 +781,7 @@ export component MainWindow inherits Window {
             y: 56px;
             width: 108px;
             height: 178px;
-            border-radius: 12px;
+            border-radius: Theme.r-button;
             background: prev2-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 text: "← НАЗАД";
@@ -802,8 +810,8 @@ export component MainWindow inherits Window {
             y: 56px + Math.floor((root.items.length + root.items-cell-offset) / root.items-cols) * 182px;
             width: root.items-col-w;
             height: 178px;
-            border-radius: 12px;
-            border-width: 2px;
+            border-radius: Theme.r-button;
+            border-width: 1px;
             border-color: Theme.border;
             background: next2-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
@@ -824,8 +832,8 @@ export component MainWindow inherits Window {
         y: 160px + root.tile-h + 16px;
         width: 400px;
         height: 56px;
-        border-radius: 16px;
-        border-width: 2px;
+        border-radius: Theme.r-card;
+        border-width: 1px;
         border-color: Theme.border;
         background: search-ta.pressed ? Theme.pressed : Theme.surface;
         Text {
@@ -848,7 +856,7 @@ export component MainWindow inherits Window {
         Rectangle {
             x: 8px; y: 8px;
             width: 180px; height: 56px;
-            border-radius: 16px;
+            border-radius: Theme.r-card;
             background: search-back-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
                 text: "← Назад";
@@ -863,8 +871,8 @@ export component MainWindow inherits Window {
         Rectangle {
             x: 204px; y: 8px;
             width: 620px; height: 56px;
-            border-radius: 16px;
-            border-width: 2px;
+            border-radius: Theme.r-card;
+            border-width: 1px;
             border-color: Theme.border;
             background: Theme.surface;
             Text {
@@ -880,8 +888,8 @@ export component MainWindow inherits Window {
         Rectangle {
             x: 840px; y: 8px;
             width: 176px; height: 56px;
-            border-radius: 16px;
-            border-width: 2px;
+            border-radius: Theme.r-card;
+            border-width: 1px;
             border-color: Theme.border;
             background: search-clear-ta.pressed ? Theme.pressed : Theme.surface;
             Text {
@@ -899,7 +907,7 @@ export component MainWindow inherits Window {
             y: 72px + i * 64px;
             width: 1008px;
             height: 56px;
-            border-radius: 12px;
+            border-radius: Theme.r-button;
             background: res-ta.pressed ? Theme.pressed : Theme.surface;
             if p.hl-match == "" : Text {
                 x: 16px;
@@ -1033,8 +1041,8 @@ export component MainWindow inherits Window {
         Rectangle {
             x: 152px; y: 150px;
             width: 720px; height: 468px;
-            border-radius: 24px;
-            border-width: 2px;
+            border-radius: Theme.r-card;
+            border-width: 1px;
             border-color: Theme.border;
             background: Theme.surface;
             popup-panel-ta := TouchArea { }
@@ -1043,7 +1051,7 @@ export component MainWindow inherits Window {
                 y: 24px;
                 width: 280px;
                 height: 280px;
-                border-radius: 16px;
+                border-radius: Theme.r-card;
                 clip: true;
                 background: Theme.chip;
                 if root.popup-plu.has-img : Image {
@@ -1121,8 +1129,8 @@ export component MainWindow inherits Window {
             Rectangle {
                 x: 24px; y: 392px;
                 width: 200px; height: 56px;
-                border-radius: 16px;
-                border-width: 2px;
+                border-radius: Theme.r-card;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: popup-cancel-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -1138,7 +1146,7 @@ export component MainWindow inherits Window {
             AppButton {
                 x: 496px; y: 392px;
                 width: 200px; height: 56px;
-                border-radius: 16px;
+                border-radius: Theme.r-card;
                 kind: 2;
                 label: "ПЕЧАТЬ";
                 font-size: Theme.font-body;
@@ -1159,7 +1167,7 @@ export component MainWindow inherits Window {
             y: (root.height - 330px) / 2;
             width: 640px;
             height: 330px;
-            border-radius: 18px;
+            border-radius: Theme.r-panel;
             background: Theme.surface;
             Text {
                 x: 32px;
@@ -1193,8 +1201,8 @@ export component MainWindow inherits Window {
             x: 8px; y: 8px;
             width: parent.width - 16px;
             height: 64px;
-            border-radius: 16px;
-            border-width: 2px;
+            border-radius: Theme.r-card;
+            border-width: 1px;
             border-color: Theme.border;
             background: Theme.surface;
             Text {
@@ -1213,7 +1221,7 @@ export component MainWindow inherits Window {
                 y: 8px;
                 width: 160px;
                 height: 48px;
-                border-radius: 12px;
+                border-radius: Theme.r-button;
                 background: admin-back-ta.pressed ? Theme.pressed : Theme.chip;
                 Text {
                     text: "НАЗАД";
@@ -1230,7 +1238,7 @@ export component MainWindow inherits Window {
                 y: 8px;
                 width: 160px;
                 height: 48px;
-                border-radius: 12px;
+                border-radius: Theme.r-button;
                 background: admin-done-ta.pressed ? Theme.pressed : Theme.chip;
                 Text {
                     text: root.screen == 4 ? "ГОТОВО" : "ВЫХОД";
@@ -1262,8 +1270,8 @@ export component MainWindow inherits Window {
                 y: 44px;
                 width: 500px;
                 height: 64px;
-                border-radius: 14px;
-                border-width: 2px;
+                border-radius: Theme.r-card;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: Theme.surface;
                 Text {
@@ -1291,9 +1299,9 @@ export component MainWindow inherits Window {
                 y: 152px + floor(i / 3) * 100px;
                 width: 160px;
                 height: 92px;
-                border-radius: 14px;
+                border-radius: Theme.r-card;
                 background: kb2-ta.pressed ? Theme.pressed-deep : Theme.surface;
-                border-width: 2px;
+                border-width: 1px;
                 border-color: Theme.border;
                 Text {
                     text: k;
@@ -1314,7 +1322,7 @@ export component MainWindow inherits Window {
                 y: 608px;
                 width: 500px;
                 height: 64px;
-                border-radius: 14px;
+                border-radius: Theme.r-card;
                 background: root.pin-mask == ""
                     ? Theme.border-soft
                     : (pin-save-ta.pressed ? Theme.success-dark : Theme.success);
@@ -1359,8 +1367,8 @@ export component MainWindow inherits Window {
                 y: 6px + i * 48px;
                 width: 300px;
                 height: 42px;
-                border-radius: 10px;
-                border-width: 2px;
+                border-radius: Theme.r-inner;
+                border-width: 1px;
                 border-color: row.state == 2 ? Theme.success
                     : (row.state == 1 && root.setup-mode == 0 ? Theme.warning
                     : (row.state == 1 ? Theme.success : Theme.border));
@@ -1394,8 +1402,8 @@ export component MainWindow inherits Window {
                 y: 6px;
                 width: parent.width - 328px;
                 height: parent.height - 170px;
-                border-radius: 14px;
-                border-width: 2px;
+                border-radius: Theme.r-card;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: Theme.surface;
                 Text {
@@ -1415,7 +1423,7 @@ export component MainWindow inherits Window {
                 y: parent.height - 156px;
                 width: 150px;
                 height: 68px;
-                border-radius: 12px;
+                border-radius: Theme.r-button;
                 background: setup-back-ta.pressed ? Theme.pressed : Theme.chip;
                 Text {
                     text: root.setup-back-label;
@@ -1470,8 +1478,8 @@ export component MainWindow inherits Window {
                 y: 12px;
                 width: 500px;
                 height: 72px;
-                border-radius: 14px;
-                border-width: 2px;
+                border-radius: Theme.r-card;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: Theme.surface;
                 Text {
@@ -1509,9 +1517,9 @@ export component MainWindow inherits Window {
                 y: 140px + floor(i / 3) * 116px;
                 width: 160px;
                 height: 106px;
-                border-radius: 14px;
+                border-radius: Theme.r-card;
                 background: kb-ta.pressed ? Theme.pressed-deep : Theme.surface;
-                border-width: 2px;
+                border-width: 1px;
                 border-color: Theme.border;
                 Text {
                     text: k;
@@ -1571,8 +1579,8 @@ export component MainWindow inherits Window {
                     y: 12px + i * 82px;
                     width: parent.width - 16px;
                     height: 74px;
-                    border-radius: 12px;
-                    border-width: 2px;
+                    border-radius: Theme.r-button;
+                    border-width: 1px;
                     border-color: Theme.border;
                     background: menu-ta.pressed ? Theme.pressed : Theme.surface;
                     opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
@@ -1603,8 +1611,8 @@ export component MainWindow inherits Window {
                 x: 8px; y: 12px;
                 width: parent.width - 16px;
                 height: parent.height - 24px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: Theme.surface;
                 clip: true;
@@ -1633,8 +1641,8 @@ export component MainWindow inherits Window {
                 y: 12px;
                 width: parent.width - 16px;
                 height: 52px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: Theme.surface;
                 Rectangle {
@@ -1642,7 +1650,7 @@ export component MainWindow inherits Window {
                     y: 4px;
                     width: (parent.width - 16px) / 2;
                     height: parent.height - 8px;
-                    border-radius: 10px;
+                    border-radius: Theme.r-inner;
                     background: !root.net-dhcp ? Theme.accent : Theme.chip;
                     Text {
                         text: "РУЧНОЙ";
@@ -1657,7 +1665,7 @@ export component MainWindow inherits Window {
                     y: 4px;
                     width: (parent.width - 16px) / 2;
                     height: parent.height - 8px;
-                    border-radius: 10px;
+                    border-radius: Theme.r-inner;
                     background: root.net-dhcp ? Theme.accent : Theme.chip;
                     Text {
                         text: "DHCP";
@@ -1673,8 +1681,8 @@ export component MainWindow inherits Window {
                 y: 72px + i * 58px;
                 width: parent.width - 16px;
                 height: 52px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: root.net-focus == i ? 2px : 1px;
                 border-color: !root.net-dhcp && root.net-focus == i ? Theme.accent : Theme.border;
                 background: Theme.surface;
                 opacity: root.net-dhcp ? 0.55 : 1.0;
@@ -1710,9 +1718,9 @@ export component MainWindow inherits Window {
                 y: 310px + Math.floor(j / 3) * 76px;
                 width: (parent.width - 32px) / 3 - 12px;
                 height: 70px;
-                border-radius: 12px;
+                border-radius: Theme.r-button;
                 background: net-key-ta.pressed ? Theme.pressed : Theme.surface;
-                border-width: 2px;
+                border-width: 1px;
                 border-color: Theme.border;
                 opacity: root.net-dhcp ? 0.45 : 1.0;
                 Text { text: k; font-size: Theme.font-h3; font-weight: 700; color: Theme.ink; }
@@ -1723,7 +1731,7 @@ export component MainWindow inherits Window {
                 y: 614px;
                 width: 160px;
                 height: 50px;
-                border-radius: 12px;
+                border-radius: Theme.r-button;
                 background: net-clear-ta.pressed ? Theme.pressed : Theme.chip;
                 Text { text: "C"; font-size: Theme.font-h3; font-weight: 700; color: Theme.ink; }
                 net-clear-ta := TouchArea { clicked => { root.net-key("C"); } }
@@ -1733,7 +1741,7 @@ export component MainWindow inherits Window {
                 y: 614px;
                 width: parent.width - 196px;
                 height: 50px;
-                border-radius: 12px;
+                border-radius: Theme.r-button;
                 background: root.net-valid
                     ? (net-apply-ta.pressed ? Theme.accent-pressed : Theme.accent)
                     : (net-apply-ta.pressed ? Theme.accent-disabled : Theme.accent-disabled);
@@ -1756,7 +1764,7 @@ export component MainWindow inherits Window {
                     y: (parent.height - 260px) / 2;
                     width: 560px;
                     height: 260px;
-                    border-radius: 18px;
+                    border-radius: Theme.r-panel;
                     background: Theme.surface;
                     Text {
                         x: 32px;
@@ -1773,7 +1781,7 @@ export component MainWindow inherits Window {
                         y: parent.height - 88px;
                         width: 220px;
                         height: 60px;
-                        border-radius: 14px;
+                        border-radius: Theme.r-card;
                         background: net-popup-ta.pressed ? Theme.success-dark : Theme.success;
                         Text { text: "ОК"; font-size: Theme.font-h3; font-weight: 700; color: Theme.surface; }
                         net-popup-ta := TouchArea { clicked => { root.net-popup-close(); } }
@@ -1797,8 +1805,8 @@ export component MainWindow inherits Window {
                 y: 12px + i * 82px;
                 width: parent.width - 16px;
                 height: 74px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: menu-eq-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -1851,8 +1859,8 @@ if root.screen == 12 : MenuPage {
                 y: 12px + i * 82px;
                 width: parent.width - 16px;
                 height: 74px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: goods-ta.pressed ? Theme.pressed : Theme.surface;
                 opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
@@ -1970,8 +1978,8 @@ if root.screen == 14 : MenuPage {
                 y: 12px + i * 82px;
                 width: parent.width - 16px;
                 height: 74px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: imp-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -1999,8 +2007,8 @@ if root.screen == 14 : MenuPage {
                 x: 8px; y: 12px;
                 width: third;
                 height: 64px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: lbl-cal-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -2018,8 +2026,8 @@ if root.screen == 14 : MenuPage {
                 y: 12px;
                 width: third;
                 height: 64px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: lbl-probe-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -2036,8 +2044,8 @@ if root.screen == 14 : MenuPage {
                 y: 12px;
                 width: third;
                 height: 64px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: lbl-imp-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -2083,8 +2091,8 @@ if root.screen == 14 : MenuPage {
                     y: 44px + i * 72px;
                     width: parent.width - 16px;
                     height: 62px;
-                    border-radius: 12px;
-                    border-width: 2px;
+                    border-radius: Theme.r-button;
+                    border-width: 1px;
                     border-color: Theme.border;
                     background: lbl-f-ta.pressed ? Theme.pressed : Theme.surface;
                     Text {
@@ -2116,8 +2124,8 @@ if root.screen == 14 : MenuPage {
                     y: (root.labels-files.length > 0 ? 44px + root.labels-files.length * 72px + 46px : 44px) + i * 72px;
                     width: parent.width - 16px;
                     height: 62px;
-                    border-radius: 12px;
-                    border-width: 2px;
+                    border-radius: Theme.r-button;
+                    border-width: 1px;
                     border-color: Theme.border;
                     background: lbl-r-ta.pressed ? Theme.success-soft : Theme.surface;
                     Text {
@@ -2137,7 +2145,7 @@ if root.screen == 14 : MenuPage {
                         y: 9px;
                         width: 44px;
                         height: 44px;
-                        border-radius: 10px;
+                        border-radius: Theme.r-inner;
                         background: lbl-del-ta.pressed ? Theme.danger-pressed : Theme.danger-soft;
                         Text { text: "✕"; font-size: Theme.font-body; font-weight: 700; color: Theme.danger-ink; }
                         lbl-del-ta := TouchArea { clicked => { root.labels-delete-tap(i); } }
@@ -2163,8 +2171,8 @@ if root.screen == 14 : MenuPage {
                 x: 8px; y: 8px;
                 width: 200px;
                 height: 52px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: al-r-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -2203,8 +2211,8 @@ if root.screen == 14 : MenuPage {
                 x: 8px; y: 8px;
                 width: 200px;
                 height: 52px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: st-r-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -2227,8 +2235,8 @@ if root.screen == 14 : MenuPage {
                     spacing: 6px;
                     for row in root.status-rows : Rectangle {
                         height: 44px;
-                        border-radius: 10px;
-                        border-width: 2px;
+                        border-radius: Theme.r-inner;
+                        border-width: 1px;
                         border-color: Theme.border;
                         background: Theme.surface;
                         Text {
@@ -2259,8 +2267,8 @@ if root.screen == 14 : MenuPage {
                 y: 12px + i * 82px;
                 width: parent.width - 16px;
                 height: 74px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: cust-ta.pressed ? Theme.pressed : Theme.surface;
                 opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
@@ -2354,8 +2362,8 @@ if root.screen == 27 : MenuPage {
                 x: 8px; y: 8px;
                 width: (parent.width - 24px) / 2;
                 height: 56px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: rep-p-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -2376,8 +2384,8 @@ if root.screen == 27 : MenuPage {
                 y: 8px;
                 width: (parent.width - 24px) / 2;
                 height: 56px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: rep-k-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -2414,8 +2422,8 @@ if root.screen == 27 : MenuPage {
                 x: 8px; y: 8px;
                 width: (parent.width - 32px) / 3;
                 height: 56px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: prn-r-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -2436,8 +2444,8 @@ if root.screen == 27 : MenuPage {
                 y: 8px;
                 width: (parent.width - 32px) / 3;
                 height: 56px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: prn-c-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -2458,8 +2466,8 @@ if root.screen == 27 : MenuPage {
                 y: 8px;
                 width: (parent.width - 32px) / 3;
                 height: 56px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: prn-x-ta.pressed ? Theme.pressed : Theme.surface;
                 Text {
@@ -2501,8 +2509,8 @@ if root.screen == 27 : MenuPage {
                 y: 12px + i * 72px;
                 width: parent.width - 16px;
                 height: 64px;
-                border-radius: 12px;
-                border-width: 2px;
+                border-radius: Theme.r-button;
+                border-width: 1px;
                 border-color: Theme.border;
                 background: Theme.surface;
                 Text {
@@ -2521,15 +2529,15 @@ if root.screen == 27 : MenuPage {
                     y: 8px;
                     width: 176px;
                     height: 48px;
-                    border-radius: 10px;
+                    border-radius: Theme.r-inner;
                     background: admin-col-ta.pressed ? Theme.pressed : Theme.chip;
                     Rectangle {
                         x: 10px;
                         width: 28px;
                         height: 28px;
                         y: (parent.height - 28px) / 2;
-                        border-radius: 14px;
-                        border-width: 2px;
+                        border-radius: Theme.r-card;
+                        border-width: 1px;
                         border-color: Theme.border;
                         background: r.color;
                     }
@@ -2551,7 +2559,7 @@ if root.screen == 27 : MenuPage {
                     y: 8px;
                     width: 64px;
                     height: 48px;
-                    border-radius: 10px;
+                    border-radius: Theme.r-inner;
                     background: admin-up-ta.pressed ? Theme.pressed : Theme.chip;
                     Text { text: "↑"; font-size: Theme.font-h3; font-weight: 700; color: Theme.ink-soft; }
                     admin-up-ta := TouchArea { clicked => { root.admin-up(r.name); } }
@@ -2561,7 +2569,7 @@ if root.screen == 27 : MenuPage {
                     y: 8px;
                     width: 64px;
                     height: 48px;
-                    border-radius: 10px;
+                    border-radius: Theme.r-inner;
                     background: admin-down-ta.pressed ? Theme.pressed : Theme.chip;
                     Text { text: "↓"; font-size: Theme.font-h3; font-weight: 700; color: Theme.ink-soft; }
                     admin-down-ta := TouchArea { clicked => { root.admin-down(r.name); } }
@@ -2571,7 +2579,7 @@ if root.screen == 27 : MenuPage {
                     y: 8px;
                     width: 64px;
                     height: 48px;
-                    border-radius: 10px;
+                    border-radius: Theme.r-inner;
                     background: admin-del-ta.pressed ? Theme.danger-pressed : Theme.danger-soft;
                     Text { text: "✕"; font-size: Theme.font-h3; font-weight: 700; color: Theme.danger-ink; }
                     admin-del-ta := TouchArea { clicked => { root.admin-del(r.name); } }
@@ -2595,7 +2603,7 @@ if root.screen == 27 : MenuPage {
                     y: (parent.height - 320px) / 2;
                     width: 640px;
                     height: 320px;
-                    border-radius: 16px;
+                    border-radius: Theme.r-card;
                     background: Theme.surface;
                     Text {
                         x: 24px; y: 24px;
@@ -2614,7 +2622,7 @@ if root.screen == 27 : MenuPage {
                         y: parent.height - 80px;
                         width: 280px;
                         height: 56px;
-                        border-radius: 12px;
+                        border-radius: Theme.r-button;
                         background: imp-no-ta.pressed ? Theme.pressed : Theme.chip;
                         Text {
                             text: "ОТМЕНА";
@@ -2633,7 +2641,7 @@ if root.screen == 27 : MenuPage {
                         y: parent.height - 80px;
                         width: 280px;
                         height: 56px;
-                        border-radius: 12px;
+                        border-radius: Theme.r-button;
                         background: imp-yes-ta.pressed ? Theme.success-dark : Theme.success;
                         Text {
                             text: imp-mode
@@ -2664,7 +2672,7 @@ if root.screen == 27 : MenuPage {
                     width: root.labels-preview-scale * 58px;
                     height: root.labels-preview-scale * root.labels-preview-h * 1px;
                     background: Theme.surface;
-                    border-width: 2px;
+                    border-width: 1px;
                     border-color: Theme.ink;
                     for r in root.labels-preview-rows : Rectangle {
                         x: r.x * root.labels-preview-scale * 1px;
@@ -2752,7 +2760,7 @@ if root.screen == 27 : MenuPage {
                     y: parent.height - 96px;
                     width: 280px;
                     height: 64px;
-                    border-radius: 12px;
+                    border-radius: Theme.r-button;
                     background: lbl-imp-yes-ta.pressed ? Theme.success-dark : Theme.success;
                     Text {
                         text: "ИМПОРТИРОВАТЬ";
@@ -2767,7 +2775,7 @@ if root.screen == 27 : MenuPage {
                     y: parent.height - 96px;
                     width: 280px;
                     height: 64px;
-                    border-radius: 12px;
+                    border-radius: Theme.r-button;
                     background: lbl-pv-ta.pressed ? Theme.success-dark : Theme.success;
                     Text {
                         text: root.labels-preview-importable ? "ОТМЕНА" : ("ЗАКРЫТЬ · " + root.labels-preview-name);
