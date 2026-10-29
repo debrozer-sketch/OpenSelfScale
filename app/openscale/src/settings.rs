@@ -391,8 +391,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 return;
             }
             if stage == 7 {
+                let uid = if k.role == 1 { 1 } else { 2 };
                 let ok = match datastore::open(&cfg.db_path) {
-                    Ok(conn) => datastore::auth::pin_is(&conn, 1, &pin).unwrap_or(false),
+                    Ok(conn) => datastore::auth::pin_is(&conn, uid, &pin).unwrap_or(false),
                     Err(e) => {
                         log::error!("смена пароля: база: {e}");
                         return;
@@ -423,11 +424,16 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 return;
             }
             let old = std::mem::take(&mut k.pin_pending);
+            let uid = if k.role == 1 { 1 } else { 2 };
             let res = match datastore::open(&cfg.db_path) {
                 Ok(conn) => {
-                    let r = datastore::auth::change_pin(&conn, 1, &old, &pin);
+                    let r = datastore::auth::change_pin(&conn, uid, &old, &pin);
                     if matches!(&r, Ok(Ok(()))) {
-                        log_action(&cfg.db_path, "PIN изменён", "администратор".into());
+                        log_action(
+                            &cfg.db_path,
+                            "PIN изменён",
+                            if uid == 1 { "администратор" } else { "кассир" }.into(),
+                        );
                     }
                     r
                 }
