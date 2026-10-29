@@ -3,7 +3,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use crate::context::AppContext;
 use crate::print;
@@ -15,7 +14,7 @@ pub fn start(
     sync_rx: Receiver<String>,
 ) -> slint::Timer {
     let (print_tx, print_rx) = std::sync::mpsc::channel::<(u64, Result<u32, String>)>();
-    let lock_db: Mutex<Option<rusqlite::Connection>> = Mutex::new(None);
+    let lock_db: RefCell<Option<rusqlite::Connection>> = RefCell::new(None);
     type TickCache = (String, i32, bool, bool, i32, bool, bool);
     let tick_cache: Rc<RefCell<TickCache>> =
         Rc::new(RefCell::new((String::new(), -1, false, false, -1, false, false)));
@@ -286,12 +285,12 @@ pub fn start(
                     }
                     if k.admin_stage == 20 {
                         if ui.get_setup_mode() == 0 {
-                            let (ticks, goods, layout_mask) = {
+                            let layout_mask = {
                                 let mut cc = checklist_cache.borrow_mut();
                                 cc.1 += 1;
                                 if cc.0 < 0 || cc.1 % 100 == 0 {
                                     let read = {
-                                        let mut db = lock_db.lock().expect("lock_db");
+                                        let mut db = lock_db.borrow_mut();
                                         if db.is_none() {
                                             *db = datastore::open(&cfg.db_path).ok();
                                         }
@@ -313,10 +312,8 @@ pub fn start(
                                             | if layout { 2 } else { 0 };
                                     }
                                 }
-                                (cc.1, cc.2, cc.0)
+                                cc.0
                             };
-                            let _ = ticks;
-                            let _ = goods;
                             let mask = layout_mask
                                 | if !ph.fault { 4 } else { 0 }
                                 | if snap.port_up { 8 } else { 0 };
@@ -332,7 +329,7 @@ pub fn start(
                             }
                         } else {
                             let st = {
-                                let mut db = lock_db.lock().expect("lock_db");
+                                let mut db = lock_db.borrow_mut();
                                 if db.is_none() {
                                     *db = datastore::open(&cfg.db_path).ok();
                                 }
@@ -358,7 +355,7 @@ pub fn start(
                     }
                     if k.admin_stage == 1 {
                         let left = {
-                            let mut db = lock_db.lock().expect("lock_db");
+                            let mut db = lock_db.borrow_mut();
                             if db.is_none() {
                                 *db = datastore::open(&cfg.db_path).ok();
                             }

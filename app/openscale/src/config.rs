@@ -9,7 +9,6 @@ pub struct UiProfile {
     pub screen_height: u32,
     pub fullscreen: bool,
     pub img_dir: PathBuf,
-    pub max_cols: u32,
 }
 impl Default for UiProfile {
     fn default() -> Self {
@@ -18,7 +17,6 @@ impl Default for UiProfile {
             screen_height: 768,
             fullscreen: false,
             img_dir: PathBuf::from("/etc/openscale/img"),
-            max_cols: 5,
         }
     }
 }
@@ -182,7 +180,7 @@ const KNOWN_SECTIONS: &[(&str, &[&str])] = &[
     ("printer", &["kind", "port", "baud", "enabled", "debug_dump"]),
     (
         "ui",
-        &["screen_width", "screen_height", "fullscreen", "img_dir", "max_cols"],
+        &["screen_width", "screen_height", "fullscreen", "img_dir"],
     ),
     (
         "kiosk",
@@ -250,10 +248,6 @@ impl Config {
             note("kiosk.cfg_export_dir=/var/ftp/scale/cfg → /var/lib/openscale/cfg-import".into());
             self.kiosk.cfg_export_dir = PathBuf::from("/var/lib/openscale/cfg-import");
         }
-        if self.ui.max_cols == 0 {
-            note("ui.max_cols=0 → 1".into());
-            self.ui.max_cols = 1;
-        }
         if self.ui.screen_width < 320 || self.ui.screen_height < 240 {
             note(format!(
                 "ui.screen_width/height={}x{} слишком малы → 1024x768",
@@ -265,7 +259,7 @@ impl Config {
     }
     pub fn summary(&self) -> String {
         format!(
-            "scales={}({})@{} printer={}({})@{} ui={}x{}{} cols={} db={} log={}",
+            "scales={}({})@{} printer={}({})@{} ui={}x{}{} db={} log={}",
             self.scales.kind,
             self.scales.port,
             self.scales.baud,
@@ -275,7 +269,6 @@ impl Config {
             self.ui.screen_width,
             self.ui.screen_height,
             if self.ui.fullscreen { " fullscreen" } else { "" },
-            self.ui.max_cols,
             self.db_path.display(),
             self.log_file.display(),
         )

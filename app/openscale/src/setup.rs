@@ -60,9 +60,6 @@ impl Checklist {
         }
     }
 }
-pub fn evaluate(c: Checklist) -> u32 {
-    c.goods as u32 | ((c.layout as u32) << 1) | ((c.printer_ok as u32) << 2) | ((c.scales_ok as u32) << 3)
-}
 pub fn all_green(mask: u32) -> bool {
     mask == 0b1111
 }
@@ -99,24 +96,9 @@ mod tests {
         assert_eq!(advance(3, Action::SkipCashier), 3);
     }
     #[test]
-    fn evaluate_bit_layout() {
-        assert_eq!(evaluate(Checklist::default()), 0);
-        assert_eq!(evaluate(Checklist { goods: true, ..Default::default() }), 0b0001);
-        assert_eq!(evaluate(Checklist { layout: true, ..Default::default() }), 0b0010);
-        assert_eq!(evaluate(Checklist { printer_ok: true, ..Default::default() }), 0b0100);
-        assert_eq!(evaluate(Checklist { scales_ok: true, ..Default::default() }), 0b1000);
-        assert_eq!(
-            evaluate(Checklist { goods: true, layout: true, printer_ok: true, scales_ok: true }),
-            0b1111
-        );
-    }
-    #[test]
     fn all_green_only_on_full_mask() {
         for mask in 0..=0b1111u32 {
             assert_eq!(all_green(mask), mask == 0b1111, "mask {mask:04b}");
-        }
-        for mask in 0..=0b1111u32 {
-            assert_eq!(evaluate(Checklist::from_mask(mask)), mask);
         }
     }
     #[test]

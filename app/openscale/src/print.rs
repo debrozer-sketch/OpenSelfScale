@@ -420,13 +420,18 @@ pub fn now_stamp() -> (String, String) {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
+    stamp_for(secs)
+}
+/// Локальная дата и время для произвольного unix-ts (Т15-паттерн: localtime на unix,
+/// UTC-фоллбек). Единая календарная математика для этикеток, отчётов и журнала.
+pub fn stamp_for(ts: i64) -> (String, String) {
     #[cfg(unix)]
     {
         unsafe {
             let mut tm: libc::tm = std::mem::zeroed();
-            let t: libc::time_t = secs as libc::time_t;
+            let t: libc::time_t = ts as libc::time_t;
             if libc::localtime_r(&t, &mut tm).is_null() {
-                return utc_stamp(secs);
+                return utc_stamp(ts);
             }
             (
                 format!("{:02}.{:02}.{:02}", tm.tm_mday, tm.tm_mon + 1, (tm.tm_year + 1900) % 100),
@@ -436,7 +441,7 @@ pub fn now_stamp() -> (String, String) {
     }
     #[cfg(not(unix))]
     {
-        utc_stamp(secs)
+        utc_stamp(ts)
     }
 }
 fn utc_stamp(secs: i64) -> (String, String) {

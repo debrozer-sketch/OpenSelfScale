@@ -9,8 +9,6 @@ pub const CAN: u8 = 0x18;
 pub enum EscPosError {
     #[error("port I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("CP866 encoding failed for U+{0:04X}")]
-    Encoding(u32),
     #[error("invalid EAN-13 payload: {0}")]
     InvalidBarcode(String),
     #[error("invalid raster payload: длина данных не кратна ширине в байтах")]
@@ -169,14 +167,6 @@ impl LabelJob {
         self.buf
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PrinterStatus {
-    pub drawer_open: bool,
-    pub printer_offline: bool,
-    pub paper_end: bool,
-    pub paper_near_end: bool,
-    pub raw_byte: u8,
-}
 pub fn build_status_query(level: u8) -> [u8; 3] {
     [0x10, 0x04, level]
 }
@@ -221,45 +211,6 @@ pub fn decode_l4(byte: u8) -> String {
 }
 pub fn build_init() -> [u8; 2] {
     [ESC, b'@']
-}
-pub fn parse_status(level: u8, byte: u8) -> PrinterStatus {
-    match level {
-        1 => PrinterStatus {
-            drawer_open: false,
-            printer_offline: byte & 0x08 != 0,
-            paper_end: false,
-            paper_near_end: false,
-            raw_byte: byte,
-        },
-        2 => PrinterStatus {
-            drawer_open: false,
-            printer_offline: byte & 0x40 != 0,
-            paper_end: false,
-            paper_near_end: false,
-            raw_byte: byte,
-        },
-        3 => PrinterStatus {
-            drawer_open: false,
-            printer_offline: false,
-            paper_end: false,
-            paper_near_end: false,
-            raw_byte: byte,
-        },
-        4 => PrinterStatus {
-            drawer_open: false,
-            printer_offline: byte & 0x04 == 0,
-            paper_end: false,
-            paper_near_end: false,
-            raw_byte: byte,
-        },
-        _ => PrinterStatus {
-            drawer_open: false,
-            printer_offline: false,
-            paper_end: false,
-            paper_near_end: false,
-            raw_byte: byte,
-        },
-    }
 }
 pub struct EscPosPrinter<P: Read + Write> {
     port: P,

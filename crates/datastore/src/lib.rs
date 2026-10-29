@@ -462,12 +462,6 @@ pub fn group_assign(conn: &Connection, group: &str, dept: &str) -> Result<(), St
     )?;
     Ok(())
 }
-pub fn dept_of(group: &str) -> Option<&'static str> {
-    SEED_GROUP_DEPT
-        .iter()
-        .find(|(g, _)| *g == group)
-        .map(|(_, d)| *d)
-}
 pub fn get_calibration(conn: &Connection, key: &str) -> Result<Option<i64>, StoreError> {
     let mut stmt = conn.prepare("SELECT value FROM calibration WHERE key = ?1")?;
     let mut rows = stmt.query([key])?;
@@ -537,10 +531,7 @@ pub fn print_log_prune(conn: &Connection, now_ts: i64) -> Result<usize, StoreErr
     )
     .map_err(StoreError::from)
 }
-pub fn print_log_count_all(conn: &Connection) -> Result<i64, StoreError> {
-    conn.query_row("SELECT COUNT(*) FROM print_log WHERE ok = 1", [], |r| r.get(0))
-        .map_err(StoreError::from)
-}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActionLogRow {
     pub ts: i64,
@@ -585,25 +576,7 @@ pub fn action_log_recent(
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
-pub fn print_log_recent(conn: &Connection, limit: usize) -> Result<Vec<PrintLogRow>, StoreError> {
-    let mut stmt = conn.prepare(
-        "SELECT ts, plu, name, weight_g, sum_kop, ok
-         FROM print_log ORDER BY id DESC LIMIT ?1",
-    )?;
-    let rows = stmt
-        .query_map([limit as i64], |r| {
-            Ok(PrintLogRow {
-                ts: r.get(0)?,
-                plu: r.get(1)?,
-                name: r.get(2)?,
-                weight_g: r.get(3)?,
-                sum_kop: r.get(4)?,
-                ok: r.get::<_, i64>(5)? != 0,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
-}
+
 pub fn print_log_filtered(
     conn: &Connection,
     since_ts: Option<i64>,
@@ -1247,30 +1220,6 @@ mod tests {
             get_setting(&conn, "label_layout_name").unwrap(),
             Some("58x30".to_string())
         );
-    }
-    #[test]
-    fn group_migration_derives_from_first_word() {
-        let conn = open(":memory:".as_ref()).unwrap();
-        import_plu(&conn, &parse_plu_xml(SAMPLE).unwrap()).unwrap();
-        let all = load_all(&conn).unwrap();
-        assert_eq!(all[1].group, "ВИНОГРАД");
-        let alpha = groups_alpha(&conn).unwrap();
-        assert_eq!(
-            alpha,
-            vec![("АВОКАДО".to_string(), 1), ("ВИНОГРАД".to_string(), 1)]
-        );
-    }
-    #[test]
-    fn dept_mapping_covers_known_groups() {
-        // Все текущие 48 групп отнесены к отделам; примеры соответствия.
-        assert_eq!(dept_of("БАНАНЫ"), Some("ФРУКТЫ"));
-        assert_eq!(dept_of("ФОРЕЛЬ"), Some("РЫБА"));
-        assert_eq!(dept_of("ЗЕЛЕНЬ"), Some("ЗЕЛЕНЬ"));
-        assert_eq!(dept_of("КАРАМЕЛЬ"), Some("КОНФЕТЫ"));
-        assert_eq!(dept_of("ГРИБЫ"), Some("ОВОЩИ"));
-        assert_eq!(dept_of("МИНДАЛЬ"), Some("ОРЕХИ"));
-        assert_eq!(dept_of("ФИСТАШКИ"), Some("ОРЕХИ"));
-        assert_eq!(dept_of("НЕТ-ТАКОЙ-ГРУППЫ"), None);
     }
     #[test]
     fn depts_seed_and_manage() {

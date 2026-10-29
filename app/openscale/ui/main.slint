@@ -2655,6 +2655,9 @@ export component MainWindow inherits Window {
                 property <bool> imp-mode: root.imp-popup-open;
                 property <bool> confirm: imp-mode ? root.imp-confirm : root.labels-confirm;
                 property <string> ptext: imp-mode ? root.imp-popup-text : root.labels-popup-text;
+                // Смысловой цвет: успех зелёным, ошибка красным (ревью 5: окна неразличимы).
+                property <bool> ok: imp-mode ? root.imp-popup-ok : root.labels-popup-ok;
+                property <color> tone: confirm ? Theme.ink : (ok ? Theme.success : Theme.danger);
                 x: 0; y: 0;
                 width: parent.width;
                 height: parent.height;
@@ -2672,7 +2675,7 @@ export component MainWindow inherits Window {
                         height: 200px;
                         text: ptext;
                         font-size: Theme.font-lg;
-                        color: Theme.ink;
+                        color: tone;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                         overflow: elide;
