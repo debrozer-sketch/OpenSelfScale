@@ -42,8 +42,48 @@ fn sha256_hex(data: &str) -> String {
     let d = h.finalize();
     d.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    let mut k = [0u8; 64];
+    if key.len() > 64 {
+        let mut h = Sha256::new();
+        h.update(key);
+        k[..32].copy_from_slice(&h.finalize());
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let ipad: Vec<u8> = k.iter().map(|b| b ^ 0x36).collect();
+    let opad: Vec<u8> = k.iter().map(|b| b ^ 0x5c).collect();
+    let mut inner = Sha256::new();
+    inner.update(&ipad);
+    inner.update(msg);
+    let inner = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(&opad);
+    outer.update(inner);
+    outer.finalize().into()
+}
+
+fn pbkdf2_hmac_sha256(password: &[u8], salt: &[u8], iters: u32) -> [u8; 32] {
+    // Один блок dklen=32 — достаточно для ключа PIN-хеша.
+    let mut salt_block = Vec::with_capacity(salt.len() + 4);
+    salt_block.extend_from_slice(salt);
+    salt_block.extend_from_slice(&1u32.to_be_bytes());
+    let mut u = hmac_sha256(password, &salt_block);
+    let mut out = u;
+    for _ in 1..iters {
+        u = hmac_sha256(password, &u);
+        for (o, x) in out.iter_mut().zip(u.iter()) {
+            *o ^= x;
+        }
+    }
+    out
+}
+
 const PIN_ROUNDS: u32 = 20_000;
+const PIN_PBKDF2_ITERS: u32 = 200_000;
 const PIN_TAG: &str = "k1$";
+const PIN_TAG_PBKDF2: &str = "k2$";
 fn stretch(salt: &str, pin: &str) -> String {
     let mut h = sha256_hex(&format!("{salt}:{pin}"));
     for _ in 1..PIN_ROUNDS {
@@ -51,11 +91,33 @@ fn stretch(salt: &str, pin: &str) -> String {
     }
     h
 }
+fn pbkdf2_stored(salt: &str, pin: &str, iters: u32) -> String {
+    let d = pbkdf2_hmac_sha256(pin.as_bytes(), salt.as_bytes(), iters);
+    format!("{PIN_TAG_PBKDF2}{iters}${}", d.iter().map(|b| format!("{b:02x}")).collect::<String>())
+}
+fn new_pin_hash(salt: &str, pin: &str) -> String {
+    // В тестах полные 200k итераций (debug-сборка) делают проверку блокировки
+    // недетерминированной по времени — используем сокращённое число.
+    let iters = if cfg!(test) { 1_000 } else { PIN_PBKDF2_ITERS };
+    pbkdf2_stored(salt, pin, iters)
+}
 fn expected_hash(salt: &str, pin: &str, stored: &str) -> String {
+    if let Some(rest) = stored.strip_prefix(PIN_TAG_PBKDF2) {
+        let iters: u32 = rest
+            .split('$')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(PIN_PBKDF2_ITERS);
+        let iters = iters.clamp(1, 1_000_000);
+        return pbkdf2_stored(salt, pin, iters);
+    }
     match stored.strip_prefix(PIN_TAG) {
         Some(_) => format!("{PIN_TAG}{}", stretch(salt, pin)),
         None => sha256_hex(&format!("{salt}:{pin}")),
     }
+}
+fn hash_needs_upgrade(stored: &str) -> bool {
+    !stored.starts_with(PIN_TAG_PBKDF2)
 }
 fn constant_time_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
@@ -166,7 +228,7 @@ pub fn create_user(
         return Ok(Err("неизвестная роль"));
     }
     let salt = random_salt();
-    let hash = format!("{PIN_TAG}{}", stretch(&salt, pin));
+    let hash = new_pin_hash(&salt, pin);
     conn.execute(
         "INSERT OR REPLACE INTO admin_user (id, role, pin_salt, pin_hash)
          VALUES (?1, ?2, ?3, ?4)",
@@ -215,9 +277,9 @@ pub fn verify(conn: &Connection, pin: &str) -> Result<Auth, rusqlite::Error> {
         if !(well_formed && constant_time_eq(&expected_hash(&salt, pin, &hash), &hash)) {
             continue;
         }
-        if !hash.starts_with(PIN_TAG) {
+        if hash_needs_upgrade(&hash) {
             let salt = random_salt();
-            let upgraded = format!("{PIN_TAG}{}", stretch(&salt, pin));
+            let upgraded = new_pin_hash(&salt, pin);
             conn.execute(
                 "UPDATE admin_user SET pin_salt = ?1, pin_hash = ?2 WHERE id = ?3",
                 rusqlite::params![salt, upgraded, id],
@@ -275,7 +337,7 @@ pub fn change_pin(
         return Ok(Err("новый пароль совпадает со старым"));
     }
     let salt = random_salt();
-    let hash = format!("{PIN_TAG}{}", stretch(&salt, new));
+    let hash = new_pin_hash(&salt, new);
     conn.execute(
         "UPDATE admin_user SET pin_salt = ?1, pin_hash = ?2 WHERE id = ?3",
         rusqlite::params![salt, hash, id],
@@ -411,6 +473,47 @@ mod tests {
         assert!(!pin_is(&conn, 1, "99999").unwrap());
     }
     #[test]
+    fn hmac_sha256_rfc4231_vector() {
+        let d = hmac_sha256(b"Jefe", b"what do ya want for nothing?");
+        let hex: String = d.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex,
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
+    #[test]
+    fn pbkdf2_known_vectors() {
+        let hex = |d: [u8; 32]| d.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        assert_eq!(
+            hex(pbkdf2_hmac_sha256(b"password", b"salt", 1)),
+            "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"
+        );
+        assert_eq!(
+            hex(pbkdf2_hmac_sha256(b"password", b"salt", 2)),
+            "ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43"
+        );
+    }
+    #[test]
+    fn k1_pin_upgrades_to_pbkdf2_on_login() {
+        let conn = db();
+        // Переходный формат k1$ (sha256-растяжка) должен обновиться до k2$.
+        let salt = "aabbccdd00112233";
+        let legacy = format!("{PIN_TAG}{}", stretch(salt, "12345"));
+        conn.execute(
+            "UPDATE admin_user SET pin_salt = ?1, pin_hash = ?2 WHERE id = 1",
+            rusqlite::params![salt, legacy],
+        )
+        .unwrap();
+        assert_eq!(verify(&conn, "12345").unwrap(), Auth::Granted(Role::Admin));
+        let (_, hash): (String, String) = conn
+            .query_row("SELECT pin_salt, pin_hash FROM admin_user WHERE id = 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert!(hash.starts_with(PIN_TAG_PBKDF2));
+        assert_eq!(verify(&conn, "12345").unwrap(), Auth::Granted(Role::Admin));
+    }
+    #[test]
     fn legacy_pin_hash_migrates_on_login() {
         let conn = db();
         let salt = "aabbccdd00112233";
@@ -426,7 +529,7 @@ mod tests {
                 Ok((r.get(0)?, r.get(1)?))
             })
             .unwrap();
-        assert!(hash.starts_with(PIN_TAG));
+        assert!(hash.starts_with(PIN_TAG_PBKDF2));
         assert_ne!(salt, "aabbccdd00112233");
         assert_eq!(verify(&conn, "12345").unwrap(), Auth::Granted(Role::Admin));
     }

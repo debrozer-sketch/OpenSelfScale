@@ -29,6 +29,12 @@ pub struct PluItem {
 pub fn open(path: &Path) -> Result<Connection, StoreError> {
     let conn = Connection::open(path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // БД содержит хеши PIN-ов; доступ — только владельцу (сервисный пользователь весов).
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
     let key = path.to_string_lossy().into_owned();
     let already = key != ":memory:"
         && migrated_paths()
