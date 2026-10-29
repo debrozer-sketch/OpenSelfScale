@@ -432,15 +432,13 @@ pub fn dept_reorder(conn: &Connection, names: &[String]) -> Result<(), StoreErro
             return Err(StoreError::UnknownDept(name.clone()));
         }
     }
-    let tx = conn.unchecked_transaction()?;
-    tx.execute("UPDATE depts SET ord = NULL", [])?;
+    conn.execute("UPDATE depts SET ord = NULL", [])?;
     for (i, name) in names.iter().enumerate() {
-        tx.execute(
+        conn.execute(
             "UPDATE depts SET ord = ?2 WHERE name = ?1",
             rusqlite::params![name, i as i64],
         )?;
     }
-    tx.commit()?;
     Ok(())
 }
 pub fn group_assign(conn: &Connection, group: &str, dept: &str) -> Result<(), StoreError> {

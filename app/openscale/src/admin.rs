@@ -86,7 +86,13 @@ pub fn admin_step(cfg: &config::Config, name: &str, delta: i64) {
     }
     let mut names = list;
     names.swap(i, j as usize);
-    if let Err(e) = datastore::dept_reorder(&conn, &names) {
+    let res = (|| -> Result<(), String> {
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        datastore::dept_reorder(&tx, &names).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    if let Err(e) = res {
         log::error!("порядок отделов: {e}");
     }
 }
