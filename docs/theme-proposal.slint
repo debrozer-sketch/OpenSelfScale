@@ -1,0 +1,103 @@
+// OpenScale · предложение темы v1 (проверено компиляцией Slint 1.9)
+export global Theme {
+    // нейтральные
+    out property <color> bg: #F4F4F2;
+    out property <color> surface: #FFFFFF;
+    out property <color> chip: #EEEEEA;
+    out property <color> pressed: #E2E3DF;
+    out property <color> ink: #16181D;
+    out property <color> ink-soft: #515866;
+    out property <color> ink-mute: #6B7280;
+    out property <color> disabled: #9AA1AB;
+    out property <color> line: #E3E4E0;
+    // действие
+    out property <color> accent: #1F5BE0;
+    out property <color> accent-pressed: #1748B8;
+    // статусы: основной / мягкий фон / текст на мягком
+    out property <color> ok: #17803D;
+    out property <color> ok-soft: #E8F5EC;
+    out property <color> ok-ink: #14532D;
+    out property <color> bad: #C62828;
+    out property <color> bad-soft: #FDECEA;
+    out property <color> bad-ink: #7A1C1C;
+    out property <color> warn: #9A5B00;
+    out property <color> warn-soft: #FFF3D6;
+    out property <color> warn-ink: #6B4400;
+    out property <color> scrim: #09090B80;
+    // радиусы (концентрические: внутренний = внешний минус отступ)
+    out property <length> r-panel: 20px;
+    out property <length> r-card: 14px;
+    out property <length> r-button: 12px;
+    out property <length> r-inner: 8px;
+    // шрифт и шкала
+    out property <string> family: "IBM Plex Sans";
+    out property <length> t-display: 92px;
+    out property <length> t-figure: 64px;
+    out property <length> t-title: 30px;
+    out property <length> t-headline: 24px;
+    out property <length> t-body: 20px;
+    out property <length> t-label: 16px;
+    // оттенок отдела из БД: любой hex даёт читаемую плитку
+    public pure function dept-tint(c: color) -> color { return c.mix(#FFFFFF, 0.86); }
+    public pure function dept-edge(c: color) -> color { return c; }
+}
+export global Motion {
+    // 0 = выключить все анимации (слабое железо), 1 = обычный режим
+    in property <int> scale: 1;
+    out property <duration> press: scale * 80ms;
+    out property <duration> page: scale * 220ms;
+    out property <duration> sheet: scale * 200ms;
+    out property <duration> fade: scale * 120ms;
+}
+component Pager inherits Rectangle {
+    in property <int> count: 3;
+    in-out property <int> page: 0;
+    callback page-changed(int);
+    property <length> drag: 0px;
+    property <bool> dragging: false;
+    clip: true;
+    Rectangle {
+        x: -root.page * root.width + root.drag;
+        width: root.width * root.count;
+        animate x { duration: root.dragging ? 0ms : Motion.page; easing: ease-out; }
+        @children
+    }
+    TouchArea {
+        property <length> x0;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) { x0 = self.mouse-x; root.dragging = true; }
+            else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                root.dragging = false;
+                if (root.drag < -root.width / 6 && root.page < root.count - 1) { root.page += 1; root.page-changed(root.page); }
+                else if (root.drag > root.width / 6 && root.page > 0) { root.page -= 1; root.page-changed(root.page); }
+                root.drag = 0px;
+            }
+        }
+        moved => { if (self.pressed) { root.drag = self.mouse-x - x0; } }
+    }
+}
+component Sheet inherits Rectangle {
+    in property <bool> open;
+    in property <length> travel: 600px;
+    y: open ? 0px : travel;
+    animate y { duration: Motion.sheet; easing: ease-out; }
+}
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback tapped();
+    height: 52px;
+    border-radius: 26px;
+    background: active ? Theme.ink : ta.pressed ? Theme.pressed : Theme.surface;
+    animate background { duration: Motion.press; }
+    Text { text: root.label; color: active ? #FFFFFF : Theme.ink; font-family: Theme.family; font-weight: 500; font-size: Theme.t-body; }
+    ta := TouchArea { clicked => { root.tapped(); } }
+}
+export component T inherits Window {
+    width: 1024px; height: 768px;
+    in-out property <bool> flag;
+    in property <color> dept: #E67E22;
+    Pager { Rectangle { background: Theme.dept-tint(root.dept); } }
+    Sheet { open: flag; }
+    Chip { label: "Фрукты"; active: flag; }
+}

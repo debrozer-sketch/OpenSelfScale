@@ -1,0 +1,10 @@
+--- a/crates/shtrih-m/src/lib.rs
++++ b/crates/shtrih-m/src/lib.rs
+@@ struct GarbageStream; (в mod tests)
+     struct GarbageStream;
++    #[cfg(unix)]
++    impl PortPoll for GarbageStream {
++        fn read_timeout(&mut self, buf: &mut [u8], _timeout: Duration) -> std::io::Result<usize> {
++            Read::read(self, buf)
++        }
++    }
