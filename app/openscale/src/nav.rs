@@ -33,7 +33,7 @@ pub const SCREENS: &[Screen] = &[
     Screen { stage: 31, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
     Screen { stage: 32, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
     Screen { stage: 33, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
-    Screen { stage: 34, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
+    Screen { stage: 34, slint: 5, title: "ДАТА И ВРЕМЯ", parent: EXIT, back: false },
     Screen { stage: 35, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
 ];
 
@@ -127,6 +127,8 @@ mod tests {
         assert_eq!(screen_title(3), "ВИТРИНА · КОМПОНОВКА");
         assert_eq!(screen_parent(3), 12);
         assert_eq!(screen_slint(30), 5);
+        assert_eq!(screen_title(30), "ВХОД ПЕРСОНАЛА");
+        assert_eq!(screen_title(34), "ДАТА И ВРЕМЯ");
         assert_eq!(screen_slint(99), FALLBACK_SLINT);
         assert_eq!(screen_title(99), FALLBACK_TITLE);
         assert_eq!(screen_parent(99), EXIT);

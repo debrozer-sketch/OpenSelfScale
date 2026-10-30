@@ -286,26 +286,25 @@ pub fn start(
                     if ui.get_admin_back_visible() != back {
                         ui.set_admin_back_visible(back);
                     }
-                    if (7..=9).contains(&k.admin_stage) {
-                        let prompt = match k.admin_stage {
-                            7 => "Введите старый пароль",
-                            8 => "Новый пароль (4–8 цифр)",
-                            _ => "Повторите новый пароль",
+                    // Экран ввода (slint 5): подсказка над полем и placeholder.
+                    {
+                        let (prompt, placeholder) = match k.admin_stage {
+                            1 => ("Введите пароль", "пароль"),
+                            7 => ("Введите старый пароль", "пароль"),
+                            8 => ("Новый пароль (4–8 цифр)", "пароль"),
+                            9 => ("Повторите новый пароль", "пароль"),
+                            30 => ("Новый PIN администратора — затем повтор", "пароль"),
+                            31 => ("Повторите PIN администратора", "пароль"),
+                            32 => ("Новый PIN кассира — затем повтор (можно пропустить)", "пароль"),
+                            33 => ("Повторите PIN кассира", "пароль"),
+                            34 => ("Дата и время: ДД.ММ.ГГГГ ЧЧ:ММ", "ДД.ММ.ГГГГ ЧЧ:ММ"),
+                            _ => ("", "пароль"),
                         };
                         if ui.get_pin_prompt() != prompt {
                             ui.set_pin_prompt(prompt.into());
                         }
-                    }
-                    if (30..=34).contains(&k.admin_stage) {
-                        let prompt = match k.admin_stage {
-                            30 => "Новый PIN администратора — затем повтор",
-                            31 => "Повторите PIN администратора",
-                            32 => "Новый PIN кассира — затем повтор (можно пропустить)",
-                            33 => "Повторите PIN кассира",
-                            _ => "Дата и время: ДД.ММ.ГГГГ ЧЧ:ММ",
-                        };
-                        if ui.get_pin_prompt() != prompt {
-                            ui.set_pin_prompt(prompt.into());
+                        if ui.get_pin_placeholder() != placeholder {
+                            ui.set_pin_placeholder(placeholder.into());
                         }
                     }
                     if k.admin_stage == 20 {

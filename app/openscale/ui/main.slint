@@ -594,6 +594,7 @@ export component MainWindow inherits Window {
     in property <[AdminRow]> admin-rows;
     in property <string> pin-mask;
     in property <string> pin-prompt: "Введите старый пароль";
+    in property <string> pin-placeholder: "пароль";
     in property <string> pin-error;
     in property <bool> pin-forced: false;
     in property <int> lock-left;
@@ -1767,17 +1768,28 @@ export component MainWindow inherits Window {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
+            Text {
+                x: 0; y: 0;
+                width: parent.width;
+                height: 36px;
+                text: root.pin-prompt;
+                font-size: Theme.font-h3;
+                font-weight: 700;
+                color: Theme.ink-soft;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
             Rectangle {
                 x: 262px;
-                y: 12px;
+                y: 40px;
                 width: 500px;
-                height: 72px;
+                height: 56px;
                 border-radius: Theme.r-card;
                 border-width: 1px;
                 border-color: Theme.border;
                 background: Theme.surface;
                 Text {
-                    text: root.pin-mask == "" ? "пароль" : root.pin-mask;
+                    text: root.pin-mask == "" ? root.pin-placeholder : root.pin-mask;
                     font-size: Theme.font-h2;
                     font-weight: 700;
                     color: root.pin-mask == "" ? Theme.ink-faint : Theme.ink;
