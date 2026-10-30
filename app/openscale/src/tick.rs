@@ -225,10 +225,26 @@ pub fn start(
                     *logo_hold.borrow_mut() = None;
                 }
                 let idle_timeout = Duration::from_secs(idle_secs.get().max(10));
+                // Мастер первичной настройки при простое возвращается на свой
+                // шаг по состоянию БД (введённый PIN сбрасывается — безопасно:
+                // PIN ещё не создан, повторный ввод ожидаем).
+                let back_to_setup = |k: &mut crate::session::Kiosk| {
+                    k.reset_state();
+                    k.setup_active = true;
+                    k.admin_open = true;
+                    k.admin_stage = 20;
+                    k.admin_idle = Some(Instant::now());
+                };
                 if k.phase < 2 && !k.admin_open {
                     if k.idle_since.is_none() {
                         k.idle_since = Some(Instant::now());
                     } else if k.idle_since.is_some_and(|t| t.elapsed() > idle_timeout) {
+                        if k.setup_active {
+                            back_to_setup(&mut k);
+                            drop(k);
+                            crate::settings::render_setup();
+                            return;
+                        }
                         k.reset_state();
                         go_root();
                     }
@@ -244,6 +260,12 @@ pub fn start(
                     }
                     if k.admin_idle.is_none_or(|t| t.elapsed() > ADMIN_IDLE_LIMIT) {
                         log::info!("меню администратора закрыто по таймеру бездействия (120 с)");
+                        if k.setup_active {
+                            back_to_setup(&mut k);
+                            drop(k);
+                            crate::settings::render_setup();
+                            return;
+                        }
                         k.reset_state();
                         go_root();
                     }

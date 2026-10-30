@@ -17,6 +17,7 @@ mod settings;
 mod setup;
 mod sync;
 mod tick;
+mod thumbs;
 mod tiles;
 mod watchdog;
 mod weight;
@@ -258,11 +259,12 @@ fn run_kiosk(cfg: config::Config) {
             cols: std::rc::Rc::new(std::cell::Cell::new(
                 cal("dept_cols")
                     .map(|v| v.clamp(1, max_dept_cols) as usize)
-                    .unwrap_or(2)
+                    .unwrap_or(5)
                     .clamp(1, max_dept_cols as usize)
                     .max(1),
             )),
             sort_alpha: std::rc::Rc::new(std::cell::Cell::new(cal("dept_sort_alpha").unwrap_or(1) != 0)),
+            item_sort_pop: std::rc::Rc::new(std::cell::Cell::new(cal("item_sort_pop").unwrap_or(0) != 0)),
             dept_cell: std::rc::Rc::new(std::cell::Cell::new(cal("dept_cell").unwrap_or(0) != 0)),
             rounding: std::rc::Rc::new(std::cell::Cell::new(cal("price_rounding").unwrap_or(0).clamp(0, 2))),
             min_weight_g: std::rc::Rc::new(std::cell::Cell::new(
@@ -365,6 +367,7 @@ fn run_kiosk(cfg: config::Config) {
     if ctx.depts_all.borrow().len() == 1 {
         (flow_handles.go_root)();
     }
+    thumbs::spawn_background(cfg.ui.img_dir.join("plu"));
     let sync_rx = sync::spawn_auto_sync(&cfg);
     print::spawn_daemon(&cfg);
     net::spawn_live_monitor();

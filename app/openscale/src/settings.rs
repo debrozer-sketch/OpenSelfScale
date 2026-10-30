@@ -46,6 +46,7 @@ fn refresh_setting_labels(
         ui.set_goods_backbtn(if trade.catalog_back.get() { "ВКЛ" } else { "ВЫКЛ" }.into());
         ui.set_catalog_back_btn(trade.catalog_back.get());
         ui.set_goods_itemscols(format!("{} столбцов", trade.item_cols.get()).into());
+        ui.set_goods_itemsort(if trade.item_sort_pop.get() { "популярные" } else { "по алфавиту" }.into());
         ui.set_trade_rounding(
             match trade.rounding.get() {
                 1 => "до 10 коп",
@@ -129,7 +130,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 k.status_from = 0;
                 return;
             }
-            let parent = crate::nav::screen_parent(k.admin_stage);
+            let parent = crate::nav::screen_parent_for(k.admin_stage, k.role);
             if parent != 0 {
                 match k.admin_stage {
                     7..=9 => {
@@ -242,6 +243,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     };
+    SETUP_RC.with(|c| {
+        *c.borrow_mut() = Some(std::rc::Rc::new(setup_render) as std::rc::Rc<dyn Fn()>)
+    });
+    let setup_render = SETUP_RC.with(|c| c.borrow().as_ref().map(|f| f.clone()).unwrap());
     ui.on_pin_try({
         let ui_handle = ui_handle.clone();
         let kiosk = kiosk.clone();
@@ -254,6 +259,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     ui.set_pin_error(msg.into());
                 }
             };
+            if k.pin_check_busy {
+                set_err(&ui_handle, "Проверяю предыдущий PIN…");
+                return;
+            }
             let pin = std::mem::take(&mut k.admin_pin_buf);
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_pin_mask("".into());
@@ -271,8 +280,69 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     set_err(&ui_handle, "Пароли не созданы — завершите мастер настройки");
                     return;
                 }
+                if !k.setup_active {
+                    // PBKDF2 занимает >1 с на J1900: проверяем в фоновом потоке,
+                    // чтобы не замирал интерфейс; результат — через event loop.
+                    k.pin_check_busy = true;
+                    let db_path = cfg.db_path.clone();
+                    let ui_handle2 = ui_handle.clone();
+                    drop(k);
+                    spawn_pin_task(move || {
+                        let t = std::time::Instant::now();
+                        let res =
+                            datastore::open(&db_path).map(|conn| datastore::auth::verify(&conn, &pin));
+                        log::info!("вход: проверка PBKDF2 заняла {:?}", t.elapsed());
+                        let _ = slint::invoke_from_event_loop(move || {
+                            KIOSK_RC.with(|c| {
+                                let Some(krc) = &*c.borrow() else { return };
+                                let mut k = krc.borrow_mut();
+                                k.pin_check_busy = false;
+                                match res {
+                                    Ok(Ok(datastore::auth::Auth::Granted(role))) => {
+                                        log::info!(
+                                            "вход: пароль принят, роль {}",
+                                            if role == datastore::auth::Role::Admin {
+                                                "admin"
+                                            } else {
+                                                "staff"
+                                            }
+                                        );
+                                        k.pin_forced = false;
+                                        k.admin_stage = 2;
+                                        k.pending = None;
+                                        k.role =
+                                            if role == datastore::auth::Role::Admin { 1 } else { 0 };
+                                        if let Some(ui) = ui_handle2.upgrade() {
+                                            ui.set_role(i32::from(k.role));
+                                            ui.set_pin_forced(false);
+                                            ui.set_popup_open(false);
+                                        }
+                                    }
+                                    Ok(Ok(datastore::auth::Auth::Denied { wait_secs })) => {
+                                        log::info!("вход: отказ, пауза {wait_secs} с");
+                                        if let Some(ui) = ui_handle2.upgrade() {
+                                            if wait_secs == 0 {
+                                                ui.set_pin_error("Неверный пароль".into());
+                                            } else {
+                                                ui.set_lock_left(wait_secs as i32);
+                                            }
+                                        }
+                                    }
+                                    Ok(Err(e)) => log::error!("вход: проверка: {e}"),
+                                    Err(e) => log::error!("вход: база: {e}"),
+                                }
+                            });
+                        });
+                    });
+                    return;
+                }
                 let res = match datastore::open(&cfg.db_path) {
-                    Ok(conn) => datastore::auth::verify(&conn, &pin),
+                    Ok(conn) => {
+                        let t = std::time::Instant::now();
+                        let r = datastore::auth::verify(&conn, &pin);
+                        log::info!("вход: проверка PBKDF2 заняла {:?}", t.elapsed());
+                        r
+                    }
                     Err(e) => {
                         log::error!("вход: база: {e}");
                         return;
@@ -295,14 +365,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                 set_err(&ui_handle, "Требуется PIN администратора");
                             }
                             return;
-                        }
-                        k.admin_stage = if role == datastore::auth::Role::Admin { 11 } else { 2 };
-                        k.pending = None;
-                        k.role = if role == datastore::auth::Role::Admin { 1 } else { 0 };
-                        if let Some(ui) = ui_handle.upgrade() {
-                            ui.set_role(i32::from(k.role));
-                            ui.set_pin_forced(false);
-                            ui.set_popup_open(false);
                         }
                     }
                     Ok(datastore::auth::Auth::Denied { wait_secs }) => {
@@ -400,19 +462,33 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
             if stage == 7 {
                 let uid = if k.role == 1 { 1 } else { 2 };
-                let ok = match datastore::open(&cfg.db_path) {
-                    Ok(conn) => datastore::auth::pin_is(&conn, uid, &pin).unwrap_or(false),
-                    Err(e) => {
-                        log::error!("смена пароля: база: {e}");
-                        return;
-                    }
-                };
-                if ok {
-                    k.pin_pending = pin;
-                    k.admin_stage = 8;
-                } else {
-                    set_err(&ui_handle, "Старый пароль неверен");
-                }
+                // PBKDF2 — в фоновом потоке, UI не блокируем.
+                k.pin_check_busy = true;
+                let db_path = cfg.db_path.clone();
+                let ui_handle2 = ui_handle.clone();
+                drop(k);
+                spawn_pin_task(move || {
+                    let t = std::time::Instant::now();
+                    let res = datastore::open(&db_path)
+                        .map(|conn| datastore::auth::pin_is(&conn, uid, &pin));
+                    log::info!("смена пароля: проверка старого PIN заняла {:?}", t.elapsed());
+                    let _ = slint::invoke_from_event_loop(move || {
+                        KIOSK_RC.with(|c| {
+                            let Some(krc) = &*c.borrow() else { return };
+                            let mut k = krc.borrow_mut();
+                            k.pin_check_busy = false;
+                            match res {
+                                Ok(Ok(true)) => {
+                                    k.pin_pending = pin;
+                                    k.admin_stage = 8;
+                                }
+                                Ok(Ok(false)) => set_err(&ui_handle2, "Старый пароль неверен"),
+                                Ok(Err(e)) => log::error!("смена пароля: проверка: {e}"),
+                                Err(e) => log::error!("смена пароля: база: {e}"),
+                            }
+                        });
+                    });
+                });
                 return;
             }
             if stage == 8 {
@@ -433,41 +509,53 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
             let old = std::mem::take(&mut k.pin_pending);
             let uid = if k.role == 1 { 1 } else { 2 };
-            let res = match datastore::open(&cfg.db_path) {
-                Ok(conn) => {
-                    let r = datastore::auth::change_pin(&conn, uid, &old, &pin);
-                    if matches!(&r, Ok(Ok(()))) {
-                        log_action(
-                            &cfg.db_path,
-                            "PIN изменён",
-                            if uid == 1 { "администратор" } else { "кассир" }.into(),
-                        );
-                    }
-                    r
-                }
-                Err(e) => {
-                    log::error!("смена пароля: база: {e}");
-                    return;
-                }
-            };
-            match res {
-                Ok(Ok(())) => {
-                    log::info!("смена пароля: выполнена");
-                    k.pin_new.clear();
-                    k.pin_forced = false;
-                    k.admin_stage = 2;
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_pin_forced(false);
-                    }
-                }
-                Ok(Err(msg)) => {
-                    set_err(&ui_handle, msg);
-                    if msg.contains("старый") {
-                        k.admin_stage = 7;
-                    }
-                }
-                Err(e) => log::error!("смена пароля: {e}"),
-            }
+            // Два прохода PBKDF2 (проверка старого + хэш нового) — в фоне.
+            k.pin_check_busy = true;
+            let db_path = cfg.db_path.clone();
+            let ui_handle2 = ui_handle.clone();
+            drop(k);
+            spawn_pin_task(move || {
+                let t = std::time::Instant::now();
+                let res = datastore::open(&db_path)
+                    .map(|conn| {
+                        let r = datastore::auth::change_pin(&conn, uid, &old, &pin);
+                        if matches!(&r, Ok(Ok(()))) {
+                            log_action(
+                                &db_path,
+                                "PIN изменён",
+                                if uid == 1 { "администратор" } else { "кассир" }.into(),
+                            );
+                        }
+                        r
+                    });
+                log::info!("смена пароля: выполнена за {:?}", t.elapsed());
+                let _ = slint::invoke_from_event_loop(move || {
+                    KIOSK_RC.with(|c| {
+                        let Some(krc) = &*c.borrow() else { return };
+                        let mut k = krc.borrow_mut();
+                        k.pin_check_busy = false;
+                        match res {
+                            Ok(Ok(Ok(()))) => {
+                                log::info!("смена пароля: выполнена");
+                                k.pin_new.clear();
+                                k.pin_forced = false;
+                                k.admin_stage = 2;
+                                if let Some(ui) = ui_handle2.upgrade() {
+                                    ui.set_pin_forced(false);
+                                }
+                            }
+                            Ok(Ok(Err(msg))) => {
+                                set_err(&ui_handle2, &msg);
+                                if msg.contains("старый") {
+                                    k.admin_stage = 7;
+                                }
+                            }
+                            Ok(Err(e)) => log::error!("смена пароля: запись: {e}"),
+                            Err(e) => log::error!("смена пароля: база: {e}"),
+                        }
+                    });
+                });
+            });
         }
     });
     ui.on_depts_close({
@@ -479,7 +567,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 return;
             }
             // Единая таблица «назад» — nav::screen_parent (дубль таблиц удалён по аудиту).
-            k.admin_stage = crate::nav::screen_parent(k.admin_stage);
+            k.admin_stage = crate::nav::screen_parent_for(k.admin_stage, k.role);
         }
     });
     ui.on_setup_tap({
@@ -761,9 +849,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let trade = trade.clone();
         let relayout = flow.relayout.clone();
         move |id: slint::SharedString| {
-            const ADMIN_TAPS: [&str; 9] = [
-                "scaleset", "createstaff", "net", "restart", "actionlog",
-                "custscreen", "access", "maint", "equip",
+            const ADMIN_TAPS: [&str; 23] = [
+                "createstaff", "net", "restart", "actionlog", "access", "equip", "goods", "trade",
+                "layout", "cols", "sortalpha", "deptview", "itemscols", "cardname", "backbtn",
+                "idletimeout", "rounding", "minweight", "export", "import", "vnctoggle", "resetkey", "itemsort",
             ];
             if ADMIN_TAPS.contains(&id.as_str()) && kiosk.borrow().role != 1 {
                 log::warn!("меню: отказ: «{id}» только для администратора");
@@ -789,10 +878,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     drop(k);
                     setup_render();
                 }
-                "scaleset" => {
-                    refresh_setting_labels(&ui_handle, &trade, &idle_secs);
-                    kiosk.borrow_mut().admin_stage = 11;
-                }
                 "goods" => {
                     refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                     kiosk.borrow_mut().admin_stage = 12;
@@ -800,9 +885,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 "trade" => {
                     refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                     kiosk.borrow_mut().admin_stage = 13;
-                }
-                "service" => {
-                    kiosk.borrow_mut().admin_stage = 14;
                 }
                 "layout" => {
                     admin_reload();
@@ -831,15 +913,29 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     let next = !trade.dept_cell.get();
                     let ui_handle = ui_handle.clone();
                     let trade = trade.clone();
+                    let relayout = relayout.clone();
                     save_setting(&cfg.db_path, "dept_cell", i64::from(next), move |v| {
                         trade.dept_cell.set(v != 0);
                         if let Some(ui) = ui_handle.upgrade() {
                             ui.set_dept_cell(v != 0);
                             ui.set_goods_deptview(if v != 0 { "ячейки" } else { "колонки" }.into());
                         }
+                        relayout();
                         log::info!("меню: вид отделов: {}", if v != 0 { "ячейки" } else { "колонки" });
                     });
                     log_action(&cfg.db_path, "Вид отделов", if next { "ячейки" } else { "колонки" }.into());
+                }
+                "itemsort" => {
+                    let next = !trade.item_sort_pop.get();
+                    let trade = trade.clone();
+                    let ui_handle = ui_handle.clone();
+                    let idle_secs = idle_secs.clone();
+                    save_setting(&cfg.db_path, "item_sort_pop", i64::from(next), |v| {
+                        trade.item_sort_pop.set(v != 0);
+                        refresh_setting_labels(&ui_handle, &trade, &idle_secs);
+                        log::info!("меню: порядок товаров: {}", if v != 0 { "популярные" } else { "алфавит" });
+                    });
+                    log_action(&cfg.db_path, "Порядок товаров", if next { "популярные" } else { "по алфавиту" }.into());
                 }
                 "sortalpha" => {
                     let next = !trade.sort_alpha.get();
@@ -1122,14 +1218,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         Err(e) => log::warn!("resetkey: {e}"),
                     }
                 }
-                "custscreen" => {
-                    kiosk.borrow_mut().admin_stage = 24;
-                }
                 "access" => {
                     kiosk.borrow_mut().admin_stage = 25;
-                }
-                "maint" => {
-                    kiosk.borrow_mut().admin_stage = 26;
                 }
                 "changepin" => {
                     let mut k = kiosk.borrow_mut();
@@ -2503,10 +2593,18 @@ fn spawn_settime(
 thread_local! {
     static KIOSK_RC: RefCell<Option<std::rc::Rc<RefCell<crate::session::Kiosk>>>> =
         const { RefCell::new(None) };
+    static SETUP_RC: RefCell<Option<std::rc::Rc<dyn Fn()>>> = const { RefCell::new(None) };
 }
-/// Поток меню с защитой от паники: тело не должно молча оставить экран
-/// «занят» (NET_APPLYING, статусы «Печатаю…») — при панике вызывается
-/// `on_panic`, чтобы сбросить флаги и вернуть UI-статус.
+
+/// Перерисовка мастера первичной настройки из внешних модулей (tick.rs):
+/// возвращает киоск на экран «Настройка весов» после сброса по простою.
+pub fn render_setup() {
+    SETUP_RC.with(|c| {
+        if let Some(f) = &*c.borrow() {
+            f();
+        }
+    });
+}
 fn kiosk_vnc_note(on: bool) {
     KIOSK_RC.with(|c| {
         if let Some(k) = &*c.borrow() {
@@ -2562,6 +2660,30 @@ pub fn reset_admin_pin_by_usb_key(db_path: &std::path::Path) -> Result<bool, Str
     }
 }
 
+/// Фоновая проверка PIN. Если поток паникует, флаг `pin_check_busy` обязательно
+/// снимается — иначе экран входа навсегда пишет «Проверяю предыдущий PIN…».
+fn spawn_pin_task<F>(f: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    std::thread::spawn(move || {
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_err() {
+            log::error!("вход: поток проверки PIN паниковал, снимаю блокировку ввода");
+            let _ = slint::invoke_from_event_loop(|| {
+                KIOSK_RC.with(|c| {
+                    if let Some(k) = &*c.borrow() {
+                        if let Ok(mut k) = k.try_borrow_mut() {
+                            k.pin_check_busy = false;
+                        }
+                    }
+                });
+            });
+        }
+    });
+}
+/// Поток меню с защитой от паники: тело не должно молча оставить экран
+/// «занят» (NET_APPLYING, статусы «Печатаю…») — при панике вызывается
+/// `on_panic`, чтобы сбросить флаги и вернуть UI-статус.
 fn spawn_menu_task<F, C>(name: &'static str, on_panic: C, f: F)
 where
     F: FnOnce() + Send + 'static,
