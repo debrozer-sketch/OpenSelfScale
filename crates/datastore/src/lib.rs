@@ -26,6 +26,16 @@ pub struct PluItem {
     pub groupcode: String,
     pub shelflife: String,
 }
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, StoreError> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |r| r.get::<_, String>(1))?;
+    for name in names {
+        if name? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
 pub fn open(path: &Path) -> Result<Connection, StoreError> {
     let conn = Connection::open(path)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -92,17 +102,11 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
          );
          CREATE INDEX IF NOT EXISTS idx_print_log_ts ON print_log (ts);",
     )?;
-    let has_card: bool = conn
-        .prepare("PRAGMA table_info(plucodes)")?
-        .query_map([], |r| r.get::<_, String>(1))
-        .map(|rows| rows.filter_map(|r| r.ok()).any(|c| c == "card_price"))?;
+    let has_card = table_has_column(&conn, "plucodes", "card_price")?;
     if !has_card {
         conn.execute_batch("ALTER TABLE plucodes ADD COLUMN card_price INTEGER;")?;
     }
-    let has_group: bool = conn
-        .prepare("PRAGMA table_info(plucodes)")?
-        .query_map([], |r| r.get::<_, String>(1))
-        .map(|rows| rows.filter_map(|r| r.ok()).any(|c| c == "group"))?;
+    let has_group = table_has_column(&conn, "plucodes", "group")?;
     if !has_group {
         conn.execute_batch(
             "ALTER TABLE plucodes ADD COLUMN \"group\" TEXT;
@@ -121,8 +125,7 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
         let mut stmt = conn.prepare("SELECT plu, namefirst FROM plucodes")?;
         let rows = stmt
             .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-            .filter_map(|r| r.ok())
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
         for (plu, name) in rows {
             conn.execute(
@@ -148,10 +151,7 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              dept TEXT NOT NULL
          );",
     )?;
-    let has_bg: bool = conn
-        .prepare("PRAGMA table_info(depts)")?
-        .query_map([], |r| r.get::<_, String>(1))
-        .map(|rows| rows.filter_map(|r| r.ok()).any(|c| c == "bg"))?;
+    let has_bg = table_has_column(&conn, "depts", "bg")?;
     if !has_bg {
         conn.execute_batch(
             "ALTER TABLE depts ADD COLUMN bg TEXT;
@@ -495,6 +495,21 @@ pub struct PrintLogRow {
     pub sum_kop: Option<i64>,
     pub ok: bool,
 }
+pub fn print_popularity(
+    conn: &Connection,
+    since_ts: i64,
+) -> Result<std::collections::HashMap<String, u32>, StoreError> {
+    let mut st = conn.prepare(
+        "SELECT plu, COUNT(*) FROM print_log WHERE ok = 1 AND ts >= ?1 AND plu IS NOT NULL AND plu <> '' GROUP BY plu",
+    )?;
+    let rows = st.query_map([since_ts], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    let mut out = std::collections::HashMap::new();
+    for row in rows {
+        let (plu, n) = row?;
+        out.insert(plu, n.clamp(0, i64::from(u32::MAX)) as u32);
+    }
+    Ok(out)
+}
 pub fn print_log_add(conn: &Connection, row: &PrintLogRow) {
     let _ = conn.execute(
         "INSERT INTO print_log (ts, plu, name, weight_g, sum_kop, ok)
@@ -625,8 +640,7 @@ pub fn ean_code5_collisions(
     let mut stmt = conn.prepare("SELECT plu, itemcode FROM plucodes")?;
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-        .filter_map(|r| r.ok())
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
     drop(stmt);
     let mut by_code5: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
@@ -917,6 +931,36 @@ pub fn apply_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn table_has_column_sees_real_columns_only() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        assert!(table_has_column(&conn, "plucodes", "card_price").unwrap());
+        assert!(table_has_column(&conn, "plucodes", "group").unwrap());
+        assert!(!table_has_column(&conn, "plucodes", "нет_такой").unwrap());
+        assert!(!table_has_column(&conn, "no_such_table", "x").unwrap());
+    }
+    #[test]
+    fn print_popularity_counts_only_successful_recent_prints() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        let row = |ts: i64, plu: &str, ok: bool| PrintLogRow {
+            ts,
+            plu: Some(plu.to_string()),
+            name: None,
+            weight_g: Some(500),
+            sum_kop: Some(1000),
+            ok,
+        };
+        for _ in 0..3 {
+            print_log_add(&conn, &row(2000, "10", true));
+        }
+        print_log_add(&conn, &row(2000, "20", true));
+        print_log_add(&conn, &row(2000, "20", false));
+        print_log_add(&conn, &row(100, "30", true));
+        let pop = print_popularity(&conn, 1000).unwrap();
+        assert_eq!(pop.get("10"), Some(&3));
+        assert_eq!(pop.get("20"), Some(&1), "ошибочные печати не считаются");
+        assert_eq!(pop.get("30"), None, "старше окна — не считается");
+    }
     #[test]
     fn action_log_adds_and_rotates() {
         let conn = open(":memory:".as_ref()).unwrap();
