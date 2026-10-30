@@ -24,6 +24,7 @@ toml = { workspace = true }
 simplelog = { workspace = true }
 sha2 = { workspace = true }
 libc = "0.2"
+image = { version = "0.24", default-features = false, features = ["jpeg", "png"] }
 suppaftp = { version = "6", default-features = false }
 slint = { version = ">=1.9.0,<1.10.0", default-features = false, features = [
     "std",

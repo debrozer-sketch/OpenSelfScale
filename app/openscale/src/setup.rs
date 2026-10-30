@@ -43,13 +43,6 @@ pub fn set_entered(conn: &Connection, value: bool) {
 fn setting_is(conn: &Connection, key: &str) -> bool {
     matches!(get_setting(conn, key), Ok(Some(v)) if v.trim() == "1")
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Checklist {
-    pub goods: bool,
-    pub layout: bool,
-    pub printer_ok: bool,
-    pub scales_ok: bool,
-}
 pub fn all_green(mask: u32) -> bool {
     mask == 0b1111
 }

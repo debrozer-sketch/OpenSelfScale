@@ -2892,6 +2892,7 @@ dependencies = [
  "datastore",
  "drivers-api",
  "escpos",
+ "image 0.24.9",
  "libc",
  "log",
  "rusqlite",

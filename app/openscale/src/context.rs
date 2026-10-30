@@ -19,6 +19,7 @@ pub struct TradeSettings {
     pub card_show_name: Rc<std::cell::Cell<bool>>,
     pub catalog_back: Rc<std::cell::Cell<bool>>,
     pub item_cols: Rc<std::cell::Cell<usize>>,
+    pub item_sort_pop: Rc<std::cell::Cell<bool>>,
 }
 pub struct AppContext {
     pub ui: Weak<MainWindow>,

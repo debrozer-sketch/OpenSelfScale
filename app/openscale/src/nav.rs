@@ -12,27 +12,23 @@ const EXIT: u8 = 0;
 pub const SCREENS: &[Screen] = &[
     Screen { stage: 1, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
     Screen { stage: 2, slint: 6, title: "МЕНЮ НАСТРОЕК", parent: EXIT, back: false },
-    Screen { stage: 3, slint: 4, title: "НАСТРОЙКИ · ОТДЕЛЫ", parent: 11, back: true },
-    Screen { stage: 4, slint: 7, title: "ДИАГНОСТИКА", parent: 6, back: true },
-    Screen { stage: 5, slint: 8, title: "НАСТРОЙКИ · СЕТЬ И ВРЕМЯ", parent: 11, back: true },
-    Screen { stage: 6, slint: 9, title: "НАСТРОЙКИ · ОБОРУДОВАНИЕ", parent: 11, back: true },
+    Screen { stage: 3, slint: 4, title: "ВИТРИНА · КОМПОНОВКА", parent: 12, back: true },
+    Screen { stage: 4, slint: 7, title: "ДИАГНОСТИКА ВЕСОВ", parent: 13, back: true },
+    Screen { stage: 5, slint: 8, title: "СЕТЬ И ВРЕМЯ", parent: 2, back: true },
+    Screen { stage: 6, slint: 9, title: "ПЕЧАТЬ", parent: 2, back: true },
     Screen { stage: 7, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 25, back: false },
     Screen { stage: 8, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 25, back: false },
     Screen { stage: 9, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 25, back: false },
-    Screen { stage: 10, slint: 7, title: "ДИАГНОСТИКА", parent: 12, back: false },
-    Screen { stage: 11, slint: 12, title: "НАСТРОЙКИ ВЕСОВ", parent: EXIT, back: true },
-    Screen { stage: 12, slint: 13, title: "ТОВАРЫ И ВЫГРУЗКА", parent: 11, back: true },
-    Screen { stage: 13, slint: 14, title: "НАСТРОЙКИ · ТОРГОВЫЕ ПРАВИЛА", parent: 11, back: true },
-    Screen { stage: 15, slint: 16, title: "НАСТРОЙКИ · ИМПОРТ", parent: 26, back: true },
-    Screen { stage: 16, slint: 17, title: "ОТЧЁТЫ", parent: 26, back: true },
+    Screen { stage: 12, slint: 13, title: "ВИТРИНА", parent: 2, back: true },
+    Screen { stage: 13, slint: 14, title: "ВЕСЫ И ТОРГОВЛЯ", parent: 2, back: true },
+    Screen { stage: 15, slint: 16, title: "ИМПОРТ КОНФИГУРАЦИИ", parent: 25, back: true },
+    Screen { stage: 16, slint: 17, title: "ОТЧЁТЫ", parent: 25, back: true },
     Screen { stage: 17, slint: 18, title: "ПРИНТЕР · ДИАГНОСТИКА", parent: 6, back: true },
     Screen { stage: 20, slint: 19, title: "НАСТРОЙКА ВЕСОВ", parent: EXIT, back: false },
-    Screen { stage: 21, slint: 20, title: "ЭТИКЕТКИ", parent: 11, back: true },
+    Screen { stage: 21, slint: 20, title: "ЭТИКЕТКИ", parent: 6, back: true },
     Screen { stage: 22, slint: 23, title: "ЖУРНАЛ ДЕЙСТВИЙ", parent: 25, back: true },
-    Screen { stage: 23, slint: 24, title: "СОСТОЯНИЕ", parent: 11, back: true },
-    Screen { stage: 24, slint: 25, title: "ЭКРАН ПОКУПАТЕЛЯ", parent: 11, back: true },
-    Screen { stage: 25, slint: 26, title: "ДОСТУП И БЕЗОПАСНОСТЬ", parent: 11, back: true },
-    Screen { stage: 26, slint: 27, title: "НАСТРОЙКИ · ОБСЛУЖИВАНИЕ", parent: 11, back: true },
+    Screen { stage: 23, slint: 24, title: "СОСТОЯНИЕ", parent: 2, back: true },
+    Screen { stage: 25, slint: 26, title: "ДОСТУП И СЕРВИС", parent: 2, back: true },
     Screen { stage: 30, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
     Screen { stage: 31, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
     Screen { stage: 32, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
@@ -60,6 +56,15 @@ pub fn screen_parent(stage: u8) -> u8 {
     screen_of(stage).map(|s| s.parent).unwrap_or(EXIT)
 }
 
+pub fn screen_parent_for(stage: u8, role: u8) -> u8 {
+    let parent = screen_parent(stage);
+    if role != 1 && parent != EXIT {
+        2
+    } else {
+        parent
+    }
+}
+
 pub fn screen_has_back(stage: u8) -> bool {
     screen_of(stage).map(|s| s.back).unwrap_or(false)
 }
@@ -73,7 +78,7 @@ mod tests {
         for s in SCREENS {
             if s.back {
                 assert!(
-                    s.stage == 5 || s.stage == 6 || s.stage == 11 || s.stage == 21 || s.parent != EXIT,
+                    s.parent != EXIT,
                     "stage {}: back=true при parent=0 — кнопка ведёт в выход, проверь поведение",
                     s.stage
                 );
@@ -92,16 +97,35 @@ mod tests {
     }
 
     #[test]
+    fn staff_always_returns_to_main_menu() {
+        for s in SCREENS {
+            if s.parent != EXIT {
+                assert_eq!(screen_parent_for(s.stage, 0), 2, "stage {}", s.stage);
+                assert_eq!(screen_parent_for(s.stage, 1), s.parent);
+            }
+        }
+    }
+
+    #[test]
+    fn admin_tree_is_two_levels_from_main_menu() {
+        let parent = |st: u8| screen_parent(st);
+        for top in [12u8, 13, 6, 5, 23, 25] {
+            assert_eq!(parent(top), 2, "stage {top}");
+        }
+        for (child, via) in [(3u8, 12u8), (4, 13), (21, 6), (17, 6), (15, 25), (16, 25), (22, 25)] {
+            assert_eq!(parent(child), via, "stage {child}");
+        }
+    }
+
+    #[test]
     fn known_screens_resolve() {
         assert_eq!(screen_slint(3), 4);
         assert_eq!(screen_slint(22), 23);
         assert_eq!(screen_slint(23), 24);
-        assert_eq!(screen_slint(24), 25);
         assert_eq!(screen_slint(25), 26);
-        assert_eq!(screen_slint(26), 27);
         assert_eq!(screen_title(22), "ЖУРНАЛ ДЕЙСТВИЙ");
-        assert_eq!(screen_title(3), "НАСТРОЙКИ · ОТДЕЛЫ");
-        assert_eq!(screen_parent(3), 11);
+        assert_eq!(screen_title(3), "ВИТРИНА · КОМПОНОВКА");
+        assert_eq!(screen_parent(3), 12);
         assert_eq!(screen_slint(30), 5);
         assert_eq!(screen_slint(99), FALLBACK_SLINT);
         assert_eq!(screen_title(99), FALLBACK_TITLE);

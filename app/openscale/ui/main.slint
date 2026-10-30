@@ -31,6 +31,7 @@ export struct MenuRow {
     id: string,
     admin: bool,
     sub: string,
+    value: string,
 }
 export struct NetworkField {
     label: string,
@@ -50,6 +51,7 @@ export struct LabelPreviewRow {
 }
 component DeptTile inherits Rectangle {
     in property <int> idx;
+    in property <int> cols: 1;
     in property <length> col-w;
     in property <length> tile-h;
     in property <length> font;
@@ -57,26 +59,19 @@ component DeptTile inherits Rectangle {
     in property <bool> active: true;
     in property <bool> cell: false;
     callback tapped(string);
-    callback next-page;
-    callback prev-page;
+    callback dragging(length);
+    callback drag-end(length);
     width: root.col-w;
-    x: 8px + self.idx * (root.col-w + 8px);
-    y: 8px;
+    x: 8px + Math.mod(self.idx, self.cols) * (root.col-w + 8px);
+    y: 8px + Math.floor(self.idx / self.cols) * (root.tile-h + 8px);
     height: root.tile-h;
     border-radius: Theme.r-card;
-    border-width: 1px;
-    border-color: Theme.border;
+    border-width: root.cell ? 2px : 1px;
+    border-color: root.cell ? Theme.ink-faint : Theme.border;
     background: root.cell
-        ? (ta.pressed ? d.bg.mix(#FFFFFF, 78%) : d.bg.mix(#FFFFFF, 86%))
-        : (ta.pressed ? d.bg-pressed : d.bg);
-    if root.cell : Rectangle {
-        x: 0;
-        y: 12px;
-        width: 8px;
-        height: parent.height - 24px;
-        border-radius: 4px;
-        background: d.bg;
-    }
+        ? (ta.pressed && Math.abs(root.moved-px) < 10px ? Theme.pressed : Theme.surface)
+        : (ta.pressed && Math.abs(root.moved-px) < 10px ? d.bg-pressed : d.bg);
+    animate background { duration: 80ms; }
     if !root.cell && d.has-img : Rectangle {
         x: 8px;
         y: 8px;
@@ -108,24 +103,29 @@ component DeptTile inherits Rectangle {
         text: d.name;
         font-size: root.cell ? 28px : root.font;
         font-weight: 700;
-        color: d.fg;
+        color: root.cell ? Theme.ink : d.fg;
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
     }
+    property <length> down-x;
+    property <length> moved-px;
     ta := TouchArea {
         enabled: root.active;
         pointer-event(ev) => {
-            if ev.kind == PointerEventKind.up {
-                if ta.mouse-x - ta.pressed-x < -80px {
-                    root.next-page();
-                } else if ta.mouse-x - ta.pressed-x > 80px {
-                    root.prev-page();
-                }
+            if ev.kind == PointerEventKind.down {
+                root.down-x = self.absolute-position.x + self.mouse-x;
+                root.moved-px = 0px;
+            } else if ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel {
+                root.drag-end(self.absolute-position.x + self.mouse-x - root.down-x);
             }
         }
+        moved => {
+            root.moved-px = self.absolute-position.x + self.mouse-x - root.down-x;
+            root.dragging(root.moved-px);
+        }
         clicked => {
-            if Math.abs(ta.mouse-x - ta.pressed-x) < 60px {
+            if Math.abs(root.moved-px) < 16px {
                 root.tapped(root.d.id);
             }
         }
@@ -140,17 +140,23 @@ component PluCard inherits Rectangle {
     in property <bool> active: true;
     in property <bool> card-show-name: true;
     callback tapped;
+    callback dragging(length);
+    callback drag-end(length);
+    property <length> down-x;
+    property <length> moved-px;
+    property <bool> hot: ta.pressed && Math.abs(root.moved-px) < 10px;
     width: root.col-w;
     height: 178px;
     x: 8px + Math.mod(self.idx + self.cell-offset, self.cols) * (root.col-w + 8px);
     y: 56px + Math.floor((self.idx + self.cell-offset) / self.cols) * 182px;
     border-radius: Theme.r-button;
-    background: !root.active ? Theme.chip : ta.pressed ? Theme.pressed : Theme.surface;
+    background: !root.active ? Theme.chip : root.hot ? Theme.pressed : Theme.surface;
+    animate background { duration: 80ms; }
     Rectangle {
-        x: 2px;
-        y: root.card-show-name ? 2px : 21px;
-        width: parent.width - 4px;
-        height: 104px;
+        x: 4px;
+        y: 4px;
+        width: parent.width - 8px;
+        height: root.card-show-name ? 76px : 124px;
         border-radius: Theme.r-inner;
         clip: true;
         background: Theme.chip;
@@ -162,56 +168,73 @@ component PluCard inherits Rectangle {
         }
     }
     if root.card-show-name : Text {
-        x: 3px;
-        y: 108px;
-        width: parent.width - 6px;
-        height: 40px;
+        x: 4px;
+        y: 82px;
+        width: parent.width - 8px;
+        height: 49px;
         text: root.p.name;
-        font-size: 10px;
+        font-size: 12px;
+        font-weight: 500;
         wrap: word-wrap;
         overflow: elide;
         horizontal-alignment: center;
         vertical-alignment: center;
-        color: !root.active ? Theme.ink-faint : Theme.ink;
+        color: !root.active ? Theme.ink-mute : Theme.ink;
     }
     if root.p.card-price == "" : Text {
-        x: 3px;
-        y: 150px;
-        width: parent.width - 6px;
-        height: 24px;
+        x: 4px;
+        y: 134px;
+        width: parent.width - 8px;
+        height: 40px;
+        text: root.p.price;
+        font-size: 18px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: !root.active ? Theme.ink-mute : Theme.ink;
+    }
+    if root.p.card-price != "" : Text {
+        x: 4px;
+        y: 132px;
+        width: parent.width - 8px;
+        height: 14px;
         text: root.p.price;
         font-size: 12px;
-        font-weight: 700;
         horizontal-alignment: center;
         vertical-alignment: center;
-        color: !root.active ? Theme.ink-faint : Theme.ink;
+        color: Theme.ink-mute;
     }
     if root.p.card-price != "" : Text {
-        x: 3px;
-        y: 147px;
-        width: parent.width - 6px;
-        height: 12px;
-        text: root.p.price;
-        font-size: 9px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        color: Theme.ink-faint;
-    }
-    if root.p.card-price != "" : Text {
-        x: 3px;
-        y: 158px;
-        width: parent.width - 6px;
-        height: 16px;
+        x: 4px;
+        y: 146px;
+        width: parent.width - 8px;
+        height: 26px;
         text: root.p.card-price;
-        font-size: 11px;
-        font-weight: 700;
+        font-size: 18px;
+        font-weight: 600;
         horizontal-alignment: center;
         vertical-alignment: center;
-        color: Theme.success-bright;
+        color: Theme.success-text;
     }
     ta := TouchArea {
         enabled: root.active;
-        clicked => { root.tapped(); }
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.down {
+                root.down-x = self.absolute-position.x + self.mouse-x;
+                root.moved-px = 0px;
+            } else if ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel {
+                root.drag-end(self.absolute-position.x + self.mouse-x - root.down-x);
+            }
+        }
+        moved => {
+            root.moved-px = self.absolute-position.x + self.mouse-x - root.down-x;
+            root.dragging(root.moved-px);
+        }
+        clicked => {
+            if Math.abs(root.moved-px) < 16px {
+                root.tapped();
+            }
+        }
     }
 }
 component KbKey inherits Rectangle {
@@ -250,7 +273,10 @@ global Theme {
     // Текст
     in property <color> ink: #111318;
     in property <color> ink-soft: #4B5563;
-    in property <color> ink-faint: #9CA3AF;    // подписи
+    in property <color> ink-faint: #9CA3AF;    // только декор и отключённое (контраст 2.5:1)
+    in property <color> ink-mute: #6B7280;     // подписи и вторичный текст (4.8:1)
+    in property <color> success-text: #15803D; // зелёный текст на белом (5.0:1)
+    in property <color> success-ink: #14532D;
     in property <color> disabled: #9CA3AB;     // недоступное
     // Границы (1px только у чипов, кнопок и полей; карточки — без рамок)
     in property <color> border: #E4E4E7;
@@ -361,78 +387,142 @@ component MenuPage inherits Rectangle {
             height: 74px;
             border-radius: Theme.r-button;
             background: mp-ta.pressed ? Theme.pressed : Theme.surface;
-            opacity: role == 1 || !r.admin ? 1.0 : 0.45;
-            // Цветная метка раздела
-            Rectangle {
-                x: 16px;
-                y: (parent.height - 40px) / 2;
-                width: 40px;
-                height: 40px;
-                border-radius: Theme.r-inner;
-                background: Theme.pastel[Math.mod(i, Theme.pastel.length)];
-            }
-        Text {
-            x: 72px;
-            width: parent.width - 130px;
-            height: r.sub == "" ? parent.height : 34px;
-            y: r.sub == "" ? 0 : (parent.height - 52px) / 2 + 2px;
-            text: r.label + (r.admin && role != 1 ? " · только администратор" : "");
-            font-size: 18px;
-            font-weight: 700;
-            color: Theme.ink;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        if r.sub != "" : Text {
-            x: 72px;
-            y: (parent.height - 52px) / 2 + 34px;
-            width: parent.width - 130px;
-            height: 18px;
-            text: r.sub;
-            font-size: 14px;
-            color: Theme.ink-faint;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-        Text {
-            x: parent.width - 44px;
-            width: 28px;
-            height: parent.height;
-            text: "›";
-            font-size: 24px;
-            color: Theme.ink-faint;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-        if r.id == "status" : Rectangle {
-            x: parent.width - 186px;
-            y: (parent.height - 28px) / 2;
-            width: 150px;
-            height: 28px;
-            border-radius: 14px;
-            background: root.ok ? Theme.success : Theme.danger;
+            animate background { duration: 80ms; }
+            opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
             Text {
-                width: parent.width;
-                height: parent.height;
-                text: root.ok ? "Всё в норме" : "Требует внимания";
-                font-size: 13px;
+                x: 24px;
+                y: r.sub == "" ? 0px : (parent.height - 50px) / 2;
+                width: parent.width - (r.value == "" ? 110px : 330px);
+                height: r.sub == "" ? parent.height : 28px;
+                text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
+                font-size: 24px;
                 font-weight: 700;
-                color: Theme.surface;
+                color: Theme.ink;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if r.sub != "" : Text {
+                x: 24px;
+                y: (parent.height - 50px) / 2 + 28px;
+                width: parent.width - (r.value == "" ? 110px : 330px);
+                height: 22px;
+                text: r.sub;
+                font-size: 16px;
+                color: Theme.ink-soft;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if r.value != "" : Rectangle {
+                x: parent.width - 24px - self.width;
+                y: (parent.height - 40px) / 2;
+                width: Math.max(96px, vtext.preferred-width + 32px);
+                height: 40px;
+                border-radius: 20px;
+                background: Theme.chip;
+                vtext := Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: r.value;
+                    font-size: 18px;
+                    font-weight: 600;
+                    color: Theme.ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            if r.value == "" && r.id != "status" : Text {
+                x: parent.width - 44px;
+                width: 28px;
+                height: parent.height;
+                text: "›";
+                font-size: 28px;
+                color: Theme.ink-mute;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
-        }
-        mp-ta := TouchArea {
-            clicked => {
-                (role == 1 || !r.admin) ? root.page-tap(r.id) : {};
+            if r.id == "status" : Rectangle {
+                x: parent.width - 190px;
+                y: (parent.height - 32px) / 2;
+                width: 166px;
+                height: 32px;
+                border-radius: 16px;
+                background: root.ok ? Theme.success-soft : Theme.danger-soft;
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.ok ? "Всё в норме" : "Требует внимания";
+                    font-size: 15px;
+                    font-weight: 600;
+                    color: root.ok ? Theme.success-ink : Theme.danger-ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
-        }
+            mp-ta := TouchArea {
+                clicked => {
+                    (root.role == 1 || !r.admin) ? root.page-tap(r.id) : {};
+                }
+            }
         }
     }
 }
 
 export component MainWindow inherits Window {
     default-font-family: Theme.family;
+    property <length> px: 0px;
+    property <length> cx: 0px;
+    property <length> pr: 0px;
+    property <length> cr: 0px;
+    property <length> gdxr: 0px;
+    property <int> gdir: 0;
+    property <bool> gbusy: false;
+    property <bool> can-prev: root.screen == 2 ? root.items-page-no > 0 : root.page-no > 0;
+    property <bool> can-next: root.screen == 2 ? root.items-page-no < root.items-pages-total - 1 : root.page-no < root.pages-total - 1;
+    pure function resist(dx: length) -> length {
+        return dx < 0px ? (root.can-next ? dx : dx / 4) : (root.can-prev ? dx : dx / 4);
+    }
+    function drag-move(dx: length) {
+        if (root.gbusy) { return; }
+        root.px = root.pr + root.resist(dx);
+    }
+    function drag-release(dx: length) {
+        if (root.gbusy) { return; }
+        root.gdxr = root.resist(dx);
+        root.gbusy = true;
+        if (dx < -90px && root.can-next) {
+            root.gdir = 1;
+            root.cx = root.cr - root.width - root.gdxr;
+            exit-t.running = true;
+        } else if (dx > 90px && root.can-prev) {
+            root.gdir = -1;
+            root.cx = root.cr + root.width - root.gdxr;
+            exit-t.running = true;
+        } else {
+            root.cx = root.cr - root.gdxr;
+            back-t.running = true;
+        }
+    }
+    exit-t := Timer {
+        interval: 110ms;
+        running: false;
+        triggered => {
+            exit-t.running = false;
+            root.px = root.pr + root.gdxr + 2 * root.gdir * root.width;
+            if (root.gdir > 0) { root.more(); } else { root.back(); }
+            root.cx = root.cr - 2 * root.gdir * root.width - root.gdxr;
+            back-t.running = true;
+        }
+    }
+    back-t := Timer {
+        interval: 160ms;
+        running: false;
+        triggered => {
+            back-t.running = false;
+            root.pr = root.px;
+            root.cr = root.cx;
+            root.gbusy = false;
+        }
+    }
     title: "OpenScale";
     in property <length> screen-w: 1024px;
     in property <length> screen-h: 768px;
@@ -476,6 +566,8 @@ export component MainWindow inherits Window {
     in property <bool> logo-has: false;
     in property <length> col-w: 195px; 
     in property <length> tile-h: 592px; 
+    in property <int> dept-cols: 1;
+    in property <length> pager-y: 768px;
     in property <bool> dept-cell: false;
     in property <string> goods-deptview: "колонки";
     in property <[DeptDef]> depts;         
@@ -542,6 +634,7 @@ export component MainWindow inherits Window {
     in property <string> goods-cardname: "ВКЛ";
     in property <string> goods-backbtn: "ВКЛ";
     in property <string> goods-itemscols: "9 столбцов";
+    in property <string> goods-itemsort: "по алфавиту";
     in property <bool> card-show-name: true;
     in property <bool> catalog-back-btn: true;
     in property <int> header-page: 0;
@@ -625,7 +718,7 @@ export component MainWindow inherits Window {
             x: 16px; y: 8px;
             width: 140px; height: 22px;
             border-radius: 11px;
-            background: weight-state == 2 ? Theme.success
+            background: weight-state == 2 ? Theme.success-dark
                      : weight-state == 1 ? Theme.warning-soft : Theme.chip;
             Text {
                 width: parent.width;
@@ -655,7 +748,7 @@ export component MainWindow inherits Window {
             x: 384px; y: 80px;
             text: "кг";
             font-size: Theme.font-lg;
-            color: Theme.ink-faint;
+            color: Theme.ink-mute;
         }
         if weight-state == 1 || weight-state == 2 : Rectangle {
             x: 16px; y: 116px;
@@ -708,21 +801,33 @@ export component MainWindow inherits Window {
         x: 0; y: 160px;
         width: root.width;
         height: root.height - 160px;
-        for d[i] in root.depts : DeptTile {
-            cell: root.dept-cell;
-            idx: i;
-            col-w: root.col-w;
-            tile-h: root.tile-h;
-            font: root.dept-font;
-            d: d;
-            active: root.can-tap;
-            tapped(dept) => { root.dept-tapped(dept); }
-            next-page => { root.more(); }
-            prev-page => { root.back(); }
+        Rectangle {
+            x: root.px;
+            width: parent.width;
+            height: parent.height;
+          Rectangle {
+            x: root.cx;
+            width: parent.width;
+            height: parent.height;
+            animate x { duration: 150ms; easing: ease-out; }
+            for d[i] in root.depts : DeptTile {
+                cell: root.dept-cell;
+                idx: i;
+                cols: root.dept-cols;
+                col-w: root.col-w;
+                tile-h: root.tile-h;
+                font: root.dept-font;
+                d: d;
+                active: root.can-tap;
+                tapped(dept) => { if (!root.gbusy) { root.dept-tapped(dept); } }
+                dragging(dx) => { root.drag-move(dx); }
+                drag-end(dx) => { root.drag-release(dx); }
+            }
+          }
         }
     }
     if screen == 0 && pages-total > 1 : Rectangle {
-        y: 160px + root.tile-h + 16px;
+        y: root.pager-y;
         x: 0;
         width: root.width;
         height: 56px;
@@ -891,7 +996,7 @@ export component MainWindow inherits Window {
                     width: 8px; height: 8px;
                     text: "⌐";
                     font-size: 8px;
-                    color: Theme.ink-faint;
+                    color: Theme.ink-mute;
                     vertical-alignment: center;
                 }
                 Text {
@@ -900,7 +1005,7 @@ export component MainWindow inherits Window {
                     height: parent.height;
                     text: "Поиск товара";
                     font-size: Theme.font-xs;
-                    color: Theme.ink-faint;
+                    color: Theme.ink-mute;
                     vertical-alignment: center;
                 }
                 search2-ta := TouchArea {
@@ -908,62 +1013,75 @@ export component MainWindow inherits Window {
                 }
             }
         }
-        if root.items-page-no > 0 && root.catalog-back-btn : Rectangle {
-            x: 8px;
-            y: 56px;
-            width: root.items-col-w;
-            height: 178px;
-            border-radius: Theme.r-button;
-            background: prev2-ta.pressed ? Theme.pressed : Theme.chip;
-            Text {
-                text: "‹";
-                font-size: 30px;
-                font-weight: 700;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                width: parent.width;
-                height: parent.height;
-                color: Theme.ink-soft;
+        Rectangle {
+            x: root.px;
+            width: parent.width;
+            height: parent.height;
+          Rectangle {
+            x: root.cx;
+            width: parent.width;
+            height: parent.height;
+            animate x { duration: 150ms; easing: ease-out; }
+            if root.items-page-no > 0 && root.catalog-back-btn : Rectangle {
+                x: 8px;
+                y: 56px;
+                width: root.items-col-w;
+                height: 178px;
+                border-radius: Theme.r-button;
+                background: prev2-ta.pressed ? Theme.pressed : Theme.chip;
+                Text {
+                    text: "‹";
+                    font-size: 30px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    width: parent.width;
+                    height: parent.height;
+                    color: Theme.ink-soft;
+                }
+                prev2-ta := TouchArea {
+                    clicked => { root.back(); }
+                }
             }
-            prev2-ta := TouchArea {
-                clicked => { root.back(); }
+            for p[i] in root.items : PluCard {
+                idx: i;
+                cell-offset: root.items-cell-offset;
+                cols: root.items-cols;
+                col-w: root.items-col-w;
+                p: p;
+                active: root.can-tap && !root.gbusy;
+                card-show-name: root.card-show-name;
+                tapped => { root.plu-tapped(p.id); }
+                dragging(dx) => { root.drag-move(dx); }
+                drag-end(dx) => { root.drag-release(dx); }
             }
-        }
-        for p[i] in root.items : PluCard {
-            idx: i;
-            cell-offset: root.items-cell-offset;
-            cols: root.items-cols;
-            col-w: root.items-col-w;
-            p: p;
-            active: root.can-tap;
-            card-show-name: root.card-show-name;
-            tapped => { root.plu-tapped(p.id); }
-        }
-        if root.items-page-no < root.items-pages-total - 1 : Rectangle {
-            x: 8px + Math.mod(root.items.length + root.items-cell-offset, root.items-cols) * (root.items-col-w + 8px);
-            y: 56px + Math.floor((root.items.length + root.items-cell-offset) / root.items-cols) * 182px;
-            width: root.items-col-w;
-            height: 178px;
-            border-radius: Theme.r-button;
-            background: next2-ta.pressed ? Theme.pressed : Theme.chip;
-            Text {
-                text: "›";
-                font-size: 30px;
-                font-weight: 700;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                width: parent.width;
-                height: parent.height;
-                color: Theme.ink-soft;
+            if root.items-page-no < root.items-pages-total - 1 : Rectangle {
+                x: 8px + Math.mod(root.items.length + root.items-cell-offset, root.items-cols) * (root.items-col-w + 8px);
+                y: 56px + Math.floor((root.items.length + root.items-cell-offset) / root.items-cols) * 182px;
+                width: root.items-col-w;
+                height: 178px;
+                border-radius: Theme.r-button;
+                background: next2-ta.pressed ? Theme.pressed : Theme.chip;
+                Text {
+                    text: "›";
+                    font-size: 30px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    width: parent.width;
+                    height: parent.height;
+                    color: Theme.ink-soft;
+                }
+                next2-ta := TouchArea {
+                    clicked => { root.more(); }
+                }
             }
-            next2-ta := TouchArea {
-                clicked => { root.more(); }
-            }
+          }
         }
     }
     if screen == 0 : Rectangle {
         x: root.width / 2 - 200px;
-        y: 160px + root.tile-h + 16px;
+        y: root.pager-y;
         width: 400px;
         height: 56px;
         border-radius: Theme.r-card;
@@ -976,7 +1094,7 @@ export component MainWindow inherits Window {
             height: parent.height;
             text: "Поиск товара";
             font-size: Theme.font-lg;
-            color: Theme.ink-faint;
+            color: Theme.ink-mute;
             vertical-alignment: center;
         }
         search-ta := TouchArea {
@@ -1115,7 +1233,7 @@ export component MainWindow inherits Window {
             text: "Начните вводить название товара";
             font-size: Theme.font-body;
             horizontal-alignment: center;
-            color: Theme.ink-faint;
+            color: Theme.ink-mute;
         }
         if root.items.length == 0 && root.search-text != "" : Text {
             x: 0; y: 80px;
@@ -1123,7 +1241,7 @@ export component MainWindow inherits Window {
             text: "Ничего не найдено";
             font-size: Theme.font-body;
             horizontal-alignment: center;
-            color: Theme.ink-faint;
+            color: Theme.ink-mute;
         }
         for k[i] in root.kb1 : KbKey {
             kx: 8px + i * 78px;
@@ -1222,7 +1340,7 @@ export component MainWindow inherits Window {
                 width: 300px; height: 20px;
                 text: "PLU " + root.popup-plu.id;
                 font-size: 14px;
-                color: Theme.ink-faint;
+                color: Theme.ink-mute;
                 vertical-alignment: center;
             }
             // Правая колонка: «К оплате», вес, цена
@@ -1231,7 +1349,7 @@ export component MainWindow inherits Window {
                 width: 456px; height: 22px;
                 text: "К оплате";
                 font-size: 16px;
-                color: Theme.ink-faint;
+                color: Theme.ink-mute;
                 horizontal-alignment: right;
                 vertical-alignment: center;
             }
@@ -1261,7 +1379,7 @@ export component MainWindow inherits Window {
                 text: "ВЕС";
                 font-size: 14px;
                 font-weight: 700;
-                color: Theme.ink-faint;
+                color: Theme.ink-mute;
                 vertical-alignment: center;
             }
             if !root.popup-empty : Text {
@@ -1279,7 +1397,7 @@ export component MainWindow inherits Window {
                 text: "ЦЕНА";
                 font-size: 14px;
                 font-weight: 700;
-                color: Theme.ink-faint;
+                color: Theme.ink-mute;
                 vertical-alignment: center;
             }
             if !root.popup-empty : Text {
@@ -1724,60 +1842,30 @@ export component MainWindow inherits Window {
                 clicked => { root.pin-try(); }
             }
         }
-        if root.screen == 6 : Rectangle {
+        if root.screen == 6 : MenuPage {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
             property <[MenuRow]> rows-staff: [
-                { label: "Состояние", id: "status", admin: false },
-                { label: "Обнулить весы", id: "zero", admin: false },
-                { label: "Протяжка этикетки", id: "feed", admin: false },
-                { label: "Тестовая печать", id: "testprint", admin: false },
-                { label: "Отчёты", id: "reports", admin: false },
-                { label: "Мой PIN", id: "changepin", admin: false },
+                { label: "Состояние", id: "status", admin: false, sub: "Весы, принтер, бумага", value: "" },
+                { label: "Обнулить весы", id: "zero", admin: false, sub: "При пустой платформе", value: "" },
+                { label: "Протяжка этикетки", id: "feed", admin: false, sub: "", value: "" },
+                { label: "Тестовая печать", id: "testprint", admin: false, sub: "", value: "" },
+                { label: "Отчёты", id: "reports", admin: false, sub: "Печать по периодам", value: "" },
+                { label: "Мой PIN", id: "changepin", admin: false, sub: "", value: "" },
             ];
-            property <[MenuRow]> rows-admin-setup: [
-                { label: "Мастер настройки", id: "setup", admin: false },
-                { label: "Настройки весов", id: "scaleset", admin: true },
-                { label: "Пароль кассира", id: "createstaff", admin: true },
-                { label: "Оборудование", id: "equip", admin: false },
-                { label: "Сеть", id: "net", admin: true },
-                { label: "Выставить 0 / тарировать", id: "zero", admin: false },
-                { label: "Перезагрузка весов", id: "restart", admin: true },
+            property <[MenuRow]> rows-admin: [
+                { label: "Состояние", id: "status", admin: false, sub: "Весы, принтер, бумага, выгрузка", value: "" },
+                { label: "Витрина", id: "goods", admin: true, sub: "Отделы, карточки, возврат на главный", value: "" },
+                { label: "Печать", id: "equip", admin: true, sub: "Этикетки, принтер, протяжка", value: "" },
+                { label: "Весы и торговля", id: "trade", admin: true, sub: "Обнуление, диагностика, округление", value: "" },
+                { label: "Сеть и время", id: "net", admin: true, sub: "IP, дата и время", value: "" },
+                { label: "Доступ и сервис", id: "access", admin: true, sub: "Пароли, журнал, отчёты, перезагрузка", value: "" },
             ];
-                        property <[MenuRow]> rows: root.role == 0 ? rows-staff : rows-admin-setup;
-            Flickable {
-                width: parent.width;
-                height: parent.height;
-                viewport-height: 12px + rows.length * 82px;
-                for r[i] in rows : Rectangle {
-                    x: 8px;
-                    y: 12px + i * 82px;
-                    width: parent.width - 16px;
-                    height: 74px;
-                    border-radius: Theme.r-button;
-                    border-width: 1px;
-                    border-color: Theme.border;
-                    background: menu-ta.pressed ? Theme.pressed : Theme.surface;
-                    opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
-                    Text {
-                        x: 24px;
-                        width: parent.width - 48px;
-                        height: parent.height;
-                        text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                        font-size: Theme.font-h3;
-                        font-weight: 700;
-                        color: Theme.ink;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    menu-ta := TouchArea {
-                        clicked => {
-                            (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
-                        }
-                    }
-                }
-            }
+            rows: root.role == 0 ? self.rows-staff : self.rows-admin;
+            role: root.role;
+            ok: root.status-text == "" && root.scales-ok && !root.printer-fault;
+            page-tap(id) => { root.menu-tap(id); }
         }
         if root.screen == 7 : Rectangle {
             x: 0; y: 84px;
@@ -1965,174 +2053,46 @@ export component MainWindow inherits Window {
                 }
             }
         }
-        if root.screen == 9 : Rectangle {
-            x: 0; y: 84px;
-            width: parent.width;
-            height: parent.height - 84px;
-            property <[MenuRow]> rows: [
-                { label: "Диагностика", id: "diag", admin: false },
-                { label: "Принтер", id: "printerdiag", admin: false },
-                { label: "Протяжка этикетки", id: "feed", admin: false },
-                { label: "Тестовая печать", id: "testprint", admin: false },
-                { label: "Этикетки", id: "labels", admin: false },
-            ];
-            for r[i] in rows : Rectangle {
-                x: 8px;
-                y: 12px + i * 82px;
-                width: parent.width - 16px;
-                height: 74px;
-                border-radius: Theme.r-button;
-                border-width: 1px;
-                border-color: Theme.border;
-                background: menu-eq-ta.pressed ? Theme.pressed : Theme.surface;
-                Text {
-                    x: 24px;
-                    width: parent.width - 48px;
-                    height: parent.height;
-                    text: r.label;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-                menu-eq-ta := TouchArea {
-                    clicked => { root.menu-tap(r.id); }
-                }
-            }
-        }
-if root.screen == 12 : MenuPage {
+        if root.screen == 9 : MenuPage {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
             rows: [
-                { label: "Состояние", id: "status", admin: true, sub: "Весы, принтер, бумага" },
-                { label: "Товары и выгрузка", id: "goods", admin: true, sub: "Каталог, выгрузка, внешний вид" },
-                { label: "Экран покупателя", id: "custscreen", admin: true, sub: "Логотип и витрина" },
-                { label: "Этикетки", id: "labels", admin: true, sub: "Шаблоны и калибровка" },
-                { label: "Торговые правила", id: "trade", admin: true, sub: "Округление, минимальный вес" },
-                { label: "Оборудование", id: "equip", admin: true, sub: "Диагностика и принтер" },
-                { label: "Выставить 0 / тарировать", id: "zero", admin: false, sub: "При пустой платформе" },
-                { label: "Сеть и время", id: "net", admin: true, sub: "IP, DHCP, дата и время" },
-                { label: "Доступ и безопасность", id: "access", admin: true, sub: "Пароли и журнал" },
-                { label: "Обслуживание", id: "maint", admin: true, sub: "Отчёты и перезагрузка" },
+                { label: "Этикетки", id: "labels", admin: false, sub: "Раскладка, калибровка, выбор шаблона", value: "" },
+                { label: "Принтер: состояние", id: "printerdiag", admin: false, sub: "Лента, крышка, ошибки", value: "" },
+                { label: "Протяжка этикетки", id: "feed", admin: false, sub: "", value: "" },
+                { label: "Тестовая печать", id: "testprint", admin: false, sub: "", value: "" },
             ];
             role: root.role;
-            ok: root.status-text == "" && root.scales-ok && !root.printer-fault;
             page-tap(id) => { root.menu-tap(id); }
         }
-        if root.screen == 13 : Rectangle {
+        if root.screen == 13 : MenuPage {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-            property <[MenuRow]> rows: [
-                { label: "Компоновка разделов", id: "layout", admin: true },
-                { label: "Колонок на экране", id: "cols", admin: true },
-                { label: "Порядок отделов", id: "sortalpha", admin: true },
-                { label: "Вид отделов", id: "deptview", admin: true },
-                { label: "Столбцов с товарами", id: "itemscols", admin: true },
+            rows: [
+                { label: "Компоновка разделов", id: "layout", admin: true, sub: "Порядок, цвета, картинки отделов", value: "" },
+                { label: "Вид отделов", id: "deptview", admin: true, sub: "", value: root.goods-deptview },
+                { label: "Колонок на экране", id: "cols", admin: true, sub: "", value: root.goods-cols },
+                { label: "Порядок отделов", id: "sortalpha", admin: true, sub: "", value: root.goods-sort },
+                { label: "Столбцов с товарами", id: "itemscols", admin: true, sub: "", value: root.goods-itemscols },
+                { label: "Порядок товаров", id: "itemsort", admin: true, sub: "Популярные: чаще печатаемые за 30 дней сверху", value: root.goods-itemsort },
+                { label: "Название в карточке", id: "cardname", admin: true, sub: "", value: root.goods-cardname },
+                { label: "Кнопка «← Назад» в каталоге", id: "backbtn", admin: true, sub: "", value: root.goods-backbtn },
+                { label: "Возврат на главный экран", id: "idletimeout", admin: true, sub: "", value: root.goods-idle },
             ];
-            for r[i] in rows : Rectangle {
-                x: 8px;
-                y: 12px + i * 82px;
-                width: parent.width - 16px;
-                height: 74px;
-                border-radius: Theme.r-button;
-                border-width: 1px;
-                border-color: Theme.border;
-                background: goods-ta.pressed ? Theme.pressed : Theme.surface;
-                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
-                Text {
-                    x: 24px;
-                    width: parent.width - 260px;
-                    height: parent.height;
-                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-                if r.id == "cols" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.goods-cols;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                if r.id == "deptview" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.goods-deptview;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                if r.id == "idletimeout" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.goods-idle;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                if r.id == "cardname" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.goods-cardname;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                if r.id == "backbtn" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.goods-backbtn;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                if r.id == "itemscols" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.goods-itemscols;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                goods-ta := TouchArea {
-                    clicked => {
-                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
-                    }
-                }
-            }
+            role: root.role;
+            page-tap(id) => { root.menu-tap(id); }
         }
 if root.screen == 14 : MenuPage {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
             rows: [
-                { label: "Округление цены", id: "rounding", admin: true },
-                { label: "Минимальный вес печати", id: "minweight", admin: true },
+                { label: "Обнулить весы", id: "zero", admin: false, sub: "При пустой платформе", value: "" },
+                { label: "Диагностика весов", id: "diag", admin: false, sub: "Связь, вес, принтер", value: "" },
+                { label: "Округление цены", id: "rounding", admin: true, sub: "", value: root.trade-rounding },
+                { label: "Минимальный вес печати", id: "minweight", admin: true, sub: "", value: root.trade-minw },
             ];
             role: root.role;
             page-tap(id) => { root.menu-tap(id); }
@@ -2431,100 +2391,21 @@ if root.screen == 14 : MenuPage {
                 }
             }
         }
-        if root.screen == 25 : Rectangle {
-            x: 0; y: 84px;
-            width: parent.width;
-            height: parent.height - 84px;
-            property <[MenuRow]> rows: [
-                { label: "Возврат на главный экран", id: "idletimeout", admin: true },
-                { label: "Название в карточке", id: "cardname", admin: true },
-                { label: "Кнопка «← Назад» в каталоге", id: "backbtn", admin: true },
-            ];
-            for r[i] in rows : Rectangle {
-                x: 8px;
-                y: 12px + i * 82px;
-                width: parent.width - 16px;
-                height: 74px;
-                border-radius: Theme.r-button;
-                border-width: 1px;
-                border-color: Theme.border;
-                background: cust-ta.pressed ? Theme.pressed : Theme.surface;
-                opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
-                Text {
-                    x: 24px;
-                    width: parent.width - 260px;
-                    height: parent.height;
-                    text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-                if r.id == "idletimeout" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.goods-idle;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                if r.id == "cardname" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.goods-cardname;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                if r.id == "backbtn" : Text {
-                    x: parent.width - 230px;
-                    width: 190px;
-                    height: parent.height;
-                    text: root.goods-backbtn;
-                    font-size: Theme.font-h3;
-                    font-weight: 700;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-                cust-ta := TouchArea {
-                    clicked => {
-                        (root.role == 1 || !r.admin) ? root.menu-tap(r.id) : {};
-                    }
-                }
-            }
-        }
 if root.screen == 26 : MenuPage {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
             rows: [
-                { label: "Пароль администратора", id: "changepin", admin: true },
-                { label: "Пароль кассира", id: "createstaff", admin: true },
-                { label: "Удалённый доступ (VNC)", id: "vnctoggle", admin: true },
-                { label: "Сбросить PIN ключом с USB", id: "resetkey", admin: true },
-                { label: "Журнал действий", id: "actionlog", admin: true },
-            ];
-            role: root.role;
-            page-tap(id) => { root.menu-tap(id); }
-        }
-if root.screen == 27 : MenuPage {
-            x: 0; y: 84px;
-            width: parent.width;
-            height: parent.height - 84px;
-            rows: [
-                { label: "Отчёты", id: "reports", admin: true },
-                { label: "Экспорт конфигурации", id: "export", admin: true },
-                { label: "Импорт конфигурации", id: "import", admin: true },
-                { label: "Мастер настройки", id: "setup", admin: true },
-                { label: "Перезагрузка весов", id: "restart", admin: true },
+                { label: "Пароль администратора", id: "changepin", admin: true, sub: "", value: "" },
+                { label: "Пароль кассира", id: "createstaff", admin: true, sub: "", value: "" },
+                { label: "Сбросить PIN ключом с USB", id: "resetkey", admin: true, sub: "", value: "" },
+                { label: "Удалённый доступ (VNC)", id: "vnctoggle", admin: true, sub: "", value: "" },
+                { label: "Журнал действий", id: "actionlog", admin: true, sub: "", value: "" },
+                { label: "Отчёты", id: "reports", admin: true, sub: "Печать по периодам", value: "" },
+                { label: "Экспорт конфигурации", id: "export", admin: true, sub: "", value: "" },
+                { label: "Импорт конфигурации", id: "import", admin: true, sub: "", value: "" },
+                { label: "Мастер настройки", id: "setup", admin: true, sub: "", value: "" },
+                { label: "Перезагрузка весов", id: "restart", admin: true, sub: "", value: "" },
             ];
             role: root.role;
             page-tap(id) => { root.menu-tap(id); }

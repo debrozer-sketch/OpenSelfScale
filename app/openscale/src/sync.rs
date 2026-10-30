@@ -441,6 +441,9 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         }
         copied.push((p.clone(), *cap));
     }
+    if imgs_new > 0 {
+        crate::thumbs::ensure_dir(&local, std::time::Duration::from_secs(25));
+    }
     let (imported, layout_note) =
         apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata)?;
     let mut deferred = 0usize;
