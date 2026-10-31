@@ -206,46 +206,7 @@ fn poll_loop(
                 if !was_up.swap(true, Ordering::Relaxed) {
                     log::info!("весы: связь восстановлена");
                 }
-                let mut silent = 0u32;
-                loop {
-                    if stop.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    if zero.swap(false, Ordering::Relaxed) {
-                        match driver.zero() {
-                            Ok(()) => log::info!("весы: обнулено по запросу"),
-                            Err(e) => log::warn!("весы: обнуление не удалось: {e}"),
-                        }
-                    }
-                    match driver.poll_once(Duration::from_millis(900)) {
-                        Ok(sample) => {
-                            silent = 0;
-                            let mut s = out.lock().unwrap_or_else(|e| e.into_inner());
-                            s.mass_kg = sample.mass_g as f64 / 1000.0;
-                            s.stable = sample.stable;
-                            s.port_up = true;
-                            s.updated_at_ms = now_ms();
-                        }
-                        Err(drivers_api::DriverError::Timeout) => {
-                            silent += 1;
-                            let mut s = out.lock().unwrap_or_else(|e| e.into_inner());
-                            s.mass_kg = 0.0;
-                            s.stable = false;
-                            if silent == SILENT_LIMIT {
-                                log::warn!("весы молчат {SILENT_LIMIT} опросов подряд — связь потеряна");
-                            }
-                            s.port_up = silent < SILENT_LIMIT;
-                        }
-                        Err(e) => {
-                            log::warn!("опрос весов: {e}; переподключение");
-                            let mut s = out.lock().unwrap_or_else(|e| e.into_inner());
-                            s.mass_kg = 0.0;
-                            s.stable = false;
-                            s.port_up = false;
-                            break;
-                        }
-                    }
-                }
+                poll_session(driver.as_mut(), &out, &stop, &zero);
             }
             Err(e) => {
                 if was_up.swap(false, Ordering::Relaxed) {
@@ -257,6 +218,59 @@ fn poll_loop(
             }
         }
         sleep_interruptible(&stop, Duration::from_secs(3));
+    }
+}
+
+/// Один цикл соединения с весами: до потери порта (Err из poll_once),
+/// сигнала остановки или паники драйвера. После разрыва poll_loop
+/// переоткрывает соединение — перезапуск приложения не требуется.
+/// Таймауты обнуляют массу и после SILENT_LIMIT помечают связь потерянной:
+/// старые показания не используются.
+fn poll_session(
+    driver: &mut dyn drivers_api::ScalesDriver,
+    out: &Arc<Mutex<Snapshot>>,
+    stop: &AtomicBool,
+    zero: &AtomicBool,
+) {
+    let mut silent = 0u32;
+    loop {
+        if stop.load(Ordering::Relaxed) {
+            return;
+        }
+        if zero.swap(false, Ordering::Relaxed) {
+            match driver.zero() {
+                Ok(()) => log::info!("весы: обнулено по запросу"),
+                Err(e) => log::warn!("весы: обнуление не удалось: {e}"),
+            }
+        }
+        match driver.poll_once(Duration::from_millis(900)) {
+            Ok(sample) => {
+                silent = 0;
+                let mut s = out.lock().unwrap_or_else(|e| e.into_inner());
+                s.mass_kg = sample.mass_g as f64 / 1000.0;
+                s.stable = sample.stable;
+                s.port_up = true;
+                s.updated_at_ms = now_ms();
+            }
+            Err(drivers_api::DriverError::Timeout) => {
+                silent += 1;
+                let mut s = out.lock().unwrap_or_else(|e| e.into_inner());
+                s.mass_kg = 0.0;
+                s.stable = false;
+                if silent == SILENT_LIMIT {
+                    log::warn!("весы молчат {SILENT_LIMIT} опросов подряд — связь потеряна");
+                }
+                s.port_up = silent < SILENT_LIMIT;
+            }
+            Err(e) => {
+                log::warn!("опрос весов: {e}; переподключение");
+                let mut s = out.lock().unwrap_or_else(|e| e.into_inner());
+                s.mass_kg = 0.0;
+                s.stable = false;
+                s.port_up = false;
+                return;
+            }
+        }
     }
 }
 #[cfg(test)]
@@ -331,5 +345,196 @@ mod tests {
             started.elapsed() < std::time::Duration::from_secs(10),
             "три цикла создания и остановки не должны занимать 10 с"
         );
+    }
+
+    /// Fake-драйвер: скрипт ответов + гейт темпа. Начиная со 2-го опроса
+    /// poll_once ждёт разрешения (gate) — тест проверяет состояние между
+    /// шагами без гонок.
+    struct FakeDriver {
+        script: Vec<Result<drivers_api::WeightSample, drivers_api::DriverError>>,
+        zero_calls: Arc<std::sync::atomic::AtomicU32>,
+        steps: Arc<std::sync::atomic::AtomicU32>,
+        gate: Arc<(std::sync::Mutex<u32>, std::sync::Condvar)>,
+        zero_ok: bool,
+    }
+    impl drivers_api::ScalesDriver for FakeDriver {
+        fn poll_once(
+            &mut self,
+            _timeout: Duration,
+        ) -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
+            let n = self.steps.fetch_add(1, Ordering::SeqCst) + 1;
+            if n >= 2 {
+                let (max, cv) = &*self.gate;
+                let mut m = max.lock().unwrap();
+                while *m < n {
+                    m = cv.wait(m).unwrap();
+                }
+            }
+            if self.script.is_empty() {
+                return Err(drivers_api::DriverError::Timeout);
+            }
+            self.script.remove(0)
+        }
+        fn zero(&mut self) -> Result<(), drivers_api::DriverError> {
+            self.zero_calls.fetch_add(1, Ordering::SeqCst);
+            if self.zero_ok {
+                Ok(())
+            } else {
+                Err(drivers_api::DriverError::Protocol("zero не поддержан".into()))
+            }
+        }
+    }
+    fn fake_snapshot() -> (Arc<Mutex<Snapshot>>, Arc<AtomicBool>, Arc<AtomicBool>) {
+        (
+            Arc::new(Mutex::new(Snapshot {
+                mass_kg: 0.0,
+                stable: false,
+                port_up: false,
+                updated_at_ms: 0,
+            })),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        )
+    }
+    fn ok_sample(g: i32, stable: bool) -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
+        Ok(drivers_api::WeightSample { mass_g: g, stable })
+    }
+    fn timeout() -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
+        Err(drivers_api::DriverError::Timeout)
+    }
+    fn port_error() -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
+        Err(drivers_api::DriverError::Io(std::io::Error::other("usb выдернут")))
+    }
+
+    #[test]
+    fn fake_scales_recover_after_silence() {
+        // Связь пропала (6 таймаутов), потом вернулась — обновление без
+        // перезапуска, старые показания затёрты новым измерением.
+        let (out, stop, zero) = fake_snapshot();
+        let gate = Arc::new((std::sync::Mutex::new(0), std::sync::Condvar::new()));
+        let mut script = vec![ok_sample(2000, true)];
+        for _ in 0..SILENT_LIMIT {
+            script.push(timeout());
+        }
+        script.push(ok_sample(1200, true));
+        let mut fake = FakeDriver {
+            script,
+            zero_calls: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            steps: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            gate: gate.clone(),
+            zero_ok: true,
+        };
+        let steps = fake.steps.clone();
+        let gate2 = gate.clone();
+        let h = {
+            let out = out.clone();
+            let stop = stop.clone();
+            std::thread::spawn(move || poll_session(&mut fake, &out, &stop, &zero))
+        };
+        let wait_for = |cond: &dyn Fn(&Snapshot) -> bool, steps_min: u32, what: &str| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                let s = out.lock().unwrap();
+                if steps.load(Ordering::SeqCst) >= steps_min && cond(&s) {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{what}: mass={} port_up={} steps={}",
+                    s.mass_kg,
+                    s.port_up,
+                    steps.load(Ordering::SeqCst)
+                );
+                drop(s);
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        };
+        wait_for(&|s| s.mass_kg == 2.0 && s.port_up, 1, "первый опрос");
+        // Отпускаем таймауты по одному; после 6-го связь считается потерянной.
+        for n in 2..=(1 + SILENT_LIMIT) {
+            let (max, cv) = &*gate2;
+            *max.lock().unwrap() = n;
+            cv.notify_all();
+            wait_for(
+                &|s| s.mass_kg == 0.0 && !s.stable,
+                n,
+                "таймаут обнуляет показание",
+            );
+        }
+        wait_for(
+            &|s| !s.port_up && s.mass_kg == 0.0,
+            1 + SILENT_LIMIT,
+            "потеря связи после молчания",
+        );
+        // Весы вернулись: новый замер применяется без перезапуска.
+        {
+            let (max, cv) = &*gate2;
+            *max.lock().unwrap() = 2 + SILENT_LIMIT;
+            cv.notify_all();
+        }
+        wait_for(
+            &|s| s.port_up && s.mass_kg == 1.2 && s.stable,
+            2 + SILENT_LIMIT,
+            "восстановление после возврата весов",
+        );
+        // Отпускаем весь темп и останавливаем сессию.
+        {
+            let (max, cv) = &*gate2;
+            *max.lock().unwrap() = u32::MAX;
+            cv.notify_all();
+        }
+        stop.store(true, Ordering::Relaxed);
+        h.join().unwrap();
+    }
+
+    #[test]
+    fn fake_scales_port_error_ends_session_with_clean_state() {
+        // Порт отвалился (USB выдернут): сессия завершается, состояние чистое,
+        // poll_loop переоткроет соединение — перезапуск приложения не нужен.
+        let (out, stop, zero) = fake_snapshot();
+        let mut fake = FakeDriver {
+            script: vec![ok_sample(1500, true), port_error()],
+            zero_calls: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            steps: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            gate: Arc::new((std::sync::Mutex::new(u32::MAX), std::sync::Condvar::new())),
+            zero_ok: true,
+        };
+        poll_session(&mut fake, &out, &stop, &zero);
+        let s = out.lock().unwrap();
+        assert!(!s.port_up);
+        assert!(!s.stable);
+        assert_eq!(s.mass_kg, 0.0, "после разрыва старые показания не остаются");
+    }
+
+    #[test]
+    fn fake_scales_stop_flag_ends_session() {
+        let (out, stop, zero) = fake_snapshot();
+        let mut fake = FakeDriver {
+            script: vec![],
+            zero_calls: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            steps: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            gate: Arc::new((std::sync::Mutex::new(u32::MAX), std::sync::Condvar::new())),
+            zero_ok: true,
+        };
+        stop.store(true, Ordering::Relaxed);
+        poll_session(&mut fake, &out, &stop, &zero);
+        assert!(!out.lock().unwrap().port_up);
+    }
+
+    #[test]
+    fn fake_scales_zero_request_reaches_driver() {
+        let (out, stop, zero) = fake_snapshot();
+        let zero_calls = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let mut fake = FakeDriver {
+            script: vec![ok_sample(500, false), port_error()],
+            zero_calls: zero_calls.clone(),
+            steps: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            gate: Arc::new((std::sync::Mutex::new(u32::MAX), std::sync::Condvar::new())),
+            zero_ok: true,
+        };
+        zero.store(true, Ordering::Relaxed);
+        poll_session(&mut fake, &out, &stop, &zero);
+        assert_eq!(zero_calls.load(Ordering::SeqCst), 1, "обнуление дошло до драйвера");
+        assert!(!out.lock().unwrap().stable, "нестабильный вес не помечен стабильным");
     }
 }

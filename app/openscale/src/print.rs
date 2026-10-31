@@ -1750,6 +1750,58 @@ mod tests {
         let err = print_for_item(&cfg, &sample(), 1350).unwrap_err();
         assert!(matches!(err, PrintError::PrinterDisabled));
     }
+
+    // L4-байты принтера: 0x36 — норма без этикетки в лотке, 0x16 — норма
+    // с этикеткой в лотке, 0x12 — валидный, но с битом ошибки.
+    const L4_OK: u8 = 0x36;
+    const L4_IN_TRAY: u8 = 0x16;
+    const L4_FAULT: u8 = 0x12;
+
+    #[test]
+    fn monitor_marks_fault_after_two_confirmations_and_clears_it() {
+        let mut mon = Monitor::default();
+        mon.feed(Some(L4_OK));
+        assert!(!mon.health.fault, "норма — аварии нет");
+        mon.feed(Some(L4_FAULT));
+        assert!(!mon.health.fault, "один сбой — ещё не авария");
+        mon.feed(Some(L4_FAULT));
+        assert!(mon.health.fault, "два подтверждения — авария");
+        mon.feed(Some(L4_OK));
+        assert!(!mon.health.fault, "норма сняла аварию");
+        assert_eq!(mon.recover_attempts, 0, "счётчик восстановления сброшен");
+    }
+
+    #[test]
+    fn monitor_silence_is_fault_and_stops_label_wait() {
+        let mut mon = Monitor::default();
+        mon.feed(Some(L4_IN_TRAY));
+        assert!(mon.health.label_waiting);
+        for _ in 0..SILENT_CONFIRM {
+            mon.feed(None);
+        }
+        assert!(mon.health.fault, "принтер молчит — авария");
+        assert!(!mon.health.label_waiting, "ожидание этикетки снято");
+        // Восстановление ответов убирает аварию.
+        mon.feed(Some(L4_OK));
+        assert!(!mon.health.fault, "принтер снова отвечает — авария снята");
+    }
+
+    #[test]
+    fn monitor_note_failure_is_immediate_fault() {
+        let mut mon = Monitor::default();
+        mon.feed(Some(L4_OK));
+        mon.note_failure();
+        assert!(mon.health.fault);
+    }
+
+    #[test]
+    fn monitor_label_watch_resets_when_label_removed() {
+        let mut mon = Monitor::default();
+        mon.feed(Some(L4_IN_TRAY));
+        assert!(mon.health.label_waiting);
+        mon.feed(Some(L4_OK));
+        assert!(!mon.health.label_waiting, "этикетку забрали");
+    }
     fn tmp_db() -> std::path::PathBuf {
         static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);

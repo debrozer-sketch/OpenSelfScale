@@ -318,7 +318,8 @@ fn fetch_string(ftp: &mut FtpStream, path: &str) -> Result<String, String> {
             MAX_XML_BYTES / 1024 / 1024
         ));
     }
-    String::from_utf8(bytes).map_err(|_| format!("{path}: не UTF-8"))
+    let dummy = std::path::PathBuf::from(path);
+    decode_xml(&dummy, bytes)
 }
 fn fetch_bytes(ftp: &mut FtpStream, path: &str) -> Result<Vec<u8>, String> {
     let bytes = ftp
@@ -332,6 +333,21 @@ fn fetch_bytes(ftp: &mut FtpStream, path: &str) -> Result<Vec<u8>, String> {
         ));
     }
     Ok(bytes)
+}
+/// Декодирует XML выгрузки. Кассовая система иногда дописывает мусор после
+/// закрывающего `</body>` (вплоть до обрывка другого документа со своим
+/// `</body>`) — берём первый маркер: полезная часть остаётся строгим UTF-8.
+fn decode_xml(name: &std::path::Path, bytes: Vec<u8>) -> Result<String, String> {
+    let end = match bytes.windows(7).position(|w| w == b"</body>") {
+        Some(p) => p + 7,
+        None => bytes.len(),
+    };
+    String::from_utf8(bytes[..end].to_vec())
+        .map_err(|_| format!("{}: файл не UTF-8, проверьте выгрузку на сервере", name.display()))
+}
+fn read_xml(name: &std::path::Path) -> Result<String, String> {
+    let bytes = std::fs::read(name).map_err(|e| format!("{}: {e}", name.display()))?;
+    decode_xml(name, bytes)
 }
 fn apply_upload(
     cfg: &Config,
@@ -348,16 +364,16 @@ fn apply_upload(
             .collect::<Vec<_>>(),
     );
     let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|e| format!("транзакция: {e}"))?;
-    let imported = datastore::import_plu(&tx, items).map_err(|e| format!("импорт: {e}"))?;
-    let removed = datastore::remove_absent(&tx, items).map_err(|e| format!("удаление снятых: {e}"))?;
+    // Каждая операция сама открывает транзакцию: вложенный BEGIN запрещён в
+    // SQLite, поэтому внешняя обёртка здесь не используется. Сбой между
+    // операциями оставляет частично обновлённый каталог до следующей выгрузки.
+    let imported = datastore::import_plu(&conn, items).map_err(|e| format!("импорт: {e}"))?;
+    let removed = datastore::remove_absent(&conn, items).map_err(|e| format!("удаление снятых: {e}"))?;
     let removed_note = if removed > 0 { format!(", снято {removed}") } else { String::new() };
     let layout_note = match groups {
         Some(g) => {
             let (regrouped, orphans) =
-                datastore::apply_layout(&tx, g).map_err(|e| format!("раскладка: {e}"))?;
+                datastore::apply_layout(&conn, g).map_err(|e| format!("раскладка: {e}"))?;
             format!(
                 ", раскладка: {} групп / {} переназначено / {} без группы",
                 g.len(),
@@ -367,7 +383,6 @@ fn apply_upload(
         }
         None => String::new(),
     };
-    tx.commit().map_err(|e| format!("коммит приёма: {e}"))?;
     Ok((imported, format!("{removed_note}{layout_note}")))
 }
 pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
@@ -414,7 +429,7 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    let plu_data = std::fs::read_to_string(&plu).map_err(|e| format!("{}: {e}", plu.display()))?;
+    let plu_data = read_xml(&plu)?;
     let plu_cap = snapshot_meta(&plu);
     let (items, skipped) = if external {
         let canon = run_external(&cfg.center.external_cmd, &plu)?;
@@ -430,8 +445,7 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     }
     let layout = dir.join("layout.xml");
     let (groups, ldata, layout_cap) = if layout.exists() {
-        let s = std::fs::read_to_string(&layout)
-            .map_err(|e| format!("{}: {e}", layout.display()))?;
+        let s = read_xml(&layout)?;
         let g = datastore::parse_layout_xml(&s)
             .map_err(|e| format!("разбор layout.xml: {e}"))?;
         let cap = snapshot_meta(&layout);
@@ -703,6 +717,27 @@ mod tests {
         let cap = snapshot_meta(&p);
         assert!(delete_if_unchanged(&p, cap));
         assert!(stranger.exists(), "посторонний файл не трогается");
+    }
+    #[test]
+    fn xml_with_trailing_garbage_after_body_is_accepted() {
+        // Касса дописала мусор (битый UTF-8, вплоть до обрывка со своим
+        // </body>): полезная часть принимается по ПЕРВОМУ маркеру.
+        let name = std::path::PathBuf::from("/var/ftp/scale/plu.xml");
+        let mut bytes = b"<body>\r\n<item plunumber=\"1\" price=\"100\" namefirst=\"A\" />\r\n</body>\r\n"
+            .to_vec();
+        bytes.extend_from_slice(&[0x96, 0xD0, 0x95, 0xFF, 0xFE]);
+        bytes.extend_from_slice(b"\" namesecond=\"\" />dfg</body>\r\n");
+        let s = decode_xml(&name, bytes).expect("мусор обрезан, XML декодирован");
+        assert!(s.ends_with("</body>"), "обрезка по первому маркеру: {s:?}");
+        assert!(s.contains("</body>"));
+        let (items, _) = datastore::parse_plu_xml_counted(&s).expect("парсер принимает");
+        assert_eq!(items.len(), 1);
+    }
+    #[test]
+    fn xml_fully_broken_encoding_is_rejected() {
+        let name = std::path::PathBuf::from("/var/ftp/scale/plu.xml");
+        let bytes = vec![0xFF, 0xFE, 0xD1, 0x8F];
+        assert!(decode_xml(&name, bytes).is_err(), "без маркера </body> битый файл отклонён");
     }
     #[test]
     fn canonical_json_minimal_and_optional() {
