@@ -2174,21 +2174,30 @@ fn refresh_action_log(cfg: &crate::config::Config, ui_handle: &slint::Weak<MainW
         });
     });
 }
+/// Поколение запроса отчёта: устаревший асинхронный результат
+/// (пользователь уже сменил период/тип) не перезаписывает экран.
+static REPORT_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn refresh_report(
     cfg: &crate::config::Config,
     kiosk: &std::rc::Rc<std::cell::RefCell<crate::session::Kiosk>>,
     ui_handle: &slint::Weak<MainWindow>,
-) {    let (period, kind) = {
+) {
+    let (period, kind) = {
         let k = kiosk.borrow();
         (k.report_period, k.report_kind)
     };
     if let Some(ui) = ui_handle.upgrade() {
         ui.set_report_text("Собираю отчёт…".into());
     }
+    let my_gen = REPORT_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     let cfg = cfg.clone();
     let ui_handle = ui_handle.clone();
     std::thread::spawn(move || {
         let text = build_report(&cfg, period, kind);
+        if REPORT_GEN.load(std::sync::atomic::Ordering::SeqCst) != my_gen {
+            log::info!("отчёт: результат устарел — пропущен");
+            return;
+        }
         slint::invoke_from_event_loop(move || {
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_report_text(text.into());

@@ -26,6 +26,7 @@ pub struct WeightSource {
     inner: Arc<Mutex<Snapshot>>,
     stop: Arc<AtomicBool>,
     zero: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
 }
 impl WeightSource {
     pub fn spawn(profile: &ScalesProfile) -> Self {
@@ -42,7 +43,8 @@ impl WeightSource {
         let stop_t = stop.clone();
         let zero_t = zero.clone();
         let inner_g = inner.clone();
-        std::thread::Builder::new()
+        let stop_t2 = stop.clone();
+        let handle = std::thread::Builder::new()
             .name("weight-poll".into())
             .spawn(move || {
                 loop {
@@ -58,14 +60,17 @@ impl WeightSource {
                             s.port_up = false;
                             s.stable = false;
                         }
-                        std::thread::sleep(Duration::from_secs(2));
+                        if stop_t2.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        sleep_interruptible(&stop_t2, Duration::from_secs(2));
                     } else {
                         break;
                     }
                 }
             })
             .expect("spawn weight thread");
-        Self { inner, stop, zero }
+        Self { inner, stop, zero, handle: Some(handle) }
     }
     pub fn snapshot(&self) -> Snapshot {
         let mut s = *self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -79,6 +84,19 @@ impl WeightSource {
 impl Drop for WeightSource {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+/// Ожидание с проверкой stop: Drop не ждёт лишних секунд.
+fn sleep_interruptible(stop: &AtomicBool, total: Duration) {
+    let step = Duration::from_millis(100);
+    let mut left = total;
+    while left > step && !stop.load(Ordering::Relaxed) {
+        std::thread::sleep(step);
+        left -= step;
     }
 }
 #[cfg(unix)]
@@ -238,7 +256,7 @@ fn poll_loop(
                 s.stable = false;
             }
         }
-        std::thread::sleep(Duration::from_secs(3));
+        sleep_interruptible(&stop, Duration::from_secs(3));
     }
 }
 #[cfg(test)]

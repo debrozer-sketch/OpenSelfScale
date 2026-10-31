@@ -96,7 +96,22 @@ fn run_external(cmd: &str, input: &Path) -> Result<String, String> {
                 let _ = child.wait();
                 break Err(format!("конвертер не уложился в {} с", EXTERNAL_TIMEOUT.as_secs()));
             }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Ok(None) => {
+                // Лимит проверяем во время записи: конвертер, пишущий
+                // неограниченно, не должен успеть заполнить диск.
+                if let Ok(m) = std::fs::metadata(&out_path) {
+                    if m.len() > EXTERNAL_MAX_OUT {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        let _ = std::fs::remove_file(&out_path);
+                        break Err(format!(
+                            "вывод конвертера превысил лимит {} МБ — процесс остановлен",
+                            EXTERNAL_MAX_OUT / (1024 * 1024)
+                        ));
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
             Err(e) => break Err(format!("ожидание конвертера: {e}")),
         }
     };
@@ -116,45 +131,86 @@ fn run_external(cmd: &str, input: &Path) -> Result<String, String> {
     String::from_utf8(raw).map_err(|_| "вывод конвертера — не UTF-8".into())
 }
 const ARCHIVE_KEEP: usize = 240;
-const LOCK_STALE_SECS: u64 = 600;
+/// Владение блокировкой гарантирует ядро: flock снимается при смерти
+/// процесса, поэтому эвристика «файл старше N секунд» не нужна и опасна
+/// (снятие чужого актива + удаление чужого лока в Drop). Файл sync.lock
+/// постоянный: общий inode исключает гонку повторного создания.
 #[derive(Debug)]
 pub struct SyncLock {
+    // Файл держится открытым: flock живёт, пока жив дескриптор.
+    #[cfg(unix)]
+    _file: std::fs::File,
+    #[cfg(not(unix))]
     path: std::path::PathBuf,
 }
 impl Drop for SyncLock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        // unix: flock снимется при закрытии файла, сам файл не удаляем.
+        #[cfg(not(unix))]
+        {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 pub fn take_lock(dir: &Path) -> Result<SyncLock, String> {
-    let path = dir.join("sync.lock");
-    for attempt in 0..2 {
-        match std::fs::OpenOptions::new()
+    #[cfg(unix)]
+    {
+        use std::os::unix::io::AsRawFd;
+        let path = dir.join("sync.lock");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
             .write(true)
-            .create_new(true)
+            .read(true)
             .open(&path)
-        {
-            Ok(_) => return Ok(SyncLock { path }),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                let stale = std::fs::metadata(&path)
-                    .ok()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.elapsed().ok())
-                    .map(|d| d.as_secs() > LOCK_STALE_SECS)
-                    .unwrap_or(false);
-                if stale && attempt == 0 {
-                    log::warn!("sync.lock старше {LOCK_STALE_SECS} с — считаю зависшим, снимаю");
-                    let _ = std::fs::remove_file(&path);
-                    continue;
-                }
-                return Err(
-                    "каталог обмена занят другим процессом приёма (sync.lock удерживается)".into(),
-                );
-            }
-            Err(e) => return Err(format!("sync.lock: {e}")),
+            .map_err(|e| format!("sync.lock: {e}"))?;
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if rc != 0 {
+            let e = std::io::Error::last_os_error();
+            return if e.kind() == std::io::ErrorKind::WouldBlock {
+                Err(
+                    "каталог обмена занят другим процессом приёма (sync.lock удерживается)"
+                        .into(),
+                )
+            } else {
+                Err(format!("sync.lock: {e}"))
+            };
         }
+        Ok(SyncLock { _file: file })
     }
-    unreachable!("lock retry loop")
+    #[cfg(not(unix))]
+    {
+        let path = dir.join("sync.lock");
+        for attempt in 0..2 {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(_) => return Ok(SyncLock { path }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // Windows-ветка (тесты): эвристика устаревания сохранена.
+                    const LOCK_STALE_SECS: u64 = 600;
+                    let stale = std::fs::metadata(&path)
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.elapsed().ok())
+                        .map(|d| d.as_secs() > LOCK_STALE_SECS)
+                        .unwrap_or(false);
+                    if stale && attempt == 0 {
+                        log::warn!("sync.lock старше {LOCK_STALE_SECS} с — считаю зависшим, снимаю");
+                        let _ = std::fs::remove_file(&path);
+                        continue;
+                    }
+                    return Err(
+                        "каталог обмена занят другим процессом приёма (sync.lock удерживается)"
+                            .into(),
+                    );
+                }
+                Err(e) => return Err(format!("sync.lock: {e}")),
+            }
+        }
+        unreachable!("lock retry loop")
+    }
 }
 type MetaCap = (u64, std::time::SystemTime);
 fn snapshot_meta(p: &Path) -> Option<MetaCap> {

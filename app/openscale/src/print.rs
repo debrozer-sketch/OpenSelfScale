@@ -1513,6 +1513,7 @@ pub fn print_ruler_probe(cfg: &crate::config::Config) -> Result<(), PrintError> 
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
+#[cfg(test)]
 pub fn print_for_item(
     cfg: &crate::config::Config,
     item: &PluItem,

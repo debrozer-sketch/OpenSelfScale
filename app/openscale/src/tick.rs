@@ -102,18 +102,33 @@ pub fn start(
                 if ui.get_popup_open() {
                     if let Some(p) = k.pending.clone() {
                         let r = trade.rounding.get();
-                        ui.set_popup_empty(ws == 0);
+                        // Показывать массу и сумму только по актуальному
+                        // измерению: устаревший снимок (связь потеряна/нет
+                        // данных) не участвует в расчёте покупки.
+                        let live = ws == 2 && snap.port_up;
+                        ui.set_popup_empty(!live);
                         ui.set_popup_under_min(
-                            snap.mass_kg > 0.0 && snap.mass_kg < trade.min_weight_g.get() / 1000.0,
+                            live && snap.mass_kg > 0.0
+                                && snap.mass_kg < trade.min_weight_g.get() / 1000.0,
                         );
-                        ui.set_popup_weight(format!("{:.3} кг", snap.mass_kg).into());
-                        let g = (snap.mass_kg.max(0.0) * 1000.0).round() as u32;
-                        ui.set_popup_sum(sum_str(round_sum(sum_kopecks(p.price, g), r)).into());
-                        ui.set_popup_card_sum(
-                            p.card_price
-                                .map(|c| sum_str(round_sum(sum_kopecks(c, g), r)))
-                                .unwrap_or_default()
+                        ui.set_popup_weight(
+                            if live { format!("{:.3} кг", snap.mass_kg) } else { "—".into() }
                                 .into(),
+                        );
+                        let g = if live { (snap.mass_kg.max(0.0) * 1000.0).round() as u32 } else { 0 };
+                        ui.set_popup_sum(
+                            if live { sum_str(round_sum(sum_kopecks(p.price, g), r)) } else { "—".into() }
+                                .into(),
+                        );
+                        ui.set_popup_card_sum(
+                            if live {
+                                p.card_price
+                                    .map(|c| sum_str(round_sum(sum_kopecks(c, g), r)))
+                                    .unwrap_or_default()
+                            } else {
+                                "—".into()
+                            }
+                            .into(),
                         );
                     }
                 }
