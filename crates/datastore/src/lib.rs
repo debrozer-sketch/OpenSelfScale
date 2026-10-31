@@ -510,11 +510,22 @@ pub fn print_popularity(
     }
     Ok(out)
 }
-pub fn print_log_add(conn: &Connection, row: &PrintLogRow) {
-    let _ = conn.execute(
+/// Записывает попытку печати до передачи на принтер и возвращает rowid:
+/// операция фиксируется первой, крах процесса после записи не теряет её.
+pub fn print_log_add(conn: &Connection, row: &PrintLogRow) -> Result<i64, StoreError> {
+    conn.execute(
         "INSERT INTO print_log (ts, plu, name, weight_g, sum_kop, ok)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![row.ts, row.plu, row.name, row.weight_g, row.sum_kop, row.ok as i64],
+    )
+    .map(|_| conn.last_insert_rowid())
+    .map_err(StoreError::from)
+}
+/// Помечает исход попытки печати по rowid после завершения задания.
+pub fn print_log_mark(conn: &Connection, rowid: i64, ok: bool) {
+    let _ = conn.execute(
+        "UPDATE print_log SET ok = ?2 WHERE rowid = ?1",
+        rusqlite::params![rowid, ok as i64],
     );
 }
 pub fn print_log_count_since(conn: &Connection, ts: i64) -> Result<i64, StoreError> {
@@ -951,15 +962,55 @@ mod tests {
             ok,
         };
         for _ in 0..3 {
-            print_log_add(&conn, &row(2000, "10", true));
+            let _ = print_log_add(&conn, &row(2000, "10", true));
         }
-        print_log_add(&conn, &row(2000, "20", true));
-        print_log_add(&conn, &row(2000, "20", false));
-        print_log_add(&conn, &row(100, "30", true));
+        let _ = print_log_add(&conn, &row(2000, "20", true));
+        let _ = print_log_add(&conn, &row(2000, "20", false));
+        let _ = print_log_add(&conn, &row(100, "30", true));
         let pop = print_popularity(&conn, 1000).unwrap();
         assert_eq!(pop.get("10"), Some(&3));
         assert_eq!(pop.get("20"), Some(&1), "ошибочные печати не считаются");
         assert_eq!(pop.get("30"), None, "старше окна — не считается");
+    }
+    #[test]
+    fn print_log_mark_updates_attempt_outcome() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        let row = |ok: bool| PrintLogRow {
+            ts: 2000,
+            plu: Some("10".into()),
+            name: Some("СЫР".into()),
+            weight_g: Some(500),
+            sum_kop: Some(1000),
+            ok,
+        };
+        let id_ok = print_log_add(&conn, &row(false)).unwrap();
+        let id_err = print_log_add(&conn, &row(false)).unwrap();
+        assert_ne!(id_ok, id_err, "rowid попыток различается");
+        print_log_mark(&conn, id_ok, true);
+        print_log_mark(&conn, id_err, false);
+        let ok_rows = print_log_count_filtered(&conn, None, Some(true)).unwrap();
+        let err_rows = print_log_count_filtered(&conn, None, Some(false)).unwrap();
+        assert_eq!(ok_rows, 1, "успешная попытка помечена как продажа");
+        assert_eq!(err_rows, 1, "неудачная попытка осталась ошибкой");
+    }
+    #[test]
+    fn print_log_attempt_survives_without_mark() {
+        // Запись до печати: без пометки результатом попытка остаётся ok=0 —
+        // крах процесса после фиксации не теряет операцию.
+        let conn = open(":memory:".as_ref()).unwrap();
+        let row = PrintLogRow {
+            ts: 2000,
+            plu: Some("10".into()),
+            name: Some("СЫР".into()),
+            weight_g: Some(1350),
+            sum_kop: Some(26999),
+            ok: false,
+        };
+        let total = print_log_count_filtered(&conn, None, None).unwrap();
+        assert_eq!(total, 0);
+        let _ = print_log_add(&conn, &row).unwrap();
+        let total = print_log_count_filtered(&conn, None, None).unwrap();
+        assert_eq!(total, 1, "зафиксированная попытка видна в журнале");
     }
     #[test]
     fn action_log_adds_and_rotates() {

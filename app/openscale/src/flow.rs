@@ -73,7 +73,11 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             let mut k = kiosk.borrow_mut();
             let Some(entry) = k.pending.clone() else { return };
             let min_kg = trade.min_weight_g.get() / 1000.0;
-            let ws = weight_state(&app_state.snapshot(), min_kg);
+            // Один снимок на подтверждение: та же масса, по которой popup
+            // показывал сумму, становится весом этикетки. Пересчёт в тике
+            // не выполняется — сумма подтверждения равна сумме печати.
+            let snap = app_state.snapshot();
+            let ws = weight_state(&snap, min_kg);
             if ws != 2 {
                 return;
             }
@@ -90,6 +94,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                     return;
                 }
             };
+            k.print_weight_g = Some(((snap.mass_kg.max(0.0)) * 1000.0).round() as u32);
             k.pending = None;
             k.selected = Some(item);
             k.phase = 2;

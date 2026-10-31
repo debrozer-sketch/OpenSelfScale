@@ -513,6 +513,9 @@ pub enum PrinterRequest {
         ack: mpsc::Sender<Result<(), String>>,
         queued_at: std::time::Instant,
         meta: Option<PrintMeta>,
+        /// rowid записи попытки в журнале печатей: после задания
+        /// демон помечает исход (ok=true/false) по этой строке.
+        log_rowid: Option<i64>,
         cancel: Arc<std::sync::atomic::AtomicBool>,
     },
     Feed { ack: mpsc::Sender<Result<(), String>> },
@@ -882,7 +885,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
             next_prune = std::time::Instant::now() + Duration::from_secs(6 * 3600);
         }
         match rx.recv_timeout(mon.next_probe()) {
-            Ok(PrinterRequest::Print { bytes, ack, queued_at, meta, cancel }) => {
+            Ok(PrinterRequest::Print { bytes, ack, queued_at, meta, log_rowid, cancel }) => {
                 if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                     finish(ack, Err("задание печати отменено".into()), "отмена");
                     continue;
@@ -905,22 +908,27 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 }
                 let print_ok = res.is_ok();
                 finish(ack, res, "печать");
-                if let Some(m) = meta {
+                if log_rowid.is_some() || meta.is_some() {
                     if let Ok(conn) = datastore::open(&cfg.db_path) {
-                        datastore::print_log_add(
-                            &conn,
-                            &datastore::PrintLogRow {
-                                ts: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map(|d| d.as_secs() as i64)
-                                    .unwrap_or(0),
-                                plu: Some(m.plu),
-                                name: Some(m.name),
-                                weight_g: Some(m.weight_g as i64),
-                                sum_kop: Some(m.sum_kop),
-                                ok: print_ok,
-                            },
-                        );
+                        if let Some(rowid) = log_rowid {
+                            datastore::print_log_mark(&conn, rowid, print_ok);
+                        } else if let Some(m) = meta {
+                            // Легаси-путь без журнала попытки: пишем как раньше.
+                            let _ = datastore::print_log_add(
+                                &conn,
+                                &datastore::PrintLogRow {
+                                    ts: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_secs() as i64)
+                                        .unwrap_or(0),
+                                    plu: Some(m.plu),
+                                    name: Some(m.name),
+                                    weight_g: Some(m.weight_g as i64),
+                                    sum_kop: Some(m.sum_kop),
+                                    ok: print_ok,
+                                },
+                            );
+                        }
                     }
                 }
             }
@@ -1550,6 +1558,29 @@ pub fn print_for_item_with_cancel(
         crate::session::sum_kopecks(item.price, weight_g),
         rounding,
     );
+    // Фиксация попытки до передачи на принтер: крах процесса после записи
+    // оставляет операцию в журнале (ok=0), ошибка печати не теряет её.
+    // БД недоступна — печать не выполняется: продажа без записи запрещена.
+    let log_rowid = match datastore::print_log_add(
+        &conn,
+        &datastore::PrintLogRow {
+            ts: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+            plu: Some(item.plu.clone()),
+            name: Some(item.namefirst.clone()),
+            weight_g: Some(i64::from(weight_g)),
+            sum_kop: Some(sum_kop),
+            ok: false,
+        },
+    ) {
+        Ok(id) => Some(id),
+        Err(e) => {
+            log::error!("печать: журнал недоступен ({e}) — операция не зафиксирована");
+            return Err(PrintError::Store(e));
+        }
+    };
     request(|ack| {
         PrinterRequest::Print {
             bytes,
@@ -1561,6 +1592,7 @@ pub fn print_for_item_with_cancel(
                 weight_g,
                 sum_kop,
             }),
+            log_rowid,
             cancel,
         }
     })

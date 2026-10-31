@@ -155,47 +155,33 @@ pub fn start(
                         }
                     }
                 }
-                if k.phase == 1 && k.selected.is_none() {
-                    k.phase = 0;
-                }
-                if k.phase == 1 && ws == 2 {
-                    k.phase = 2;
-                }
-                if k.phase == 1 && !snap.port_up {
-                    log::warn!("печать отменена: связь с весовым модулем потеряна");
-                    k.phase = 0;
-                    k.selected = None;
-                    k.pending = None;
-                }
                 // B16: пока принтер ждёт снятия этикетки или бумага кончилась —
                 // новую этикетку не выдаём, покупатель должен забрать предыдущую.
                 let tray_blocked = ph.label_waiting || ph.paper_end;
-                if k.phase == 2 && !tray_blocked && k.print_weight_g.is_none() {
-                    let weight_g = (snap.mass_kg * 1000.0).round() as i64;
-                    if weight_g <= 0 || ws != 2 {
-                        k.phase = 1;
-                    } else {
-                        let weight_g = weight_g as u32;
-                        k.print_weight_g = Some(weight_g);
-                        k.print_op += 1;
-                        k.print_at = Some(Instant::now());
-                        let cfg = cfg.clone();
-                        let tx = print_tx.clone();
-                        let op = k.print_op;
-                        let item = k.selected.as_ref().cloned();
-                        let plu = item.as_ref().map(|p| p.plu.clone()).unwrap_or_default();
-                        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                        k.cancel_print = Some(cancel.clone());
-                        log::info!("печать: PLU {plu}, {weight_g} г (операция #{op})");
-                        std::thread::spawn(move || {
-                            let res = match item {
-                                Some(item) => print::print_for_item_with_cancel(&cfg, &item, weight_g, cancel)
-                                    .map_err(|e| format!("{e}")),
-                                None => Err("позиция не выбрана".into()),
-                            };
-                            let _ = tx.send((op, res.map(|_| weight_g)));
-                        });
-                    }
+                // Вес уже зафиксирован при подтверждении (on_plu_confirm) —
+                // тик только запускает печать, массу не пересчитывает.
+                if k.phase == 2 && !tray_blocked && k.print_at.is_none()
+                    && k.print_weight_g.is_some_and(|g| g > 0)
+                {
+                    let weight_g = k.print_weight_g.unwrap_or(0);
+                    k.print_op += 1;
+                    k.print_at = Some(Instant::now());
+                    let cfg = cfg.clone();
+                    let tx = print_tx.clone();
+                    let op = k.print_op;
+                    let item = k.selected.as_ref().cloned();
+                    let plu = item.as_ref().map(|p| p.plu.clone()).unwrap_or_default();
+                    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    k.cancel_print = Some(cancel.clone());
+                    log::info!("печать: PLU {plu}, {weight_g} г (операция #{op})");
+                    std::thread::spawn(move || {
+                        let res = match item {
+                            Some(item) => print::print_for_item_with_cancel(&cfg, &item, weight_g, cancel)
+                                .map_err(|e| format!("{e}")),
+                            None => Err("позиция не выбрана".into()),
+                        };
+                        let _ = tx.send((op, res.map(|_| weight_g)));
+                    });
                 }
                 const PRINT_TIMEOUT: Duration = Duration::from_secs(30);
                 if k.phase == 2 && k.print_weight_g.is_some()
@@ -249,6 +235,10 @@ pub fn start(
                     k.admin_open = true;
                     k.admin_stage = 20;
                     k.admin_idle = Some(Instant::now());
+                    // Сброс состояния затрагивает только kiosk: открытый
+                    // popup подтверждения гасим, иначе он висит над витриной
+                    // с уже очищенным pending.
+                    ui.set_popup_open(false);
                 };
                 if k.phase < 2 && !k.admin_open {
                     if k.idle_since.is_none() {
@@ -260,6 +250,7 @@ pub fn start(
                             crate::settings::render_setup();
                             return;
                         }
+                        ui.set_popup_open(false);
                         k.reset_state();
                         go_root();
                     }
@@ -281,6 +272,7 @@ pub fn start(
                             crate::settings::render_setup();
                             return;
                         }
+                        ui.set_popup_open(false);
                         k.reset_state();
                         go_root();
                     }
