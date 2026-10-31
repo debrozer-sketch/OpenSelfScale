@@ -792,7 +792,7 @@ pub fn ean_code5_collisions(
     out.sort();
     Ok(out)
 }
-pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
+fn validate_plu_items(items: &[PluItem]) -> Result<(), StoreError> {
     for it in items {
         if it.price <= 0 || it.price > MAX_PRICE_KOP {
             return Err(StoreError::Xml(format!(
@@ -809,8 +809,11 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
             }
         }
     }
-    let tx = conn.unchecked_transaction()?;
-    let mut stmt = tx.prepare(
+    Ok(())
+}
+/// Шаг импорта без открытия транзакции: вызывает внутри внешней tx.
+fn import_plu_step(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
+    let mut stmt = conn.prepare(
         "INSERT INTO plucodes
              (plu, price, card_price, itemcode, groupcode, namefirst, namesecond, shelflife, \"group\")
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -841,7 +844,9 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
         ])?;
     }
     drop(stmt);
-    tx.commit()?;
+    Ok(n)
+}
+fn warn_ean_collisions(conn: &Connection) {
     match ean_code5_collisions(conn) {
         Ok(cols) => {
             for (code5, plus) in &cols {
@@ -853,31 +858,63 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
         }
         Err(e) => log::warn!("импорт: проверка коллизий штрихкодов: {e}"),
     }
+}
+pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
+    validate_plu_items(items)?;
+    let tx = conn.unchecked_transaction()?;
+    let n = import_plu_step(&tx, items)?;
+    tx.commit()?;
+    warn_ean_collisions(conn);
     Ok(n)
 }
-pub fn remove_absent(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
-    let tx = conn.unchecked_transaction()?;
-    let existing: i64 = tx.query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))?;
+/// Шаг снятия отсутствующих без открытия транзакции.
+fn remove_absent_step(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
+    let existing: i64 = conn.query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))?;
     if existing >= 20 && (items.len() as i64) * 2 < existing {
         return Err(StoreError::Xml(format!(
             "в выгрузке {} товаров при {existing} в базе: подозрение на обрезанный файл, снятие отменено",
             items.len()
         )));
     }
-    tx.execute_batch("CREATE TEMP TABLE incoming_plu (plu TEXT PRIMARY KEY)")?;
+    conn.execute_batch("CREATE TEMP TABLE incoming_plu (plu TEXT PRIMARY KEY)")?;
     {
-        let mut stmt = tx.prepare("INSERT OR IGNORE INTO incoming_plu (plu) VALUES (?1)")?;
+        let mut stmt = conn.prepare("INSERT OR IGNORE INTO incoming_plu (plu) VALUES (?1)")?;
         for it in items {
             stmt.execute([&it.plu])?;
         }
     }
-    let n = tx.execute(
+    let n = conn.execute(
         "DELETE FROM plucodes WHERE plu NOT IN (SELECT plu FROM incoming_plu)",
         [],
     )?;
-    tx.execute_batch("DROP TABLE incoming_plu")?;
+    conn.execute_batch("DROP TABLE incoming_plu")?;
+    Ok(n)
+}
+pub fn remove_absent(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
+    let tx = conn.unchecked_transaction()?;
+    let n = remove_absent_step(&tx, items)?;
     tx.commit()?;
     Ok(n)
+}
+/// Атомарное применение одной выгрузки: импорт + снятие отсутствующих +
+/// раскладка. Либо все изменения фиксируются, либо при любой ошибке база
+/// остаётся в прежнем состоянии.
+pub fn apply_upload(
+    conn: &Connection,
+    items: &[PluItem],
+    groups: Option<&[(String, Vec<String>)]>,
+) -> Result<(usize, usize, Option<(usize, usize)>), StoreError> {
+    validate_plu_items(items)?;
+    let tx = conn.unchecked_transaction()?;
+    let imported = import_plu_step(&tx, items)?;
+    let removed = remove_absent_step(&tx, items)?;
+    let layout = match groups {
+        Some(g) => Some(apply_layout_step(&tx, g)?),
+        None => None,
+    };
+    tx.commit()?;
+    warn_ean_collisions(conn);
+    Ok((imported, removed, layout))
 }
 pub fn parse_plu_xml(data: &str) -> Result<Vec<PluItem>, StoreError> {
     parse_plu_xml_counted(data).map(|(items, _)| items)
@@ -1033,6 +1070,32 @@ pub fn parse_layout_xml(data: &str) -> Result<Vec<(String, Vec<String>)>, StoreE
     }
     Ok(groups)
 }
+/// Шаг раскладки без открытия транзакции.
+fn apply_layout_step(
+    conn: &Connection,
+    groups: &[(String, Vec<String>)],
+) -> Result<(usize, usize), StoreError> {
+    if groups.is_empty() {
+        return Ok((0, 0));
+    }
+    conn.execute("UPDATE plucodes SET groupcode = ''", [])?;
+    let mut regrouped = 0usize;
+    for (group, plus) in groups {
+        for plu in plus {
+            regrouped += conn
+                .execute(
+                    "UPDATE plucodes SET groupcode = ?1 WHERE plu = ?2",
+                    rusqlite::params![group, plu],
+                )?;
+        }
+    }
+    let orphans: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM plucodes WHERE groupcode = ''",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok((regrouped, orphans as usize))
+}
 pub fn apply_layout(
     conn: &Connection,
     groups: &[(String, Vec<String>)],
@@ -1041,24 +1104,9 @@ pub fn apply_layout(
         return Ok((0, 0));
     }
     let tx = conn.unchecked_transaction()?;
-    tx.execute("UPDATE plucodes SET groupcode = ''", [])?;
-    let mut regrouped = 0usize;
-    for (group, plus) in groups {
-        for plu in plus {
-            regrouped += tx
-                .execute(
-                    "UPDATE plucodes SET groupcode = ?1 WHERE plu = ?2",
-                    rusqlite::params![group, plu],
-                )?;
-        }
-    }
-    let orphans: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM plucodes WHERE groupcode = ''",
-        [],
-        |r| r.get(0),
-    )?;
+    let r = apply_layout_step(&tx, groups)?;
     tx.commit()?;
-    Ok((regrouped, orphans as usize))
+    Ok(r)
 }
 #[cfg(test)]
 mod tests {
@@ -1382,6 +1430,104 @@ mod tests {
             .query_row("SELECT price FROM plucodes WHERE plu='2502192'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(price, 19999);
+    }
+    fn atomic_item(plu: &str, name: &str, price: i64) -> PluItem {
+        PluItem {
+            plu: plu.into(),
+            price,
+            card_price: None,
+            itemcode: String::new(),
+            namefirst: name.into(),
+            namesecond: String::new(),
+            groupcode: String::new(),
+            shelflife: String::new(),
+        }
+    }
+    fn catalog(conn: &Connection) -> Vec<(String, i64, String)> {
+        let mut stmt = conn
+            .prepare("SELECT plu, price, groupcode FROM plucodes ORDER BY plu")
+            .unwrap();
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap();
+        rows.map(|r| r.unwrap()).collect()
+    }
+    #[test]
+    fn apply_upload_success_applies_all_stages() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        let items = vec![
+            atomic_item("A", "ТОВАР А КГ", 100),
+            atomic_item("B", "ТОВАР Б КГ", 200),
+        ];
+        let groups = vec![("ГР".to_string(), vec!["A".to_string()])];
+        let (imported, removed, layout) = apply_upload(&conn, &items, Some(&groups)).unwrap();
+        assert_eq!(imported, 2);
+        assert_eq!(removed, 0);
+        assert_eq!(layout, Some((1, 1)), "переназначен A, без группы остался B");
+        assert_eq!(catalog(&conn), vec![
+            ("A".into(), 100, "ГР".into()),
+            ("B".into(), 200, "".into()),
+        ]);
+    }
+    #[test]
+    fn apply_upload_rolls_back_import_on_removal_failure() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        let old: Vec<PluItem> = (0..20)
+            .map(|i| atomic_item(&format!("old{i:02}"), &format!("СТАРЫЙ {i} КГ"), 500))
+            .collect();
+        import_plu(&conn, &old).unwrap();
+        let before = catalog(&conn);
+        // Выгрузка с 2 товарами при 20 в базе — guard снятия считает файл
+        // обрезанным и рвёт транзакцию: импорт новых не должен сохраниться.
+        let items = vec![
+            atomic_item("A", "ТОВАР А КГ", 100),
+            atomic_item("B", "ТОВАР Б КГ", 200),
+        ];
+        let groups = vec![("ГР".to_string(), vec!["A".to_string()])];
+        let err = apply_upload(&conn, &items, Some(&groups)).unwrap_err();
+        assert!(err.to_string().contains("обрезанный файл"), "{err}");
+        assert_eq!(catalog(&conn), before, "каталог полностью неизменён после отката");
+    }
+    #[test]
+    fn apply_upload_rolls_back_all_on_layout_failure() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        let old: Vec<PluItem> = (0..10)
+            .map(|i| atomic_item(&format!("old{i:02}"), &format!("СТАРЫЙ {i} КГ"), 500))
+            .collect();
+        import_plu(&conn, &old).unwrap();
+        let before = catalog(&conn);
+        conn.execute_batch(
+            "CREATE TRIGGER fail_layout BEFORE UPDATE OF groupcode ON plucodes
+             WHEN NEW.groupcode = 'FAIL'
+             BEGIN SELECT RAISE(ABORT, 'layout fail'); END;",
+        )
+        .unwrap();
+        let mut items = old.clone();
+        items.push(atomic_item("A", "ТОВАР А КГ", 100));
+        items.push(atomic_item("B", "ТОВАР Б КГ", 200));
+        let groups = vec![("FAIL".to_string(), vec!["A".to_string()])];
+        let err = apply_upload(&conn, &items, Some(&groups)).unwrap_err();
+        assert!(err.to_string().contains("layout fail"), "{err}");
+        assert_eq!(catalog(&conn), before, "импорт и снятие откатились вместе с раскладкой");
+    }
+    #[test]
+    fn apply_upload_repeated_is_idempotent() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        let items = vec![
+            atomic_item("A", "ТОВАР А КГ", 100),
+            atomic_item("B", "ТОВАР Б КГ", 200),
+        ];
+        let groups = vec![("ГР".to_string(), vec!["A".to_string()])];
+        for round in 1..=2 {
+            let (imported, removed, layout) = apply_upload(&conn, &items, Some(&groups)).unwrap();
+            assert_eq!(imported, 2, "повтор {round}: upsert возвращает все позиции");
+            assert_eq!(removed, 0, "повтор {round}: снимать нечего");
+            assert_eq!(layout, Some((1, 1)), "повтор {round}: раскладка воспроизводится");
+        }
+        assert_eq!(catalog(&conn), vec![
+            ("A".into(), 100, "ГР".into()),
+            ("B".into(), 200, "".into()),
+        ], "после двух применений каталог идентичен однократному");
     }
     #[test]
     fn card_price_follows_center_mirror() {

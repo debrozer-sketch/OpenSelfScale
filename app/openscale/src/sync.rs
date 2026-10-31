@@ -364,24 +364,19 @@ fn apply_upload(
             .collect::<Vec<_>>(),
     );
     let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
-    // Каждая операция сама открывает транзакцию: вложенный BEGIN запрещён в
-    // SQLite, поэтому внешняя обёртка здесь не используется. Сбой между
-    // операциями оставляет частично обновлённый каталог до следующей выгрузки.
-    let imported = datastore::import_plu(&conn, items).map_err(|e| format!("импорт: {e}"))?;
-    let removed = datastore::remove_absent(&conn, items).map_err(|e| format!("удаление снятых: {e}"))?;
+    // Атомарное применение: импорт, снятие и раскладка в одной транзакции.
+    let (imported, removed, layout) =
+        datastore::apply_upload(&conn, items, groups.map(|g| g.as_slice()))
+            .map_err(|e| format!("приём выгрузки: {e}"))?;
     let removed_note = if removed > 0 { format!(", снято {removed}") } else { String::new() };
-    let layout_note = match groups {
-        Some(g) => {
-            let (regrouped, orphans) =
-                datastore::apply_layout(&conn, g).map_err(|e| format!("раскладка: {e}"))?;
-            format!(
-                ", раскладка: {} групп / {} переназначено / {} без группы",
-                g.len(),
-                regrouped,
-                orphans
-            )
-        }
-        None => String::new(),
+    let layout_note = match (groups, layout) {
+        (Some(g), Some((regrouped, orphans))) => format!(
+            ", раскладка: {} групп / {} переназначено / {} без группы",
+            g.len(),
+            regrouped,
+            orphans
+        ),
+        _ => String::new(),
     };
     Ok((imported, format!("{removed_note}{layout_note}")))
 }

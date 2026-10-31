@@ -16,6 +16,13 @@
 
 ## 2. Дефекты, найденные и исправленные в этой волне
 
+### D4 (P2) Атомарность применения выгрузки каталога
+- Проблема после фикса D1: `import_plu`, `remove_absent`, `apply_layout` выполнялись отдельными транзакциями — сбой между ними оставлял частично обновлённый каталог.
+- Фикс (datastore): логика этапов выделена во внутренние шаги без открытия транзакций (`import_plu_step`, `remove_absent_step`, `apply_layout_step`); публичные обёртки `import_plu`/`remove_absent`/`apply_layout` сохранены (CLI-импорт их использует); добавлен `datastore::apply_upload(conn, items, groups)` — одна транзакция на всю выгрузку, коммит только после всех этапов, валидация цен до открытия транзакции. SQL и бизнес-логика в одном экземпляре, вложенных `BEGIN` нет.
+- `sync.rs::apply_upload` теперь вызывает один `datastore::apply_upload`.
+- Тесты (datastore): `apply_upload_success_applies_all_stages`, `apply_upload_rolls_back_import_on_removal_failure` (guard обрезанного файла рвёт транзакцию — импорт откатывается), `apply_upload_rolls_back_all_on_layout_failure` (ошибка раскладки через SQLite-триггер `RAISE(ABORT)` — импорт и снятие откатываются, каталог полностью неизменён), `apply_upload_repeated_is_idempotent` (двойное применение даёт идентичный каталог).
+- Полный набор после фикса: 201 passed, 0 failed.
+
 ### D1 (P1) Выгрузка не применялась: вложенная транзакция
 - Симптом на стенде: `импорт: sqlite: cannot start a transaction within a transaction`, повтор каждые 60 с.
 - Причина: `apply_upload` (sync.rs:367) оборачивал `import_plu` во внешнюю транзакцию, а `import_plu`/`remove_absent`/`apply_layout` (datastore) сами открывают `unchecked_transaction` — вложенный `BEGIN` запрещён.
