@@ -313,4 +313,23 @@ mod tests {
         let snap = s.snapshot();
         assert!(!snap.port_up);
     }
+    #[test]
+    fn repeated_spawn_and_drop_finishes_quickly() {
+        // Жизненный цикл: Drop дожидается потока, повторные запуски не
+        // копят задачи и не зависают на прерываемом сне.
+        let started = std::time::Instant::now();
+        for _ in 0..3 {
+            let s = WeightSource::spawn(&ScalesProfile {
+                kind: "shtrih-slim".into(),
+                port: "/nonexistent-port".into(),
+                baud: 115_200,
+            });
+            let _ = s.snapshot();
+            drop(s);
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "три цикла создания и остановки не должны занимать 10 с"
+        );
+    }
 }

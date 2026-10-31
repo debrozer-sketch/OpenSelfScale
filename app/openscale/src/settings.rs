@@ -1155,18 +1155,22 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     kiosk.borrow_mut().admin_stage = 23;
                 }
                 "vnctoggle" => {
+                    static VNC_BUSY: std::sync::atomic::AtomicBool =
+                        std::sync::atomic::AtomicBool::new(false);
+                    if VNC_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        log::info!("меню: VNC: предыдущее переключение ещё идёт");
+                        return;
+                    }
                     let cur = kiosk.borrow().vnc_on;
                     let next = !cur;
                     let arg = if next { "on" } else { "off" };
                     let ui_handle = ui_handle.clone();
                     let cfg_t = cfg.clone();
                     std::thread::spawn(move || {
-                        match std::process::Command::new("sudo")
-                            .arg("/usr/local/sbin/openscale-vnc-toggle")
-                            .arg(arg)
-                            .output()
-                        {
-                            Ok(o) if o.status.success() => {
+                        let mut cmd = std::process::Command::new("sudo");
+                        cmd.arg("/usr/local/sbin/openscale-vnc-toggle").arg(arg);
+                        let res = match run_cmd_timeout(&mut cmd, std::time::Duration::from_secs(5)) {
+                            Ok(true) => {
                                 kiosk_vnc_note(next);
                                 log_action(&cfg_t.db_path, "удалённый доступ", format!("VNC {}", if next { "включён" } else { "выключен" }));
                                 let _ = slint::invoke_from_event_loop(move || {
@@ -1180,15 +1184,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                     }
                                 });
                             }
-                            Ok(o) => {
-                                log::warn!(
-                                    "vnc-toggle: код {}: {}",
-                                    o.status,
-                                    String::from_utf8_lossy(&o.stderr)
-                                );
-                            }
+                            Ok(false) => log::warn!("vnc-toggle: хелпер сообщил об ошибке"),
                             Err(e) => log::warn!("vnc-toggle: {e}"),
-                        }
+                        };
+                        VNC_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                        res
                     });
                 }
                 "resetkey" => {
@@ -1308,6 +1308,16 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         log::info!("меню: калибровка отклонена: на платформе вес ({:.3} кг)", snap.mass_kg);
                         return;
                     }
+                    // Калибровка меняет длину этикетки: параллельно с покупкой
+                    // этикетка может выйти неверной длины — под общим BUSY.
+                    if PRN_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_prn_diag_text(
+                                "Принтер занят — дождитесь завершения печати.".into(),
+                            );
+                        }
+                        return;
+                    }
                     let cfg = cfg.clone();
                     let ui_handle = ui_handle.clone();
                     if let Some(ui) = ui_handle.upgrade() {
@@ -1315,7 +1325,16 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             "Калибровка: подача этикетки шагами.\nЗаймёт до минуты, не трогайте принтер…".into(),
                         );
                     }
-                    std::thread::spawn(move || {
+                    let ui_panic = ui_handle.clone();
+                    spawn_menu_task(
+                        "калибровка принтера",
+                        move |msg| {
+                            PRN_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                            if let Some(ui) = ui_panic.upgrade() {
+                                ui.set_prn_diag_text(format!("Калибровка прервана ошибкой: {msg}").into());
+                            }
+                        },
+                        move || {
                         let text = match print::calibrate_label(&cfg) {
                             Ok(mm) if mm < 15 => {
                                 log::warn!("меню: калибровка: подозрительная длина {mm} мм — не сохранена");
@@ -1356,6 +1375,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             }
                         })
                         .ok();
+                        // Снимаем BUSY при любом исходе калибровки.
+                        PRN_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
                         },
                     );
                 }
@@ -1366,11 +1387,15 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     }
                     let cfg = cfg.clone();
                     std::thread::spawn(move || {
-                        let res = print::print_test_label(&cfg);
+                        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            print::print_test_label(&cfg)
+                        }));
+                        // Паника потока не должна оставить BUSY навсегда.
                         PRN_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
-                        match res {
-                            Ok(()) => log::info!("меню: тестовая этикетка"),
-                            Err(e) => log::warn!("меню: тестовая печать: {e}"),
+                        match r {
+                            Ok(Ok(())) => log::info!("меню: тестовая этикетка"),
+                            Ok(Err(e)) => log::warn!("меню: тестовая печать: {e}"),
+                            Err(_) => log::error!("меню: тестовая печать: поток паниковал"),
                         }
                     });
                 }
@@ -2738,25 +2763,39 @@ fn calibrate_label_text(cfg: &Config) -> (String, Option<i64>) {
         }
     }
 }
+/// Запускает subprocess с принудительным завершением по таймауту.
+/// Без этого зависший хелпер держит поток навсегда, а повторные
+/// попытки копят бесхозные процессы.
+pub(crate) fn run_cmd_timeout(
+    cmd: &mut std::process::Command,
+    timeout: std::time::Duration,
+) -> Result<bool, String> {
+    use std::process::Stdio;
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("запуск: {e}"))?;
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(st)) => return Ok(st.success()),
+            Ok(None) if std::time::Instant::now() > deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("не уложился в отведённое время, прерван".into());
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            Err(e) => return Err(format!("ожидание: {e}")),
+        }
+    }
+}
 fn run_settime(args: &[String]) -> Result<(), String> {
-    let (tx, rx) = std::sync::mpsc::channel::<Result<bool, String>>();
-    let args = args.to_vec();
-    std::thread::spawn(move || {
-        let res = std::process::Command::new("sudo")
-            .arg("/usr/local/bin/openscale-settime")
-            .args(&args)
-            .stdin(std::process::Stdio::null())
-            .output();
-        let _ = tx.send(match res {
-            Ok(o) => Ok(o.status.success()),
-            Err(e) => Err(e.to_string()),
-        });
-    });
-    match rx.recv_timeout(std::time::Duration::from_secs(5)) {
-        Ok(Ok(true)) => Ok(()),
-        Ok(Ok(false)) => Err("хелпер сообщил об ошибке".into()),
-        Ok(Err(e)) => Err(format!("запуск хелпера не удался: {e}")),
-        Err(_) => Err("хелпер не ответил за 5 с".into()),
+    let mut cmd = std::process::Command::new("sudo");
+    cmd.arg("/usr/local/bin/openscale-settime").args(args);
+    match run_cmd_timeout(&mut cmd, std::time::Duration::from_secs(5)) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("хелпер сообщил об ошибке".into()),
+        Err(e) => Err(e),
     }
 }
 fn spawn_settime(
@@ -2968,4 +3007,38 @@ fn spawn_settime_then_advance(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cmd_timeout_returns_status_of_finished_process() {
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "exit", "0"]);
+        assert!(run_cmd_timeout(&mut cmd, std::time::Duration::from_secs(5)).unwrap());
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "exit", "3"]);
+        assert!(!run_cmd_timeout(&mut cmd, std::time::Duration::from_secs(5)).unwrap());
+    }
+
+    #[test]
+    fn cmd_timeout_kills_hanging_process() {
+        let started = std::time::Instant::now();
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "ping", "-n", "30", "127.0.0.1"]);
+        let err = run_cmd_timeout(&mut cmd, std::time::Duration::from_millis(300)).unwrap_err();
+        assert!(err.contains("прерван"), "{err}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "убитый процесс не держит вызов 30 с"
+        );
+    }
+
+    #[test]
+    fn cmd_timeout_missing_program_is_error() {
+        let mut cmd = std::process::Command::new("no-such-program-openscale");
+        assert!(run_cmd_timeout(&mut cmd, std::time::Duration::from_secs(1)).is_err());
+    }
 }
