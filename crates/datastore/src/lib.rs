@@ -85,7 +85,12 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              name     TEXT,
              weight_g INTEGER,
              sum_kop  INTEGER,
-             ok       INTEGER NOT NULL
+             ok       INTEGER,
+             itemcode   TEXT,
+             namesecond TEXT,
+             price      INTEGER,
+             shelflife  TEXT,
+             origin_id  INTEGER
          );
          CREATE TABLE IF NOT EXISTS label_layouts (
              name      TEXT PRIMARY KEY NOT NULL,
@@ -105,6 +110,35 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
     let has_card = table_has_column(&conn, "plucodes", "card_price")?;
     if !has_card {
         conn.execute_batch("ALTER TABLE plucodes ADD COLUMN card_price INTEGER;")?;
+    }
+    // Миграция журнала печатей: снимок покупки (повторная печать не зависит
+    // от каталога), связь с исходной операцией и ok без NOT NULL
+    // (NULL = исход неизвестен: попытка прервана крахом процесса).
+    if !table_has_column(&conn, "print_log", "origin_id")? {
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE print_log_new (
+                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                 ts       INTEGER NOT NULL,
+                 plu      TEXT,
+                 name     TEXT,
+                 weight_g INTEGER,
+                 sum_kop  INTEGER,
+                 ok       INTEGER,
+                 itemcode   TEXT,
+                 namesecond TEXT,
+                 price      INTEGER,
+                 shelflife  TEXT,
+                 origin_id  INTEGER
+             );
+             INSERT INTO print_log_new
+                 (id, ts, plu, name, weight_g, sum_kop, ok)
+                 SELECT id, ts, plu, name, weight_g, sum_kop, ok FROM print_log;
+             DROP TABLE print_log;
+             ALTER TABLE print_log_new RENAME TO print_log;
+             CREATE INDEX IF NOT EXISTS idx_print_log_ts ON print_log (ts);
+             COMMIT;",
+        )?;
     }
     let has_group = table_has_column(&conn, "plucodes", "group")?;
     if !has_group {
@@ -486,21 +520,57 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), Stor
     )?;
     Ok(())
 }
+/// Строка журнала печатей. Для торговых операций хранит снимок покупки:
+/// повторная печать использует эти значения, а не текущий каталог.
+/// `ok`: Some(true) — печать успешна, Some(false) — ошибка, None — исход
+/// неизвестен (передача прервана крахом процесса).
 #[derive(Clone, Debug)]
 pub struct PrintLogRow {
+    pub id: i64,
     pub ts: i64,
     pub plu: Option<String>,
     pub name: Option<String>,
     pub weight_g: Option<i64>,
     pub sum_kop: Option<i64>,
-    pub ok: bool,
+    pub ok: Option<bool>,
+    pub itemcode: Option<String>,
+    pub namesecond: Option<String>,
+    pub price: Option<i64>,
+    pub shelflife: Option<String>,
+    /// rowid исходной операции для повторной печати (None — сама покупка).
+    pub origin_id: Option<i64>,
+}
+impl PrintLogRow {
+    #[cfg(test)]
+    fn sale(ts: i64, plu: &str, name: &str, weight_g: i64, sum_kop: i64, ok: Option<bool>) -> Self {
+        PrintLogRow {
+            id: 0,
+            ts,
+            plu: Some(plu.into()),
+            name: Some(name.into()),
+            weight_g: Some(weight_g),
+            sum_kop: Some(sum_kop),
+            ok,
+            itemcode: None,
+            namesecond: None,
+            price: None,
+            shelflife: None,
+            origin_id: None,
+        }
+    }
+    pub fn is_reprint(&self) -> bool {
+        self.origin_id.is_some()
+    }
 }
 pub fn print_popularity(
     conn: &Connection,
     since_ts: i64,
 ) -> Result<std::collections::HashMap<String, u32>, StoreError> {
+    // Повторные печати не считаются продажами.
     let mut st = conn.prepare(
-        "SELECT plu, COUNT(*) FROM print_log WHERE ok = 1 AND ts >= ?1 AND plu IS NOT NULL AND plu <> '' GROUP BY plu",
+        "SELECT plu, COUNT(*) FROM print_log
+         WHERE ok = 1 AND origin_id IS NULL AND ts >= ?1 AND plu IS NOT NULL AND plu <> ''
+         GROUP BY plu",
     )?;
     let rows = st.query_map([since_ts], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
     let mut out = std::collections::HashMap::new();
@@ -514,9 +584,23 @@ pub fn print_popularity(
 /// операция фиксируется первой, крах процесса после записи не теряет её.
 pub fn print_log_add(conn: &Connection, row: &PrintLogRow) -> Result<i64, StoreError> {
     conn.execute(
-        "INSERT INTO print_log (ts, plu, name, weight_g, sum_kop, ok)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![row.ts, row.plu, row.name, row.weight_g, row.sum_kop, row.ok as i64],
+        "INSERT INTO print_log
+             (ts, plu, name, weight_g, sum_kop, ok,
+              itemcode, namesecond, price, shelflife, origin_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        rusqlite::params![
+            row.ts,
+            row.plu,
+            row.name,
+            row.weight_g,
+            row.sum_kop,
+            row.ok.map(|v| v as i64),
+            row.itemcode,
+            row.namesecond,
+            row.price,
+            row.shelflife,
+            row.origin_id,
+        ],
     )
     .map(|_| conn.last_insert_rowid())
     .map_err(StoreError::from)
@@ -530,7 +614,7 @@ pub fn print_log_mark(conn: &Connection, rowid: i64, ok: bool) {
 }
 pub fn print_log_count_since(conn: &Connection, ts: i64) -> Result<i64, StoreError> {
     conn.query_row(
-        "SELECT COUNT(*) FROM print_log WHERE ok = 1 AND ts >= ?1",
+        "SELECT COUNT(*) FROM print_log WHERE ok = 1 AND origin_id IS NULL AND ts >= ?1",
         [ts],
         |r| r.get(0),
     )
@@ -541,9 +625,14 @@ pub fn print_log_count_filtered(
     since_ts: Option<i64>,
     ok: Option<bool>,
 ) -> Result<i64, StoreError> {
+    // ok=Some(true) — успешные продажи (повторные печати не считаются),
+    // Some(false) — проблемы: ошибки и прерванные попытки (ok = 0 или NULL).
     conn.query_row(
         "SELECT COUNT(*) FROM print_log
-         WHERE (?1 IS NULL OR ts >= ?1) AND (?2 IS NULL OR ok = ?2)",
+         WHERE (?1 IS NULL OR ts >= ?1)
+           AND (?2 IS NULL
+                OR (?2 = 1 AND ok = 1 AND origin_id IS NULL)
+                OR (?2 = 0 AND (ok = 0 OR ok IS NULL)))",
         rusqlite::params![since_ts, ok.map(|v| v as i64)],
         |r| r.get(0),
     )
@@ -609,28 +698,60 @@ pub fn print_log_filtered(
     ok: Option<bool>,
     limit: usize,
 ) -> Result<Vec<PrintLogRow>, StoreError> {
+    // Фильтр как в count_filtered: Some(false) включает прерванные попытки.
     let mut stmt = conn.prepare(
-        "SELECT ts, plu, name, weight_g, sum_kop, ok
+        "SELECT id, ts, plu, name, weight_g, sum_kop, ok,
+                itemcode, namesecond, price, shelflife, origin_id
          FROM print_log
-         WHERE (?1 IS NULL OR ts >= ?1) AND (?2 IS NULL OR ok = ?2)
+         WHERE (?1 IS NULL OR ts >= ?1)
+           AND (?2 IS NULL
+                OR (?2 = 1 AND ok = 1 AND origin_id IS NULL)
+                OR (?2 = 0 AND (ok = 0 OR ok IS NULL)))
          ORDER BY id DESC LIMIT ?3",
     )?;
     let rows = stmt
         .query_map(
             rusqlite::params![since_ts, ok.map(|v| v as i64), limit as i64],
-            |r| {
-                Ok(PrintLogRow {
-                    ts: r.get(0)?,
-                    plu: r.get(1)?,
-                    name: r.get(2)?,
-                    weight_g: r.get(3)?,
-                    sum_kop: r.get(4)?,
-                    ok: r.get::<_, i64>(5)? != 0,
-                })
-            },
+            print_log_row_from,
         )?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+fn print_log_row_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<PrintLogRow> {
+    Ok(PrintLogRow {
+        id: r.get(0)?,
+        ts: r.get(1)?,
+        plu: r.get(2)?,
+        name: r.get(3)?,
+        weight_g: r.get(4)?,
+        sum_kop: r.get(5)?,
+        ok: r.get::<_, Option<i64>>(6)?.map(|v| v != 0),
+        itemcode: r.get(7)?,
+        namesecond: r.get(8)?,
+        price: r.get(9)?,
+        shelflife: r.get(10)?,
+        origin_id: r.get(11)?,
+    })
+}
+/// Читает одну запись журнала по rowid (для повторной печати).
+pub fn print_log_get(conn: &Connection, rowid: i64) -> Result<Option<PrintLogRow>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, ts, plu, name, weight_g, sum_kop, ok,
+                itemcode, namesecond, price, shelflife, origin_id
+         FROM print_log WHERE id = ?1",
+    )?;
+    let mut rows = stmt.query([rowid])?;
+    match rows.next()? {
+        Some(r) => Ok(Some(print_log_row_from(r)?)),
+        None => Ok(None),
+    }
+}
+/// Последние записи журнала с rowid (список повторной печати в UI).
+pub fn print_log_recent(
+    conn: &Connection,
+    limit: usize,
+) -> Result<Vec<PrintLogRow>, StoreError> {
+    print_log_filtered(conn, None, None, limit)
 }
 pub const MAX_PRICE_KOP: i64 = 99_999_999;
 pub fn sanitize_text(s: &str) -> String {
@@ -953,38 +1074,31 @@ mod tests {
     #[test]
     fn print_popularity_counts_only_successful_recent_prints() {
         let conn = open(":memory:".as_ref()).unwrap();
-        let row = |ts: i64, plu: &str, ok: bool| PrintLogRow {
-            ts,
-            plu: Some(plu.to_string()),
-            name: None,
-            weight_g: Some(500),
-            sum_kop: Some(1000),
-            ok,
+        let row = |ts: i64, plu: &str, ok: Option<bool>, origin: Option<i64>| {
+            let mut r = PrintLogRow::sale(ts, plu, "ТОВАР", 500, 1000, ok);
+            r.origin_id = origin;
+            r
         };
         for _ in 0..3 {
-            let _ = print_log_add(&conn, &row(2000, "10", true));
+            let _ = print_log_add(&conn, &row(2000, "10", Some(true), None));
         }
-        let _ = print_log_add(&conn, &row(2000, "20", true));
-        let _ = print_log_add(&conn, &row(2000, "20", false));
-        let _ = print_log_add(&conn, &row(100, "30", true));
+        let _ = print_log_add(&conn, &row(2000, "20", Some(true), None));
+        let _ = print_log_add(&conn, &row(2000, "20", Some(false), None));
+        let _ = print_log_add(&conn, &row(2000, "10", Some(true), Some(1)));
+        let _ = print_log_add(&conn, &row(100, "30", Some(true), None));
         let pop = print_popularity(&conn, 1000).unwrap();
-        assert_eq!(pop.get("10"), Some(&3));
+        assert_eq!(pop.get("10"), Some(&3), "повторные печати не считаются продажами");
         assert_eq!(pop.get("20"), Some(&1), "ошибочные печати не считаются");
         assert_eq!(pop.get("30"), None, "старше окна — не считается");
+        let sales = print_log_count_since(&conn, 1000).unwrap();
+        assert_eq!(sales, 4, "повторы не попадают в счётчик операций");
     }
     #[test]
     fn print_log_mark_updates_attempt_outcome() {
         let conn = open(":memory:".as_ref()).unwrap();
-        let row = |ok: bool| PrintLogRow {
-            ts: 2000,
-            plu: Some("10".into()),
-            name: Some("СЫР".into()),
-            weight_g: Some(500),
-            sum_kop: Some(1000),
-            ok,
-        };
-        let id_ok = print_log_add(&conn, &row(false)).unwrap();
-        let id_err = print_log_add(&conn, &row(false)).unwrap();
+        let row = PrintLogRow::sale(2000, "10", "СЫР", 500, 1000, None);
+        let id_ok = print_log_add(&conn, &row).unwrap();
+        let id_err = print_log_add(&conn, &row).unwrap();
         assert_ne!(id_ok, id_err, "rowid попыток различается");
         print_log_mark(&conn, id_ok, true);
         print_log_mark(&conn, id_err, false);
@@ -994,23 +1108,90 @@ mod tests {
         assert_eq!(err_rows, 1, "неудачная попытка осталась ошибкой");
     }
     #[test]
-    fn print_log_attempt_survives_without_mark() {
-        // Запись до печати: без пометки результатом попытка остаётся ok=0 —
-        // крах процесса после фиксации не теряет операцию.
+    fn print_log_attempt_without_mark_is_unknown() {
+        // Запись до печати: без пометки результатом попытка остаётся ok=NULL —
+        // крах процесса после фиксации не теряет операцию и не выдаёт её
+        // за успех или ошибку.
         let conn = open(":memory:".as_ref()).unwrap();
-        let row = PrintLogRow {
-            ts: 2000,
-            plu: Some("10".into()),
-            name: Some("СЫР".into()),
-            weight_g: Some(1350),
-            sum_kop: Some(26999),
-            ok: false,
-        };
+        let row = PrintLogRow::sale(2000, "10", "СЫР", 1350, 26999, None);
         let total = print_log_count_filtered(&conn, None, None).unwrap();
         assert_eq!(total, 0);
-        let _ = print_log_add(&conn, &row).unwrap();
+        let id = print_log_add(&conn, &row).unwrap();
         let total = print_log_count_filtered(&conn, None, None).unwrap();
         assert_eq!(total, 1, "зафиксированная попытка видна в журнале");
+        assert_eq!(print_log_count_filtered(&conn, None, Some(true)).unwrap(), 0);
+        assert_eq!(
+            print_log_count_filtered(&conn, None, Some(false)).unwrap(),
+            1,
+            "прерванная попытка видна как проблема, но не как продажа"
+        );
+        let got = print_log_get(&conn, id).unwrap().unwrap();
+        assert_eq!(got.ok, None, "исход неизвестен, а не ошибка или успех");
+    }
+    #[test]
+    fn print_log_snapshot_roundtrip_for_reprint() {
+        let conn = open(":memory:".as_ref()).unwrap();
+        let mut row = PrintLogRow::sale(2000, "2502192", "ВИНОГРАД", 1350, 26999, None);
+        row.itemcode = Some("02136".into());
+        row.namesecond = Some("КИШМИШ ЧЕРНЫЙ КГ".into());
+        row.price = Some(19999);
+        row.shelflife = Some("20/09/2026".into());
+        let id = print_log_add(&conn, &row).unwrap();
+        print_log_mark(&conn, id, true);
+        let got = print_log_get(&conn, id).unwrap().unwrap();
+        assert_eq!(got.id, id);
+        assert_eq!(got.plu.as_deref(), Some("2502192"));
+        assert_eq!(got.name.as_deref(), Some("ВИНОГРАД"));
+        assert_eq!(got.weight_g, Some(1350));
+        assert_eq!(got.sum_kop, Some(26999));
+        assert_eq!(got.itemcode.as_deref(), Some("02136"));
+        assert_eq!(got.namesecond.as_deref(), Some("КИШМИШ ЧЕРНЫЙ КГ"));
+        assert_eq!(got.price, Some(19999));
+        assert_eq!(got.shelflife.as_deref(), Some("20/09/2026"));
+        assert_eq!(got.origin_id, None, "исходная операция");
+        let recent = print_log_recent(&conn, 10).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].id, id);
+    }
+    #[test]
+    fn print_log_migration_keeps_old_rows() {
+        // База старой схемы: NOT NULL ok, без снимка. open() должен
+        // перестроить таблицу, сохранив записи.
+        let file = std::env::temp_dir().join(format!(
+            "openscale-mig-test-{}.sqlite",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&file);
+        let conn = rusqlite::Connection::open(&file).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE print_log (
+                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                 ts       INTEGER NOT NULL,
+                 plu      TEXT,
+                 name     TEXT,
+                 weight_g INTEGER,
+                 sum_kop  INTEGER,
+                 ok       INTEGER NOT NULL
+             );
+             INSERT INTO print_log (ts, plu, name, weight_g, sum_kop, ok)
+                 VALUES (1000, '10', 'СТАРЫЙ ТОВАР', 500, 1000, 1);
+             INSERT INTO print_log (ts, plu, name, weight_g, sum_kop, ok)
+                 VALUES (1001, '11', 'ОШИБКА', 300, 600, 0);",
+        )
+        .unwrap();
+        drop(conn);
+        let conn = open(&file).unwrap();
+        assert!(table_has_column(&conn, "print_log", "origin_id").unwrap());
+        let all = print_log_filtered(&conn, None, None, 10).unwrap();
+        assert_eq!(all.len(), 2, "старые записи сохранены");
+        assert_eq!(all[0].name.as_deref(), Some("ОШИБКА"), "порядок по id DESC");
+        assert_eq!(all[0].ok, Some(false));
+        assert_eq!(all[1].ok, Some(true));
+        assert_eq!(all[1].itemcode, None, "у старых записей снимка нет");
+        let sales = print_log_count_since(&conn, 0).unwrap();
+        assert_eq!(sales, 1);
+        drop(conn);
+        let _ = std::fs::remove_file(&file);
     }
     #[test]
     fn action_log_adds_and_rotates() {

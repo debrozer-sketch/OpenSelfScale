@@ -49,6 +49,11 @@ export struct LabelPreviewRow {
     text: string,
     kind: int,
 }
+export struct ReportOp {
+    rowid: int,
+    text: string,
+    can-reprint: bool,
+}
 component DeptTile inherits Rectangle {
     in property <int> idx;
     in property <int> cols: 1;
@@ -652,6 +657,14 @@ export component MainWindow inherits Window {
     in property <string> report-text;
     in property <string> report-period: "Сегодня";
     in property <string> report-kind: "Все события";
+    in property <[ReportOp]> report-ops;
+    in property <bool> reprint-popup-open: false;
+    in property <bool> reprint-confirm: false;
+    in property <string> reprint-popup-text;
+    in property <bool> reprint-popup-ok: true;
+    callback reprint-ask(int);
+    callback reprint-confirm-apply();
+    callback reprint-popup-close();
     in property <[string]> actionlog-rows;
     in property <[string]> status-rows;
     callback status-refresh();
@@ -2476,13 +2489,62 @@ if root.screen == 26 : MenuPage {
                 x: 24px;
                 y: 76px;
                 width: parent.width - 48px;
-                height: parent.height - 92px;
+                height: parent.height - 92px - 224px;
                 text: root.report-text;
                 font-size: Theme.font-sm;
                 font-family: "DejaVu Sans Mono";
                 color: Theme.ink;
                 vertical-alignment: top;
                 wrap: word-wrap;
+            }
+            Text {
+                x: 24px;
+                y: parent.height - 300px;
+                width: parent.width - 48px;
+                height: 32px;
+                text: "Последние операции — касание строки повторяет печать этикетки";
+                font-size: Theme.font-sm;
+                color: Theme.ink-faint;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                x: 16px;
+                y: parent.height - 264px;
+                width: parent.width - 32px;
+                height: 256px;
+                border-radius: Theme.r-card;
+                border-width: 1px;
+                border-color: Theme.border;
+                background: Theme.surface;
+                Flickable {
+                    x: 8px; y: 8px;
+                    width: parent.width - 16px;
+                    height: parent.height - 16px;
+                    viewport-width: parent.width;
+                    viewport-height: Math.max(parent.height, root.report-ops.length * 52px);
+                    for op[i] in root.report-ops : Rectangle {
+                        property <bool> pressed: op-ta.pressed;
+                        height: 52px;
+                        y: i * 52px;
+                        background: pressed ? Theme.pressed : (Math.mod(i, 2) == 0 ? Theme.surface : Theme.chip);
+                        opacity: op.can-reprint ? 1.0 : 0.45;
+                        Text {
+                            x: 12px;
+                            width: parent.width - 24px;
+                            height: parent.height;
+                            text: op.text;
+                            font-size: Theme.font-sm;
+                            font-family: "DejaVu Sans Mono";
+                            color: Theme.ink;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        op-ta := TouchArea {
+                            enabled: op.can-reprint;
+                            clicked => { root.reprint-ask(op.rowid); }
+                        }
+                    }
+                }
             }
         }
         if root.screen == 18 : Rectangle {
@@ -2658,6 +2720,71 @@ if root.screen == 26 : MenuPage {
                 }
             }
         }
+            if root.reprint-popup-open : rep-pop := Rectangle {
+                x: 0; y: 0;
+                width: parent.width;
+                height: parent.height;
+                background: Theme.overlay;
+                Rectangle {
+                    x: (parent.width - 640px) / 2;
+                    y: (parent.height - 320px) / 2;
+                    width: 640px;
+                    height: 320px;
+                    border-radius: Theme.r-card;
+                    background: Theme.surface;
+                    Text {
+                        x: 24px; y: 24px;
+                        width: parent.width - 48px;
+                        height: 200px;
+                        text: root.reprint-popup-text;
+                        font-size: Theme.font-lg;
+                        color: root.reprint-confirm ? Theme.ink
+                            : (root.reprint-popup-ok ? Theme.success : Theme.danger);
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        wrap: word-wrap;
+                    }
+                    if root.reprint-confirm : Rectangle {
+                        x: 24px;
+                        y: parent.height - 80px;
+                        width: 280px;
+                        height: 56px;
+                        border-radius: Theme.r-button;
+                        background: rep-no-ta.pressed ? Theme.pressed : Theme.chip;
+                        Text {
+                            text: "ОТМЕНА";
+                            font-size: Theme.font-lg;
+                            font-weight: 700;
+                            color: Theme.ink;
+                        }
+                        rep-no-ta := TouchArea { clicked => { root.reprint-popup-close(); } }
+                    }
+                    Rectangle {
+                        x: root.reprint-confirm ? parent.width - 304px : 24px;
+                        y: parent.height - 80px;
+                        width: 280px;
+                        height: 56px;
+                        border-radius: Theme.r-button;
+                        background: rep-yes-ta.pressed
+                            ? (root.reprint-confirm ? Theme.success-dark : Theme.chip)
+                            : (root.reprint-confirm ? Theme.success : Theme.chip);
+                        Text {
+                            text: root.reprint-confirm ? "ПЕЧАТАТЬ" : "ЗАКРЫТЬ";
+                            font-size: Theme.font-lg;
+                            font-weight: 700;
+                            color: root.reprint-confirm ? Theme.surface : Theme.ink;
+                        }
+                        rep-yes-ta := TouchArea {
+                            clicked => {
+                                root.reprint-confirm
+                                    ? root.reprint-confirm-apply()
+                                    : root.reprint-popup-close();
+                            }
+                        }
+                    }
+                }
+            }
             if root.imp-popup-open || root.labels-popup-open : lbl-pop := Rectangle {
                 property <bool> imp-mode: root.imp-popup-open;
                 property <bool> confirm: imp-mode ? root.imp-confirm : root.labels-confirm;

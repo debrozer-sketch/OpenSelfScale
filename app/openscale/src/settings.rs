@@ -1,4 +1,5 @@
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 use crate::admin;
@@ -1787,6 +1788,110 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     });
+    // Повторная печать: тап по строке операции показывает подтверждение,
+    // «ПЕЧАТАТЬ» отправляет задание по сохранённому снимку покупки.
+    // Одновременно — одна попытка: REPRINT_BUSY защищает от параллельных
+    // копий одного задания (демон печати последовательный).
+    static REPRINT_BUSY: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    let reprint_pending: Rc<Cell<i64>> = Rc::new(Cell::new(0));
+    ui.on_reprint_ask({
+        let ui_handle = ui_handle.clone();
+        let cfg = cfg.clone();
+        let reprint_pending = reprint_pending.clone();
+        move |rowid: i32| {
+            if REPRINT_BUSY.load(std::sync::atomic::Ordering::SeqCst) {
+                show_reprint_popup(&ui_handle, true, false, "Печать уже выполняется,\nподождите.".into());
+                return;
+            }
+            let Ok(conn) = datastore::open(&cfg.db_path) else {
+                show_reprint_popup(&ui_handle, false, false, "База недоступна.".into());
+                return;
+            };
+            let row = match datastore::print_log_get(&conn, i64::from(rowid)) {
+                Ok(Some(r)) => r,
+                Ok(None) => {
+                    show_reprint_popup(&ui_handle, false, false, "Операция не найдена.".into());
+                    return;
+                }
+                Err(e) => {
+                    show_reprint_popup(&ui_handle, false, false, format!("База: {e}"));
+                    return;
+                }
+            };
+            let name = row.name.clone().unwrap_or_default();
+            let sum = row.sum_kop.map(crate::session::sum_str).unwrap_or_default();
+            let weight = row
+                .weight_g
+                .map(|w| format_w_g(w as u32))
+                .unwrap_or_else(|| "—".into());
+            reprint_pending.set(i64::from(rowid));
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_reprint_confirm(true);
+                ui.set_reprint_popup_ok(true);
+                ui.set_reprint_popup_text(
+                    format!("Повторить печать этикетки?\n\n{name}\n{weight} — {sum}").into(),
+                );
+                ui.set_reprint_popup_open(true);
+            }
+        }
+    });
+    ui.on_reprint_confirm_apply({
+        let ui_handle = ui_handle.clone();
+        let cfg = cfg.clone();
+        let reprint_pending = reprint_pending.clone();
+        move || {
+            let rowid = reprint_pending.replace(0);
+            if rowid == 0 {
+                if let Some(ui) = ui_handle.upgrade() {
+                    ui.set_reprint_popup_open(false);
+                }
+                return;
+            }
+            if REPRINT_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                show_reprint_popup(&ui_handle, true, false, "Печать уже выполняется,\nподождите.".into());
+                return;
+            }
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_reprint_confirm(false);
+                ui.set_reprint_popup_text("Печать…".into());
+            }
+            let cfg = cfg.clone();
+            let ui_handle = ui_handle.clone();
+            std::thread::spawn(move || {
+                let res = print::print_reprint(&cfg, rowid);
+                let _ = slint::invoke_from_event_loop(move || {
+                    REPRINT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_reprint_popup_open(true);
+                        match res {
+                            Ok(_) => {
+                                ui.set_reprint_popup_ok(true);
+                                ui.set_reprint_popup_text(
+                                    "Повторная печать отправлена.\n\nИсходная операция не изменилась.".into(),
+                                );
+                            }
+                            Err(e) => {
+                                ui.set_reprint_popup_ok(false);
+                                ui.set_reprint_popup_text(format!("Не напечатано:\n{e}").into());
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    });
+    ui.on_reprint_popup_close({
+        let ui_handle = ui_handle.clone();
+        let reprint_pending = reprint_pending.clone();
+        move || {
+            reprint_pending.set(0);
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_reprint_popup_open(false);
+                ui.set_reprint_confirm(false);
+            }
+        }
+    });
     ui.on_labels_import_tap({
         let kiosk = kiosk.clone();
         let ui_handle = ui_handle.clone();
@@ -2091,6 +2196,14 @@ fn show_labels_popup(
         }
     });
 }
+fn show_reprint_popup(ui_handle: &slint::Weak<MainWindow>, confirm: bool, ok: bool, text: String) {
+    if let Some(ui) = ui_handle.upgrade() {
+        ui.set_reprint_confirm(confirm);
+        ui.set_reprint_popup_ok(ok);
+        ui.set_reprint_popup_text(text.into());
+        ui.set_reprint_popup_open(true);
+    }
+}
 fn status_rows(
     cfg: &crate::config::Config,
     app_state: &std::sync::Arc<crate::weight::WeightSource>,
@@ -2156,7 +2269,7 @@ fn refresh_action_log(cfg: &crate::config::Config, ui_handle: &slint::Weak<MainW
         let lines: Vec<slint::SharedString> = rows
             .iter()
             .map(|r| {
-                let (date, time) = crate::print::stamp_for(r.ts);
+            let (date, time) = crate::print::stamp_for(r.ts);
                 let hm = time.get(0..5).unwrap_or(&time).to_string();
                 format!(
                     "{date} {hm}  {}  {} — {}",
@@ -2189,6 +2302,14 @@ fn refresh_report(
     if let Some(ui) = ui_handle.upgrade() {
         ui.set_report_text("Собираю отчёт…".into());
     }
+    // Список последних операций для повторной печати обновляется сразу
+    // (короткий запрос), текст отчёта — в фоне.
+    if let Ok(conn) = datastore::open(&cfg.db_path) {
+        let ops = report_ops(&conn);
+        if let Some(ui) = ui_handle.upgrade() {
+            ui.set_report_ops(slint::ModelRc::new(slint::VecModel::from(ops)));
+        }
+    }
     let my_gen = REPORT_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     let cfg = cfg.clone();
     let ui_handle = ui_handle.clone();
@@ -2205,6 +2326,48 @@ fn refresh_report(
         })
         .ok();
     });
+}
+/// Строки списка повторной печати: отметка исхода и доступность повтора
+/// (есть снимок покупки). Повторные печати связаны с исходной операцией.
+fn report_ops(conn: &rusqlite::Connection) -> Vec<crate::ReportOp> {
+    datastore::print_log_recent(conn, 14)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| {
+            let (_, time) = crate::print::stamp_for(r.ts);
+            let hm = time.get(0..5).unwrap_or(&time).to_string();
+            let name = r.name.clone().unwrap_or_default();
+            let name = if name.chars().count() > 20 {
+                format!("{}…", name.chars().take(20).collect::<String>())
+            } else {
+                name
+            };
+            let mark = match (r.ok, r.is_reprint()) {
+                (Some(true), false) => "+",
+                (Some(true), true) => "+↻",
+                (Some(false), _) => "!",
+                (None, _) => "?",
+            };
+            let weight = r
+                .weight_g
+                .map(|w| format_w_g(w as u32))
+                .unwrap_or_else(|| "—".into());
+            let sum = r.sum_kop.map(crate::session::sum_str).unwrap_or_default();
+            let text = format!("{mark} {hm} {name:<20} {weight:>7}  {sum}");
+            let can = r.weight_g.unwrap_or(0) > 0 && r.price.unwrap_or(0) > 0
+                && r.itemcode.as_deref().is_some_and(|s| !s.is_empty());
+            crate::ReportOp {
+                rowid: r.id as i32,
+                text: text.into(),
+                can_reprint: can,
+            }
+        })
+        .collect()
+}
+fn format_w_g(g: u32) -> String {
+    let whole = g / 1000;
+    let frac = g % 1000;
+    format!("{whole},{frac:03} кг")
 }
 fn refresh_printer_diag(cfg: &crate::config::Config, ui_handle: &slint::Weak<MainWindow>) {
     if let Some(ui) = ui_handle.upgrade() {
@@ -2291,24 +2454,42 @@ fn build_report(cfg: &crate::config::Config, period: usize, kind: usize) -> Stri
     }
     text.push_str("\nВремя       Товар                  Вес      Сумма\n");
     for r in rows {
-        let name = r.name.unwrap_or_default();
+        let name = r.name.clone().unwrap_or_default();
         let name = if name.chars().count() > 22 {
             format!("{}…", name.chars().take(22).collect::<String>())
         } else {
             name
         };
+        // + — успешная продажа, ↻ — повторная печать, ! — ошибка,
+        // ? — исход неизвестен (попытка прервана).
+        let tag = match (r.ok, r.is_reprint()) {
+            (Some(true), false) => "+",
+            (Some(true), true) => "+↻",
+            (Some(false), false) => "!",
+            (Some(false), true) => "!↻",
+            (None, false) => "?",
+            (None, true) => "?↻",
+        };
         match (r.weight_g, r.sum_kop, r.ok) {
-            (Some(w), Some(s), true) => {
+            (Some(w), Some(s), Some(true)) => {
                 text.push_str(&format!(
-                    "{}  {:<22} {:>6} г  {}\n",
+                    "{tag} {}  {:<22} {:>6} г  {}\n",
                     print::local_hms(r.ts),
                     name,
                     w,
                     crate::session::sum_str(s)
                 ));
             }
+            (Some(w), Some(_), None) => {
+                text.push_str(&format!(
+                    "{tag} {}  {:<22} {:>6} г  результат неизвестен\n",
+                    print::local_hms(r.ts),
+                    name,
+                    w
+                ));
+            }
             _ => {
-                text.push_str(&format!("{}  {:<22} — ошибка\n", print::local_hms(r.ts), name));
+                text.push_str(&format!("{tag} {}  {:<22} — ошибка\n", print::local_hms(r.ts), name));
             }
         }
     }

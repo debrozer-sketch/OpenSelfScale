@@ -42,6 +42,8 @@ pub enum PrintError {
     Io(#[from] std::io::Error),
     #[error("вес {0} г выше предела штрихкода (99999 г)")]
     WeightLimit(u32),
+    #[error("повторная печать: {0}")]
+    Reprint(String),
     #[error("принтер отключён в конфиге ([printer].enabled = false)")]
     PrinterDisabled,
     #[error("{0}")]
@@ -917,6 +919,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                             let _ = datastore::print_log_add(
                                 &conn,
                                 &datastore::PrintLogRow {
+                                    id: 0,
                                     ts: std::time::SystemTime::now()
                                         .duration_since(std::time::UNIX_EPOCH)
                                         .map(|d| d.as_secs() as i64)
@@ -925,7 +928,12 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                                     name: Some(m.name),
                                     weight_g: Some(m.weight_g as i64),
                                     sum_kop: Some(m.sum_kop),
-                                    ok: print_ok,
+                                    ok: Some(print_ok),
+                                    itemcode: None,
+                                    namesecond: None,
+                                    price: None,
+                                    shelflife: None,
+                                    origin_id: None,
                                 },
                             );
                         }
@@ -1529,6 +1537,118 @@ pub fn print_for_item(
 ) -> Result<(), PrintError> {
     print_for_item_with_cancel(cfg, item, weight_g, Arc::new(AtomicBool::new(false)))
 }
+/// Повторная печать покупки по записи журнала: используются сохранённые
+/// значения снимка (товар, масса, цена, срок, дата и время покупки) —
+/// изменение каталога не влияет на содержание этикетки. Создаёт отдельную
+/// запись попытки, связанную с исходной операцией (origin_id — корень
+/// цепочки). Исходная запись не меняется.
+pub fn print_reprint(cfg: &crate::config::Config, origin_rowid: i64) -> Result<i64, PrintError> {
+    print_reprint_with_cancel(cfg, origin_rowid, Arc::new(AtomicBool::new(false)))
+}
+/// Восстанавливает товар из снимка покупки: повторная печать не зависит
+/// от текущего каталога. None — снимка нет (старая запись журнала).
+fn snapshot_item(src: &datastore::PrintLogRow) -> Option<PluItem> {
+    let price = src.price?;
+    if price <= 0 || src.weight_g.unwrap_or(0) <= 0 {
+        return None;
+    }
+    let itemcode = src.itemcode.clone()?;
+    if itemcode.is_empty() {
+        return None;
+    }
+    Some(PluItem {
+        plu: src.plu.clone().unwrap_or_default(),
+        price,
+        card_price: None,
+        itemcode,
+        namefirst: src.name.clone().unwrap_or_default(),
+        namesecond: src.namesecond.clone().unwrap_or_default(),
+        groupcode: String::new(),
+        shelflife: src.shelflife.clone().unwrap_or_default(),
+    })
+}
+pub fn print_reprint_with_cancel(
+    cfg: &crate::config::Config,
+    origin_rowid: i64,
+    cancel: Arc<AtomicBool>,
+) -> Result<i64, PrintError> {
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
+    let conn = datastore::open(&cfg.db_path)?;
+    let src = datastore::print_log_get(&conn, origin_rowid)?
+        .ok_or_else(|| PrintError::Reprint(format!("операция #{origin_rowid} не найдена")))?;
+    let weight_g = u32::try_from(src.weight_g.unwrap_or(0))
+        .map_err(|_| PrintError::Reprint(format!("операция #{origin_rowid}: некорректная масса")))?;
+    let item = snapshot_item(&src).ok_or_else(|| {
+        PrintError::Reprint(format!(
+            "операция #{origin_rowid}: нет снимка покупки (старая запись журнала)"
+        ))
+    })?;
+    if weight_g > 99_999 {
+        return Err(PrintError::WeightLimit(weight_g));
+    }
+    let rounding = datastore::get_calibration(&conn, "price_rounding")
+        .ok()
+        .flatten()
+        .unwrap_or(0)
+        .clamp(0, 2);
+    let (date, time) = stamp_for(src.ts);
+    let measured = datastore::get_calibration(&conn, "label_length_mm")
+        .ok()
+        .flatten()
+        .map(|v| v as i32);
+    let spec = pick_layout(&conn, measured);
+    let bytes = build_label_from_spec(&item, weight_g, &date, &time, rounding, spec.as_ref())?;
+    let sum_kop = src.sum_kop.unwrap_or_else(|| {
+        crate::session::round_sum(crate::session::sum_kopecks(item.price, weight_g), rounding)
+    });
+    // Связь с исходной покупкой: у повтора ссылаемся на корень цепочки.
+    let root = src.origin_id.unwrap_or(origin_rowid);
+    let log_rowid = match datastore::print_log_add(
+        &conn,
+        &datastore::PrintLogRow {
+            id: 0,
+            ts: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+            plu: src.plu.clone(),
+            name: src.name.clone(),
+            weight_g: Some(i64::from(weight_g)),
+            sum_kop: Some(sum_kop),
+            ok: None,
+            itemcode: src.itemcode.clone(),
+            namesecond: src.namesecond.clone(),
+            price: src.price,
+            shelflife: src.shelflife.clone(),
+            origin_id: Some(root),
+        },
+    ) {
+        Ok(id) => id,
+        Err(e) => {
+            log::error!("повторная печать: журнал недоступен ({e})");
+            return Err(PrintError::Store(e));
+        }
+    };
+    request(|ack| {
+        PrinterRequest::Print {
+            bytes,
+            ack,
+            queued_at: std::time::Instant::now(),
+            meta: Some(PrintMeta {
+                plu: item.plu,
+                name: item.namefirst,
+                weight_g,
+                sum_kop,
+            }),
+            log_rowid: Some(log_rowid),
+            cancel,
+        }
+    })
+    .map_err(std::io::Error::other)?;
+    Ok(log_rowid)
+}
 pub fn print_for_item_with_cancel(
     cfg: &crate::config::Config,
     item: &PluItem,
@@ -1559,11 +1679,14 @@ pub fn print_for_item_with_cancel(
         rounding,
     );
     // Фиксация попытки до передачи на принтер: крах процесса после записи
-    // оставляет операцию в журнале (ok=0), ошибка печати не теряет её.
-    // БД недоступна — печать не выполняется: продажа без записи запрещена.
+    // оставляет операцию в журнале (ok=NULL — исход неизвестен), ошибка
+    // печати не теряет её. Снимок покупки обеспечивает повторную печать
+    // без зависимости от каталога. БД недоступна — печать не выполняется:
+    // продажа без записи запрещена.
     let log_rowid = match datastore::print_log_add(
         &conn,
         &datastore::PrintLogRow {
+            id: 0,
             ts: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
@@ -1572,7 +1695,12 @@ pub fn print_for_item_with_cancel(
             name: Some(item.namefirst.clone()),
             weight_g: Some(i64::from(weight_g)),
             sum_kop: Some(sum_kop),
-            ok: false,
+            ok: None,
+            itemcode: Some(item.itemcode.clone()),
+            namesecond: Some(item.namesecond.clone()),
+            price: Some(item.price),
+            shelflife: Some(item.shelflife.clone()),
+            origin_id: None,
         },
     ) {
         Ok(id) => Some(id),
@@ -1621,6 +1749,102 @@ mod tests {
         cfg.db_path = std::path::PathBuf::from("Z:/no/such-dir/db.sqlite");
         let err = print_for_item(&cfg, &sample(), 1350).unwrap_err();
         assert!(matches!(err, PrintError::PrinterDisabled));
+    }
+    fn tmp_db() -> std::path::PathBuf {
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!(
+            "openscale-reprint-test-{}-{n}.sqlite",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+    fn snapshot_row() -> datastore::PrintLogRow {
+        let mut row = datastore::PrintLogRow {
+            id: 0,
+            ts: 1_760_000_000,
+            plu: Some("2502192".into()),
+            name: Some("ВИНОГРАД КИШМИШ".into()),
+            weight_g: Some(1350),
+            sum_kop: Some(26999),
+            ok: Some(true),
+            itemcode: Some("02136".into()),
+            namesecond: Some("ЧЕРНЫЙ КГ".into()),
+            price: Some(19999),
+            shelflife: Some("20/09/2026".into()),
+            origin_id: None,
+        };
+        row.id = 0;
+        row
+    }
+    #[test]
+    fn reprint_disabled_printer_leaves_log_untouched() {
+        let mut cfg = crate::config::Config::default();
+        cfg.printer.enabled = false;
+        let path = tmp_db();
+        cfg.db_path = path.clone();
+        let conn = datastore::open(&path).unwrap();
+        let id = datastore::print_log_add(&conn, &snapshot_row()).unwrap();
+        drop(conn);
+        let err = print_reprint(&cfg, id).unwrap_err();
+        assert!(matches!(err, PrintError::PrinterDisabled));
+        let conn = datastore::open(&path).unwrap();
+        assert_eq!(
+            datastore::print_log_filtered(&conn, None, None, 10).unwrap().len(),
+            1,
+            "повторная печать не создаёт попытку при отказе"
+        );
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+    }
+    #[test]
+    fn reprint_uses_snapshot_after_catalog_change() {
+        let path = tmp_db();
+        let conn = datastore::open(&path).unwrap();
+        let id = datastore::print_log_add(&conn, &snapshot_row()).unwrap();
+        // Каталог меняется после покупки: цена и наименование другие.
+        let xml = concat!(
+            r#"<body><item plunumber="2502192" price="99999" itemcode="77777" "#,
+            r#"namefirst="ЯБЛОКО ГОЛДЕН КГ" /></body>"#
+        );
+        let items = datastore::parse_plu_xml(xml).unwrap_or_else(|e| panic!("parse: {e:?}"));
+        datastore::import_plu(&conn, &items).unwrap_or_else(|e| panic!("import: {e:?}"));
+        let src = datastore::print_log_get(&conn, id).unwrap().unwrap();
+        let item = snapshot_item(&src).expect("снимок должен быть");
+        assert_eq!(item.price, 19999, "цена из снимка, а не из каталога");
+        assert_eq!(item.namefirst, "ВИНОГРАД КИШМИШ");
+        assert_eq!(item.itemcode, "02136");
+        assert_eq!(src.weight_g, Some(1350));
+        assert_eq!(src.sum_kop, Some(26999));
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+    }
+    #[test]
+    fn legacy_row_without_snapshot_is_not_reprintable() {
+        let mut row = snapshot_row();
+        row.itemcode = None;
+        row.price = None;
+        assert!(snapshot_item(&row).is_none(), "старая запись без снимка");
+        let mut zero_weight = snapshot_row();
+        zero_weight.weight_g = Some(0);
+        assert!(snapshot_item(&zero_weight).is_none());
+    }
+    #[test]
+    fn reprint_chain_links_to_root_purchase() {
+        // Повтор от повтора связывается с исходной покупкой (корнем цепочки).
+        let row = snapshot_row();
+        let as_reprint = |origin: i64| {
+            let mut r = row.clone();
+            r.origin_id = Some(origin);
+            r
+        };
+        assert!(row.clone().is_reprint() == false);
+        let r1 = as_reprint(10);
+        let root = r1.origin_id.unwrap_or(20);
+        assert_eq!(root, 10);
+        let r2 = as_reprint(root);
+        assert_eq!(r2.origin_id.unwrap_or(30), 10, "связь с исходной покупкой");
     }
     #[test]
     fn label_contains_weight_price_sum_from_dump() {
