@@ -56,12 +56,17 @@ pub fn probe_startup(cfg: &crate::config::Config) -> DbStartup {
     }
     match integrity_check(&cfg.db_path) {
         Ok(r) if r == "ok" => {}
-        Ok(r) => {
-            return DbStartup::Unavailable(format!(
-                "integrity_check не пройден: {r}"
-            ))
-        }
+        Ok(r) => return DbStartup::Unavailable(format!("integrity_check не пройден: {r}")),
         Err(e) => return DbStartup::Unavailable(format!("файл базы не читается: {e}")),
+    }
+    // Обязательная структура проверяется ДО datastore::open: его миграции
+    // способны создать отсутствующие таблицы и замаскировать пустую или
+    // неполную установленную базу под исправную (integrity_check пустого
+    // файла возвращает ok).
+    if let Err(e) = schema_ok(&cfg.db_path) {
+        return DbStartup::Unavailable(format!(
+            "в установленной базе нет обязательных таблиц — база не принята: {e}"
+        ));
     }
     match datastore::open(&cfg.db_path).and_then(|c| datastore::load_all(&c).map(|_| ())) {
         Ok(()) => {
@@ -76,10 +81,57 @@ pub fn ensure_marker(db_path: &Path) {
     let _ = std::fs::write(marker_path(db_path), "openscale\n");
 }
 
+/// Соединение с уже установленной БД для служебных записей (статус
+/// синхронизации и т. п.). Ничего не создаёт и не мигрирует: файл, маркер
+/// установки и обязательные таблицы обязательны — иначе ошибка. Блокировка
+/// обслуживания удерживается до закрытия соединения.
+pub struct ExistingDb {
+    pub conn: rusqlite::Connection,
+    _lock: MaintLock,
+}
+
+pub fn open_existing(db_path: &Path) -> Result<ExistingDb, String> {
+    if !marker_path(db_path).exists() {
+        return Err(format!(
+            "{}: маркер установки отсутствует — запись в неустановленную базу запрещена",
+            db_path.display()
+        ));
+    }
+    let lock = MaintLock::acquire_shared(&maint_lock_path(db_path))?;
+    let opened = (|| {
+        let conn = rusqlite::Connection::open_with_flags(
+            uri_rw(db_path),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )
+        .map_err(|e| format!("{}: {e}", db_path.display()))?;
+        for table in ["plucodes", "print_log", "app_settings"] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    rusqlite::params![table],
+                    |r| r.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                return Err(format!("в базе нет обязательной таблицы {table}"));
+            }
+        }
+        Ok(ExistingDb { conn, _lock: lock })
+    })();
+    if let Err(e) = &opened {
+        log::warn!("служба: безопасное открытие базы: {e}");
+    }
+    opened
+}
+
 /// SQLite URI открытия существующей БД на запись (mode=rw, без CREATE).
 fn uri_rw(path: &Path) -> String {
     let s = path.to_string_lossy();
-    let enc = s.replace('%', "%25").replace('?', "%3f").replace(' ', "%20").replace('#', "%23");
+    let enc = s
+        .replace('%', "%25")
+        .replace('?', "%3f")
+        .replace(' ', "%20")
+        .replace('#', "%23");
     format!("file:{enc}?mode=rw")
 }
 
@@ -93,7 +145,11 @@ pub struct CliDb {
 impl CliDb {
     /// Чтение/изменение существующей БД: SH-блокировка, создание запрещено.
     /// exclusive=true — только для операций замены файла БД.
-    pub fn open(cfg: &crate::config::Config, exclusive: bool, allow_create: bool) -> Result<CliDb, String> {
+    pub fn open(
+        cfg: &crate::config::Config,
+        exclusive: bool,
+        allow_create: bool,
+    ) -> Result<CliDb, String> {
         let lock = if exclusive {
             MaintLock::acquire_exclusive(&maint_lock_path(&cfg.db_path))?
         } else {
@@ -125,9 +181,9 @@ impl CliDb {
                     })
                     .map_err(|e| format!("база: {e}"))
             }
-            DbStartup::FirstInstall => {
-                Err("базы ещё нет (первичная установка) — команда требует существующей БД".to_string())
-            }
+            DbStartup::FirstInstall => Err(
+                "базы ещё нет (первичная установка) — команда требует существующей БД".to_string(),
+            ),
             DbStartup::Unavailable(e) => Err(format!("БД недоступна, операция отменена: {e}")),
         };
         opened
@@ -156,7 +212,11 @@ impl MaintLock {
             .truncate(false)
             .open(path)
             .map_err(|e| format!("{}: {e}", path.display()))?;
-        let op = if exclusive { libc::LOCK_EX } else { libc::LOCK_SH };
+        let op = if exclusive {
+            libc::LOCK_EX
+        } else {
+            libc::LOCK_SH
+        };
         let rc = unsafe { libc::flock(file.as_raw_fd(), op | libc::LOCK_NB) };
         if rc != 0 {
             return Err(format!(
@@ -164,7 +224,10 @@ impl MaintLock {
                 path.display()
             ));
         }
-        Ok(MaintLock { path: path.to_path_buf(), _file: file })
+        Ok(MaintLock {
+            path: path.to_path_buf(),
+            _file: file,
+        })
     }
 
     pub fn acquire_shared(path: &Path) -> Result<MaintLock, String> {
@@ -205,13 +268,19 @@ impl MaintLock {
     // На рабочих станциях разработчика межпроцессная блокировка не
     // применяется; семантика проверяется на Linux-стенде.
     pub fn acquire_shared(_path: &Path) -> Result<MaintLock, String> {
-        Ok(MaintLock { path: _path.to_path_buf() })
+        Ok(MaintLock {
+            path: _path.to_path_buf(),
+        })
     }
     pub fn acquire_exclusive(path: &Path) -> Result<MaintLock, String> {
-        Ok(MaintLock { path: path.to_path_buf() })
+        Ok(MaintLock {
+            path: path.to_path_buf(),
+        })
     }
     pub fn acquire_shared_retry(path: &Path, _attempts: u32) -> Result<MaintLock, String> {
-        Ok(MaintLock { path: path.to_path_buf() })
+        Ok(MaintLock {
+            path: path.to_path_buf(),
+        })
     }
 }
 
@@ -246,7 +315,11 @@ fn ts_name() -> String {
 fn take_lock(dir: &Path) -> Result<PathBuf, String> {
     let lock = dir.join("backup.lock");
     for _ in 0..2 {
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock)
+        {
             Ok(_) => return Ok(lock),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 let stale = std::fs::metadata(&lock)
@@ -269,11 +342,9 @@ fn take_lock(dir: &Path) -> Result<PathBuf, String> {
 
 /// PRAGMA integrity_check: "ok" или текст проблем.
 pub fn integrity_check(path: &Path) -> Result<String, String> {
-    let conn = rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| format!("{}: {e}", path.display()))?;
+    let conn =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
     let mut out = String::new();
     let mut stmt = conn
         .prepare("PRAGMA integrity_check")
@@ -290,11 +361,9 @@ pub fn integrity_check(path: &Path) -> Result<String, String> {
 
 /// Ключевые таблицы схемы: снимок без них не восстанавливается.
 fn schema_ok(path: &Path) -> Result<(), String> {
-    let conn = rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .map_err(|e| format!("{}: {e}", path.display()))?;
+    let conn =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
     for table in ["plucodes", "print_log", "app_settings"] {
         let n: i64 = conn
             .query_row(
@@ -313,7 +382,9 @@ fn schema_ok(path: &Path) -> Result<(), String> {
 /// Согласованный снимок рабочей БД (SQLite Backup API, WAL-aware).
 /// Возвращает путь созданного файла.
 pub fn create_backup(cfg: &crate::config::Config, dir: Option<&Path>) -> Result<PathBuf, String> {
-    let dir = dir.map(|p| p.to_path_buf()).unwrap_or_else(|| default_backup_dir(&cfg.db_path));
+    let dir = dir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| default_backup_dir(&cfg.db_path));
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     // Каталог снимков должен остаться доступным сервисному пользователю
     // (суточное автокопирование), даже если CLI выполнялся через sudo.
@@ -328,22 +399,21 @@ pub fn create_backup(cfg: &crate::config::Config, dir: Option<&Path>) -> Result<
 
 fn do_backup(cfg: &crate::config::Config, dir: &Path) -> Result<PathBuf, String> {
     if !cfg.db_path.exists() {
-        return Err(format!("{}: базы нет, копировать нечего", cfg.db_path.display()));
+        return Err(format!(
+            "{}: базы нет, копировать нечего",
+            cfg.db_path.display()
+        ));
     }
     let src = datastore::open(&cfg.db_path).map_err(|e| format!("рабочая база: {e}"))?;
     let tmp = dir.join("backup.tmp.db");
     let _ = std::fs::remove_file(&tmp);
     let _ = std::fs::remove_file(tmp.with_extension("tmp.db-wal"));
     // Backup API: единый согласованный снимок вместе с WAL.
-    src.backup(
-        rusqlite::DatabaseName::Main,
-        &tmp,
-        None,
-    )
-    .map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("снимок: {e}")
-    })?;
+    src.backup(rusqlite::DatabaseName::Main, &tmp, None)
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            format!("снимок: {e}")
+        })?;
     drop(src);
     let check = integrity_check(&tmp)?;
     if check != "ok" {
@@ -355,7 +425,11 @@ fn do_backup(cfg: &crate::config::Config, dir: &Path) -> Result<PathBuf, String>
     let mut final_path = dir.join(ts_name());
     let mut n = 1u32;
     while final_path.exists() {
-        let stem = final_path.file_stem().and_then(|s| s.to_str()).unwrap_or("openscale").to_string();
+        let stem = final_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("openscale")
+            .to_string();
         final_path = dir.join(format!("{stem}-{n}.db"));
         n += 1;
     }
@@ -425,8 +499,10 @@ fn copy_fsync(src: &Path, dst: &Path) -> Result<(), String> {
         .open(dst)
         .map_err(|e| format!("{}: {e}", dst.display()))?;
     use std::io::Write;
-    f.write_all(&data).map_err(|e| format!("{}: {e}", dst.display()))?;
-    f.sync_all().map_err(|e| format!("{}: fsync: {e}", dst.display()))?;
+    f.write_all(&data)
+        .map_err(|e| format!("{}: {e}", dst.display()))?;
+    f.sync_all()
+        .map_err(|e| format!("{}: fsync: {e}", dst.display()))?;
     Ok(())
 }
 
@@ -435,8 +511,8 @@ fn copy_fsync(src: &Path, dst: &Path) -> Result<(), String> {
 /// (сервисного пользователя) для созданных файлов.
 #[cfg(unix)]
 fn match_owner_to(reference: &Path, targets: &[&Path]) {
-    use std::os::unix::fs::MetadataExt;
     use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
     let md = match std::fs::metadata(reference) {
         Ok(m) => m,
         Err(_) => return,
@@ -462,7 +538,7 @@ fn match_owner_to(reference: &Path, targets: &[&Path]) {
 fn match_owner_to(_reference: &Path, _targets: &[&Path]) {}
 
 /// Работает ли сейчас киоск: восстановление требует остановки сервиса.
-fn kiosk_running() -> bool {
+pub fn kiosk_running() -> bool {
     #[cfg(unix)]
     {
         // Основной источник — состояние юнита; после stop процесс может
@@ -476,7 +552,12 @@ fn kiosk_running() -> bool {
             }
         }
         let me = std::process::id();
-        for p in std::fs::read_dir("/proc").ok().into_iter().flatten().flatten() {
+        for p in std::fs::read_dir("/proc")
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             // Только числовые записи: self/thread-self указывают на нас же.
             let pid: u32 = match p.file_name().to_str().and_then(|n| n.parse().ok()) {
                 Some(n) => n,
@@ -511,7 +592,7 @@ fn kiosk_running() -> bool {
 }
 
 /// Отладочная строка: найденные процессы openscale.
-fn kiosk_pid_info() -> String {
+pub fn kiosk_pid_info() -> String {
     #[cfg(unix)]
     {
         let mut out = Vec::new();
@@ -527,7 +608,11 @@ fn kiosk_pid_info() -> String {
                     if c.trim() == "openscale" {
                         let state = std::fs::read_to_string(p.path().join("stat"))
                             .ok()
-                            .and_then(|s| s.rsplit(')').next().map(|s| s.trim_start()[..1].to_string()))
+                            .and_then(|s| {
+                                s.rsplit(')')
+                                    .next()
+                                    .map(|s| s.trim_start()[..1].to_string())
+                            })
                             .unwrap_or_default();
                         out.push(format!(
                             "pid={pid}{} state={state}",
@@ -545,9 +630,81 @@ fn kiosk_pid_info() -> String {
     }
 }
 
+/// Согласованный снимок текущего состояния БД перед восстановлением.
+/// Основной путь — SQLite Backup API (единый файл, WAL-aware). Если база
+/// настолько повреждена, что Backup API не работает, — файловая копия
+/// основного файла и sidecar-ов; ошибка любого копирования — ошибка
+/// сохранения: замена БД не начинается.
+fn save_current_state(db_path: &Path, pre: &Path) -> Result<bool, String> {
+    if !db_path.exists() {
+        return Ok(false);
+    }
+    match rusqlite::Connection::open_with_flags(
+        uri_rw(db_path),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    ) {
+        Ok(src) => match src.backup(rusqlite::DatabaseName::Main, pre, None) {
+            Ok(()) => return Ok(true),
+            Err(e) => {
+                log::warn!(
+                    "восстановление: Backup API над текущей базой не удался ({e}) — файловая копия"
+                );
+            }
+        },
+        Err(e) => {
+            log::warn!("восстановление: текущая база не открылась ({e}) — файловая копия");
+        }
+    }
+    // Файловый путь: основной файл обязателен, sidecar-ы — если есть;
+    // неполная копия недопустима: откат обязан вернуть исходное состояние.
+    copy_fsync(db_path, pre)
+        .map_err(|e| format!("не сохранить текущую базу, восстановление отменено: {e}"))?;
+    for suffix in ["-wal", "-shm"] {
+        let wal = PathBuf::from(format!("{}{suffix}", db_path.display()));
+        if wal.exists() {
+            copy_fsync(&wal, &pre.with_extension(format!("db{suffix}"))).map_err(|e| {
+                format!(
+                    "не сохранить sidecar {} текущей базы, восстановление отменено: {e}",
+                    wal.display()
+                )
+            })?;
+        }
+    }
+    Ok(true)
+}
+
+/// Полный откат к сохранённому состоянию: основной файл и sidecar-ы.
+/// Все ошибки возвращаются наружу, ничего не глушится.
+fn rollback_to_saved(db_path: &Path, pre: &Path) -> Result<(), String> {
+    // Sidecar-ы от неудачно восстановленной базы чужды исходной — убрать.
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{suffix}", db_path.display()));
+        if let Err(e) = std::fs::remove_file(&sidecar) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                return Err(format!("откат: не удалить {}: {e}", sidecar.display()));
+            }
+        }
+    }
+    if !pre.exists() {
+        return Err("откат: сохранённая копия исходной базы отсутствует".into());
+    }
+    std::fs::rename(pre, db_path).map_err(|e| format!("откат: rename: {e}"))?;
+    for suffix in ["-wal", "-shm"] {
+        let saved = pre.with_extension(format!("db{suffix}"));
+        if saved.exists() {
+            std::fs::rename(
+                &saved,
+                PathBuf::from(format!("{}{suffix}", db_path.display())),
+            )
+            .map_err(|e| format!("откат: возврат {}: {e}", saved.display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Восстановление БД из снимка. Требует остановленного киоска.
-/// Порядок: проверка снимка → сохранение текущей БД → атомарная замена →
-/// проверка → при ошибке возврат исходного состояния.
+/// Порядок: проверка снимка → сохранение текущего состояния (Backup API /
+/// файловая копия) → атомарная замена → проверка → при ошибке полный откат.
 pub fn restore_backup(
     cfg: &crate::config::Config,
     backup: &Path,
@@ -569,26 +726,25 @@ pub fn restore_backup(
     let check = integrity_check(backup)
         .map_err(|e| format!("снимок повреждён, восстановление отменено: {e}"))?;
     if check != "ok" {
-        return Err(format!("снимок повреждён, восстановление отменено: {check}"));
+        return Err(format!(
+            "снимок повреждён, восстановление отменено: {check}"
+        ));
     }
     schema_ok(backup)?;
-    let dir = dir.map(|p| p.to_path_buf()).unwrap_or_else(|| default_backup_dir(&cfg.db_path));
+    let dir = dir
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| default_backup_dir(&cfg.db_path));
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
 
     // Копия текущего состояния (даже повреждённого) — до любой замены.
+    // Ошибка сохранения отменяет восстановление: замена не начинается.
     let pre = dir.join(format!(
         "pre-restore-{}",
         backup.file_name().and_then(|n| n.to_str()).unwrap_or("db")
     ));
-    if cfg.db_path.exists() {
-        copy_fsync(&cfg.db_path, &pre)
-            .map_err(|e| format!("не сохранить текущую базу, восстановление отменено: {e}"))?;
-        for suffix in ["-wal", "-shm"] {
-            let wal = PathBuf::from(format!("{}{suffix}", cfg.db_path.display()));
-            if wal.exists() {
-                let _ = copy_fsync(&wal, &pre.with_extension(format!("db{suffix}")));
-            }
-        }
+    match save_current_state(&cfg.db_path, &pre) {
+        Ok(_) => {}
+        Err(e) => return Err(e),
     }
 
     // Атомарная замена: снимок → tmp (та же ФС) → rename.
@@ -627,11 +783,16 @@ pub fn restore_backup(
             pre.display()
         )),
         Err(e) => {
-            // Откат: вернуть исходную базу на место.
-            if pre.exists() {
-                let _ = std::fs::copy(&pre, &cfg.db_path);
+            // Полный откат: исходное состояние целиком (файл и sidecar-ы).
+            if let Err(rb) = rollback_to_saved(&cfg.db_path, &pre) {
+                log::error!("восстановление: {rb}");
+                return Err(format!(
+                    "восстановленная база не прошла проверку ({e}); {rb}"
+                ));
             }
-            Err(format!("восстановленная база не прошла проверку ({e}) — исходная база возвращена"))
+            Err(format!(
+                "восстановленная база не прошла проверку ({e}) — исходная база возвращена"
+            ))
         }
     }
 }
@@ -645,7 +806,9 @@ pub fn spawn_daily(cfg: std::sync::Arc<crate::config::Config>) -> std::thread::J
             let mut last_ok: Option<std::time::Instant> = None;
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(3600));
-                if last_ok.map(|t| t.elapsed() < std::time::Duration::from_secs(86_400)).unwrap_or(false)
+                if last_ok
+                    .map(|t| t.elapsed() < std::time::Duration::from_secs(86_400))
+                    .unwrap_or(false)
                 {
                     continue;
                 }
@@ -668,8 +831,7 @@ mod tests {
     use datastore::PluItem;
 
     fn setup(tag: &str) -> (PathBuf, Config) {
-        let dir =
-            std::env::temp_dir().join(format!("openscale-bk-{tag}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("openscale-bk-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut cfg = Config::default();
@@ -695,6 +857,187 @@ mod tests {
     fn plu_count(path: &Path) -> usize {
         let conn = datastore::open(path).unwrap();
         datastore::load_all(&conn).unwrap().len()
+    }
+
+    // ===== Волна 20, A1: fail-closed =====
+
+    #[test]
+    fn probe_rejects_empty_sqlite_file_with_marker() {
+        // Пустой SQLite-файл проходит integrity_check(ok), но не является
+        // установленной базой: миграции не должны замаскировать потерю.
+        let (dir, cfg) = setup("empty-marker");
+        std::fs::write(&cfg.db_path, b"").unwrap();
+        ensure_marker(&cfg.db_path);
+        assert!(
+            matches!(probe_startup(&cfg), DbStartup::Unavailable(_)),
+            "пустой файл с маркером не может считаться исправной базой"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn probe_rejects_partial_schema_with_marker() {
+        // Неполная база (есть только одна таблица) не маскируется под
+        // исправную миграциями.
+        let (dir, cfg) = setup("partial-schema");
+        let conn = rusqlite::Connection::open(&cfg.db_path).unwrap();
+        conn.execute("CREATE TABLE plucodes (plu TEXT)", [])
+            .unwrap();
+        drop(conn);
+        ensure_marker(&cfg.db_path);
+        assert!(matches!(probe_startup(&cfg), DbStartup::Unavailable(_)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn probe_first_install_without_marker_still_works() {
+        // Первый запуск: нет ни базы, ни маркера — штатная установка.
+        let (dir, cfg) = setup("first-install");
+        assert!(matches!(probe_startup(&cfg), DbStartup::FirstInstall));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn probe_accepts_full_db_with_marker() {
+        // Уникальный каталог: параллельные тесты не должны делить один путь БД
+        // (миграции гоняются за migrated_paths).
+        let (dir, cfg) = setup("probe-ready");
+        add_item(&cfg, "101");
+        ensure_marker(&cfg.db_path);
+        assert!(matches!(probe_startup(&cfg), DbStartup::Ready));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sync_status_open_does_not_create_missing_db() {
+        // Потерянная установленная БД: служебная запись не воссоздаёт файл —
+        // иначе fail-closed обойдён (регрессия волны 17).
+        let (dir, cfg) = setup("lost-db");
+        ensure_marker(&cfg.db_path);
+        let _ = crate::sync_status::begin(&cfg.db_path);
+        crate::sync_status::finish(&cfg.db_path, false, "", Some("x"));
+        assert!(
+            !cfg.db_path.exists(),
+            "sync_status создал файл базы при потерянной установленной БД"
+        );
+        // Пустая база с маркером не мигрируется в рабочую.
+        std::fs::write(&cfg.db_path, b"").unwrap();
+        let _ = crate::sync_status::begin(&cfg.db_path);
+        let conn = rusqlite::Connection::open_with_flags(
+            &cfg.db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        drop(conn);
+        assert_eq!(tables, 0, "sync_status прогнал миграции над пустой базой");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ===== Волна 20, A2: откат restore при неудачной проверке =====
+
+    #[test]
+    fn restore_rollback_restores_wal_state_fully() {
+        let (dir, cfg) = setup("restore-rollback");
+        let bdir = dir.join("backups");
+        std::fs::create_dir_all(&bdir).unwrap();
+        // Исходное состояние с данными в WAL: основной файл без данных,
+        // зафиксированная транзакция только в -wal.
+        {
+            let src = datastore::open(&cfg.db_path).unwrap();
+            let item = PluItem {
+                plu: "101".into(),
+                price: 19_999,
+                card_price: None,
+                itemcode: "2000001".into(),
+                namefirst: "СЫР ГАУДА КГ".into(),
+                namesecond: String::new(),
+                groupcode: String::new(),
+                shelflife: String::new(),
+            };
+            datastore::import_plu(&src, &[item]).unwrap();
+        }
+        ensure_marker(&cfg.db_path);
+        // Замораживаем триаду файлов (данные ещё в WAL), возвращаем её как
+        // рабочее состояние: main-файл данных не содержит.
+        let frozen = dir.join("frozen.db");
+        std::fs::copy(&cfg.db_path, &frozen).unwrap();
+        let wal = PathBuf::from(format!("{}-wal", cfg.db_path.display()));
+        let wal_has_data = wal.exists() && std::fs::metadata(&wal).unwrap().len() > 0;
+        if wal.exists() {
+            std::fs::copy(&wal, PathBuf::from(format!("{}-wal", frozen.display()))).unwrap();
+        }
+        let shm = PathBuf::from(format!("{}-shm", cfg.db_path.display()));
+        if shm.exists() {
+            std::fs::copy(&shm, PathBuf::from(format!("{}-shm", frozen.display()))).unwrap();
+        }
+        std::fs::copy(&frozen, &cfg.db_path).unwrap();
+        if wal_has_data {
+            std::fs::copy(PathBuf::from(format!("{}-wal", frozen.display())), &wal).unwrap();
+        }
+        // Снимок-ловушка: integrity ok, schema_ok пройдёт (таблицы есть),
+        // но load_all упадёт на отсутствующих колонках — сбой ПОСЛЕ замены.
+        let bad = bdir.join("bad.db");
+        {
+            let c = rusqlite::Connection::open(&bad).unwrap();
+            c.execute("CREATE TABLE plucodes (plu TEXT)", []).unwrap();
+            c.execute("CREATE TABLE print_log (id INTEGER)", [])
+                .unwrap();
+            c.execute("CREATE TABLE app_settings (key TEXT, value TEXT)", [])
+                .unwrap();
+        }
+        let err = restore_backup(&cfg, &bad, Some(&bdir)).unwrap_err();
+        assert!(err.contains("исходная база возвращена"), "{err}");
+        // Полное исходное состояние: данные из WAL доступны, integrity ok.
+        // Порядок важен: проверка sidecar-ов до открытия БД (открытие в
+        // WAL-режиме само создаёт -wal/-shm).
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = PathBuf::from(format!("{}{suffix}", cfg.db_path.display()));
+            assert!(
+                !sidecar.exists(),
+                "остался посторонний sidecar {}",
+                sidecar.display()
+            );
+        }
+        assert_eq!(
+            plu_count(&cfg.db_path),
+            1,
+            "данные из WAL исходной базы потеряны после отката"
+        );
+        assert_eq!(integrity_check(&cfg.db_path).unwrap(), "ok");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_refuses_to_start_when_pre_save_fails() {
+        // Не удалось сохранить исходное состояние — замена не начинается.
+        let (dir, cfg) = setup("pre-fail");
+        let bdir = dir.join("backups");
+        std::fs::create_dir_all(&bdir).unwrap();
+        add_item(&cfg, "101");
+        ensure_marker(&cfg.db_path);
+        let good = create_backup(&cfg, Some(&bdir)).unwrap();
+        // Путь pre-копии занят каталогом: файловая копия не сможет лечь.
+        let pre = bdir.join(format!(
+            "pre-restore-{}",
+            good.file_name().and_then(|n| n.to_str()).unwrap_or("db")
+        ));
+        std::fs::create_dir_all(&pre).unwrap();
+        let before = plu_count(&cfg.db_path);
+        let err = restore_backup(&cfg, &good, Some(&bdir)).unwrap_err();
+        assert!(err.contains("восстановление отменено"), "{err}");
+        assert_eq!(
+            plu_count(&cfg.db_path),
+            before,
+            "исходная база изменена при отказе сохранения"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -792,7 +1135,11 @@ mod tests {
         std::fs::write(&snap, b"not a database at all").unwrap();
         let err = restore_backup(&cfg, &snap, Some(&bdir)).err().unwrap();
         assert!(err.contains("повреждён"), "получено: {err}");
-        assert_eq!(plu_count(&cfg.db_path), 2, "рабочая база изменена при отказе");
+        assert_eq!(
+            plu_count(&cfg.db_path),
+            2,
+            "рабочая база изменена при отказе"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -803,7 +1150,8 @@ mod tests {
         std::fs::create_dir_all(&bdir).unwrap();
         let fake = bdir.join("openscale-20200101-000000.db");
         let conn = rusqlite::Connection::open(&fake).unwrap();
-        conn.execute_batch("CREATE TABLE t (x); INSERT INTO t VALUES (1);").unwrap();
+        conn.execute_batch("CREATE TABLE t (x); INSERT INTO t VALUES (1);")
+            .unwrap();
         drop(conn);
         let err = restore_backup(&cfg, &fake, Some(&bdir)).err().unwrap();
         assert!(err.contains("plucodes"), "получено: {err}");
@@ -829,7 +1177,11 @@ mod tests {
         datastore::import_plu(&conn, &[item]).unwrap();
         std::mem::forget(conn);
         assert!(PathBuf::from(format!("{}-wal", cfg.db_path.display())).exists());
-        assert_eq!(plu_count(&cfg.db_path), 1, "WAL не восстановлен после аварии");
+        assert_eq!(
+            plu_count(&cfg.db_path),
+            1,
+            "WAL не восстановлен после аварии"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -880,7 +1232,8 @@ mod tests {
         // Валидный SQLite, но в plucodes нет обязательных колонок —
         // загрузка данных невозможна.
         let conn = rusqlite::Connection::open(&cfg.db_path).unwrap();
-        conn.execute_batch("CREATE TABLE plucodes (plu TEXT);").unwrap();
+        conn.execute_batch("CREATE TABLE plucodes (plu TEXT);")
+            .unwrap();
         drop(conn);
         match probe_startup(&cfg) {
             DbStartup::Unavailable(e) => assert!(!e.is_empty()),
@@ -909,12 +1262,21 @@ mod tests {
         let lock_path = dir.join("kiosk.db.lock");
         // Exclusive занят: второй exclusive и shared не проходят.
         let ex = MaintLock::acquire_exclusive(&lock_path).unwrap();
-        assert!(MaintLock::acquire_exclusive(&lock_path).is_err(), "второй EX должен отклониться");
-        assert!(MaintLock::acquire_shared(&lock_path).is_err(), "SH при активном EX должен отклониться");
+        assert!(
+            MaintLock::acquire_exclusive(&lock_path).is_err(),
+            "второй EX должен отклониться"
+        );
+        assert!(
+            MaintLock::acquire_shared(&lock_path).is_err(),
+            "SH при активном EX должен отклониться"
+        );
         // После освобождения — доступен и EX, и SH.
         drop(ex);
         let sh = MaintLock::acquire_shared(&lock_path).unwrap();
-        assert!(MaintLock::acquire_exclusive(&lock_path).is_err(), "EX при активном SH должен отклониться");
+        assert!(
+            MaintLock::acquire_exclusive(&lock_path).is_err(),
+            "EX при активном SH должен отклониться"
+        );
         let sh2 = MaintLock::acquire_shared(&lock_path);
         assert!(sh2.is_ok(), "несколько SH должны сосуществовать");
         drop(sh);
@@ -991,7 +1353,8 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn restore_refuses_while_exclusive_held() {        let (dir, cfg) = setup("restorelock");
+    fn restore_refuses_while_exclusive_held() {
+        let (dir, cfg) = setup("restorelock");
         add_item(&cfg, "101");
         let bdir = dir.join("backups");
         let snap = create_backup(&cfg, Some(&bdir)).unwrap();
@@ -1000,11 +1363,17 @@ mod tests {
         let holder = MaintLock::acquire_exclusive(&maint_lock_path(&cfg.db_path)).unwrap();
         let before = plu_count(&cfg.db_path);
         let err = restore_backup(&cfg, &snap, Some(&bdir)).err().unwrap();
-        assert!(err.contains("обслуживания") || err.contains("работает"), "{err}");
-        assert_eq!(plu_count(&cfg.db_path), before, "БД изменена при занятой блокировке");
+        assert!(
+            err.contains("обслуживания") || err.contains("работает"),
+            "{err}"
+        );
+        assert_eq!(
+            plu_count(&cfg.db_path),
+            before,
+            "БД изменена при занятой блокировке"
+        );
         drop(holder);
         restore_backup(&cfg, &snap, Some(&bdir)).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-

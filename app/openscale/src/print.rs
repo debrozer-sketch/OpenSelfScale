@@ -1,8 +1,7 @@
-
-use std::io::Read;
-use std::time::Duration;
 use datastore::PluItem;
 use escpos::{FieldStyle, LabelJob};
+use std::io::Read;
+use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LabelLayout {
     pub area: (u16, u16),
@@ -69,23 +68,42 @@ pub fn build_label(
     let mut job = LabelJob::begin(layout.area);
     let kg = format!("{},{:03}", weight_g / 1000, weight_g % 1000);
     let price_r = format!("{},{:02}", item.price / 100, item.price % 100);
-    let sum_k = crate::session::round_sum(
-        crate::session::sum_kopecks(item.price, weight_g),
-        rounding,
-    );
+    let sum_k =
+        crate::session::round_sum(crate::session::sum_kopecks(item.price, weight_g), rounding);
     let sum_r = format!("{},{:02}", sum_k / 100, sum_k % 100);
-    job.field(layout.name.0, layout.name.1, FieldStyle::Normal, &item.namefirst)?
-        .field(layout.date.0, layout.date.1, FieldStyle::FontB, date)?
-        .field(layout.time.0, layout.time.1, FieldStyle::FontB, time)?
-        .field(layout.plu_label.0, layout.plu_label.1, FieldStyle::FontB, &format!("PLU {}", item.plu))?;
+    job.field(
+        layout.name.0,
+        layout.name.1,
+        FieldStyle::Normal,
+        &item.namefirst,
+    )?
+    .field(layout.date.0, layout.date.1, FieldStyle::FontB, date)?
+    .field(layout.time.0, layout.time.1, FieldStyle::FontB, time)?
+    .field(
+        layout.plu_label.0,
+        layout.plu_label.1,
+        FieldStyle::FontB,
+        &format!("PLU {}", item.plu),
+    )?;
     if !item.shelflife.is_empty() {
         let text = shelflife_label(&item.shelflife).unwrap_or_else(|| item.shelflife.clone());
-        job.field(layout.shelflife.0, layout.shelflife.1, FieldStyle::FontB, &text)?;
+        job.field(
+            layout.shelflife.0,
+            layout.shelflife.1,
+            FieldStyle::FontB,
+            &text,
+        )?;
     }
     job.field(layout.weight.0, layout.weight.1, FieldStyle::FontB, &kg)?
         .field(layout.price.0, layout.price.1, FieldStyle::FontB, &price_r)?
         .field(layout.sum.0, layout.sum.1, FieldStyle::DoubleH, &sum_r)?
-        .barcode_ean13(layout.barcode.0, layout.barcode.1, &ean13_payload(item, weight_g), 2, 0x30)?;
+        .barcode_ean13(
+            layout.barcode.0,
+            layout.barcode.1,
+            &ean13_payload(item, weight_g),
+            2,
+            0x30,
+        )?;
     Ok(job.finish())
 }
 fn money(kop: i64) -> String {
@@ -144,7 +162,11 @@ fn spec_field_text(
     if caption.is_empty() {
         return Some(value);
     }
-    let mut cell = if f.font_a { FONT_A_CELL_MM } else { FONT_B_CELL_MM };
+    let mut cell = if f.font_a {
+        FONT_A_CELL_MM
+    } else {
+        FONT_B_CELL_MM
+    };
     if f.size2 {
         cell *= 2.0;
     }
@@ -193,8 +215,16 @@ pub fn preview_items(
             let name = item.namefirst.clone();
             (font_a, size2) = name_font_fit(f, &name, fit_w);
         }
-        let mut cell = if font_a { FONT_A_CELL_MM } else { FONT_B_CELL_MM };
-        let mut height = if font_a { FONT_A_HEIGHT_MM } else { FONT_B_HEIGHT_MM };
+        let mut cell = if font_a {
+            FONT_A_CELL_MM
+        } else {
+            FONT_B_CELL_MM
+        };
+        let mut height = if font_a {
+            FONT_A_HEIGHT_MM
+        } else {
+            FONT_B_HEIGHT_MM
+        };
         if size2 {
             cell *= 2.0;
             height *= 2.0;
@@ -244,7 +274,10 @@ pub fn preview_items(
     }
     out
 }
-pub fn pick_layout(conn: &rusqlite::Connection, measured_len_mm: Option<i32>) -> Option<crate::label::LabelSpec> {
+pub fn pick_layout(
+    conn: &rusqlite::Connection,
+    measured_len_mm: Option<i32>,
+) -> Option<crate::label::LabelSpec> {
     let rows = datastore::label_layout_list(conn).ok()?;
     if rows.is_empty() {
         return None;
@@ -264,7 +297,11 @@ pub fn pick_layout(conn: &rusqlite::Connection, measured_len_mm: Option<i32>) ->
         log::warn!("раскладок с ошибками: {broken}");
     }
     let Some(len) = measured_len_mm else {
-        return if specs.len() == 1 { specs.into_iter().next() } else { None };
+        return if specs.len() == 1 {
+            specs.into_iter().next()
+        } else {
+            None
+        };
     };
     if let Some(spec) = crate::label::choose(&specs, len) {
         return Some(spec);
@@ -292,10 +329,8 @@ pub fn build_label_from_spec(
         return build_label(item, weight_g, LIVE_LAYOUT, date, time, rounding);
     };
     use crate::label::{LabelKind, MM_TO_DOTS};
-    let sum_kop = crate::session::round_sum(
-        crate::session::sum_kopecks(item.price, weight_g),
-        rounding,
-    );
+    let sum_kop =
+        crate::session::round_sum(crate::session::sum_kopecks(item.price, weight_g), rounding);
     let mut job = LabelJob::begin((
         ((spec.width_mm * MM_TO_DOTS) as u16).min(PRINT_WIDTH_DOTS),
         (spec.height_mm * MM_TO_DOTS) as u16,
@@ -316,8 +351,16 @@ pub fn build_label_from_spec(
         let x = (f.x_mm * MM_TO_DOTS as f64).round() as u16;
         let y = (f.y_mm * MM_TO_DOTS as f64).round() as u16;
         if f.kind == LabelKind::Barcode {
-            let bars_top = ((f.y_mm + BARCODE_HEIGHT_MM * if f.size2 { 2.0 } else { 1.0 }) * MM_TO_DOTS as f64).round() as u16;
-            job.barcode_ean13(x, bars_top, &ean13_payload(item, weight_g), if f.size2 { 4 } else { 2 }, 0x30)?;
+            let bars_top = ((f.y_mm + BARCODE_HEIGHT_MM * if f.size2 { 2.0 } else { 1.0 })
+                * MM_TO_DOTS as f64)
+                .round() as u16;
+            job.barcode_ean13(
+                x,
+                bars_top,
+                &ean13_payload(item, weight_g),
+                if f.size2 { 4 } else { 2 },
+                0x30,
+            )?;
             continue;
         }
         let Some(text) = spec_field_text(f, item, weight_g, sum_kop, date, time, fit_w) else {
@@ -328,7 +371,11 @@ pub fn build_label_from_spec(
     Ok(job.finish())
 }
 pub fn ean13_payload(item: &PluItem, weight_g: u32) -> String {
-    let digits: String = item.itemcode.chars().filter(|c| c.is_ascii_digit()).collect();
+    let digits: String = item
+        .itemcode
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect();
     let code5 = if digits.len() >= 5 {
         digits[digits.len() - 5..].to_string()
     } else {
@@ -337,16 +384,20 @@ pub fn ean13_payload(item: &PluItem, weight_g: u32) -> String {
     format!("21{code5}{:05}", weight_g.min(99_999))
 }
 const EAN13_L: [&str; 10] = [
-    "0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011",
+    "0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011",
+    "0110111", "0001011",
 ];
 const EAN13_G: [&str; 10] = [
-    "0100111", "0110011", "0011011", "0100001", "0011101", "0111001", "0000101", "0010001", "0001001", "0010111",
+    "0100111", "0110011", "0011011", "0100001", "0011101", "0111001", "0000101", "0010001",
+    "0001001", "0010111",
 ];
 const EAN13_R: [&str; 10] = [
-    "1110010", "1100110", "1101100", "1000010", "1011100", "1001110", "1010000", "1000100", "1001000", "1110100",
+    "1110010", "1100110", "1101100", "1000010", "1011100", "1001110", "1010000", "1000100",
+    "1001000", "1110100",
 ];
 const EAN13_PARITY: [&str; 10] = [
-    "000000", "001011", "001101", "001110", "010011", "011001", "011100", "010101", "010110", "011010",
+    "000000", "001011", "001101", "001110", "010011", "011001", "011100", "010101", "010110",
+    "011010",
 ];
 pub fn ean13_check_digit(payload: &str) -> u8 {
     let sum: u32 = payload
@@ -365,7 +416,11 @@ pub fn ean13_bar_runs(digits13: &str) -> Vec<(usize, usize)> {
     let mut pattern = String::with_capacity(95);
     pattern.push_str("101");
     for i in 0..6 {
-        let code = if parity.as_bytes()[i] == b'0' { EAN13_L } else { EAN13_G };
+        let code = if parity.as_bytes()[i] == b'0' {
+            EAN13_L
+        } else {
+            EAN13_G
+        };
         pattern.push_str(code[d[1 + i]]);
     }
     pattern.push_str("01010");
@@ -400,7 +455,9 @@ pub fn shelflife_label(raw: &str) -> Option<String> {
         if p.len() != 3 {
             return None;
         }
-        p.iter().map(|x| x.parse::<u32>().ok()).collect::<Option<Vec<_>>>()?
+        p.iter()
+            .map(|x| x.parse::<u32>().ok())
+            .collect::<Option<Vec<_>>>()?
     } else if date_part.contains('-') {
         let p: Vec<&str> = date_part.split('-').collect();
         if p.len() != 3 {
@@ -442,7 +499,12 @@ pub fn stamp_for(ts: i64) -> (String, String) {
                 return utc_stamp(ts);
             }
             (
-                format!("{:02}.{:02}.{:02}", tm.tm_mday, tm.tm_mon + 1, (tm.tm_year + 1900) % 100),
+                format!(
+                    "{:02}.{:02}.{:02}",
+                    tm.tm_mday,
+                    tm.tm_mon + 1,
+                    (tm.tm_year + 1900) % 100
+                ),
                 format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec),
             )
         }
@@ -477,10 +539,7 @@ pub fn local_hms(ts: i64) -> String {
             let mut tm: libc::tm = std::mem::zeroed();
             let t: libc::time_t = ts as libc::time_t;
             if !libc::localtime_r(&t, &mut tm).is_null() {
-                return format!(
-                    "{:02}:{:02}:{:02}",
-                    tm.tm_hour, tm.tm_min, tm.tm_sec
-                );
+                return format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec);
             }
         }
     }
@@ -499,9 +558,7 @@ pub fn today_start() -> i64 {
             if libc::localtime_r(&t, &mut tm).is_null() {
                 return now / 86_400 * 86_400;
             }
-            now - i64::from(tm.tm_hour) * 3600
-                - i64::from(tm.tm_min) * 60
-                - i64::from(tm.tm_sec)
+            now - i64::from(tm.tm_hour) * 3600 - i64::from(tm.tm_min) * 60 - i64::from(tm.tm_sec)
         }
     }
     #[cfg(not(unix))]
@@ -516,9 +573,11 @@ pub struct PrinterHealth {
     pub paper_near_end: bool,
     pub label_waiting: bool,
     pub power_cycle_hint: bool,
-    /// Демон хоть раз получил ответ принтера: без этого «готов» показать
-    /// нельзя — данных о принтере ещё нет.
+    /// Был ли хоть раз получен ответ принтера: без него «готов» нельзя
+    /// показывать — возможно, в принтере просто нет бумаги данных.
     pub seen: bool,
+    /// Авария из-за молчания (ошибка связи), а не из-за бита ошибки L4.
+    pub silent: bool,
 }
 pub enum PrinterRequest {
     Print {
@@ -531,11 +590,22 @@ pub enum PrinterRequest {
         log_rowid: Option<i64>,
         cancel: Arc<std::sync::atomic::AtomicBool>,
     },
-    Feed { ack: mpsc::Sender<Result<(), String>> },
-    Test { bytes: Vec<u8>, ack: mpsc::Sender<Result<(), PrintFail>> },
-    Diagnostics { ack: mpsc::Sender<PrinterDiagnostics> },
-    Reset { ack: mpsc::Sender<Result<(), String>> },
-    Calibrate { ack: mpsc::Sender<Result<u32, String>> },
+    Feed {
+        ack: mpsc::Sender<Result<(), String>>,
+    },
+    Test {
+        bytes: Vec<u8>,
+        ack: mpsc::Sender<Result<(), PrintFail>>,
+    },
+    Diagnostics {
+        ack: mpsc::Sender<PrinterDiagnostics>,
+    },
+    Reset {
+        ack: mpsc::Sender<Result<(), String>>,
+    },
+    Calibrate {
+        ack: mpsc::Sender<Result<u32, String>>,
+    },
 }
 #[derive(Debug, Clone)]
 pub struct PrintMeta {
@@ -557,13 +627,11 @@ pub struct PrinterDiagnostics {
     pub model: Option<String>,
     pub serial: Option<String>,
 }
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-static PRINTER_TX: std::sync::OnceLock<mpsc::Sender<PrinterRequest>> =
-    std::sync::OnceLock::new();
-static HEALTH: std::sync::OnceLock<std::sync::Mutex<PrinterHealth>> =
-    std::sync::OnceLock::new();
+use std::sync::mpsc;
+static PRINTER_TX: std::sync::OnceLock<mpsc::Sender<PrinterRequest>> = std::sync::OnceLock::new();
+static HEALTH: std::sync::OnceLock<std::sync::Mutex<PrinterHealth>> = std::sync::OnceLock::new();
 pub fn daemon_running(cfg: &crate::config::Config) -> bool {
     cfg.printer.enabled && PRINTER_TX.get().is_some()
 }
@@ -573,37 +641,82 @@ pub fn health() -> PrinterHealth {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
 }
+
+/// Единый человекочитаемый статус принтера для «Состояния» и «Обслуживания».
+/// Возвращает (текст, состояние 0=норма / 1=внимание / 2=проблема).
+/// «Готов» показывается только при подтверждённом ответе принтера.
+pub fn status_line(printer_enabled: bool) -> (String, i32) {
+    if !printer_enabled {
+        return ("выключен в настройках".to_string(), 1);
+    }
+    let ph = health();
+    if ph.fault {
+        return if ph.silent {
+            ("ошибка связи".to_string(), 2)
+        } else {
+            ("авария".to_string(), 2)
+        };
+    }
+    if !ph.seen {
+        return ("нет ответа".to_string(), 0);
+    }
+    if ph.paper_end {
+        return ("кончилась бумага".to_string(), 2);
+    }
+    if ph.label_waiting {
+        return ("занят: этикетка в лотке".to_string(), 1);
+    }
+    if ph.paper_near_end {
+        return ("бумага заканчивается".to_string(), 1);
+    }
+    ("готов".to_string(), 0)
+}
 fn set_health(h: PrinterHealth) {
     *HEALTH
         .get_or_init(|| std::sync::Mutex::new(PrinterHealth::default()))
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = h;
 }
-fn request(build: impl FnOnce(mpsc::Sender<Result<(), String>>) -> PrinterRequest) -> Result<(), String> {
-    let tx = PRINTER_TX.get().ok_or_else(|| "принтер не запущен".to_string())?;
+fn request(
+    build: impl FnOnce(mpsc::Sender<Result<(), String>>) -> PrinterRequest,
+) -> Result<(), String> {
+    let tx = PRINTER_TX
+        .get()
+        .ok_or_else(|| "принтер не запущен".to_string())?;
     let (ack_tx, ack_rx) = mpsc::channel();
-    tx.send(build(ack_tx)).map_err(|_| "поток принтера не запущен".to_string())?;
+    tx.send(build(ack_tx))
+        .map_err(|_| "поток принтера не запущен".to_string())?;
     ack_rx
         .recv_timeout(Duration::from_secs(90))
         .unwrap_or_else(|_| Err("принтер не отвечает".into()))
 }
-fn request_print(build: impl FnOnce(mpsc::Sender<Result<(), PrintFail>>) -> PrinterRequest) -> Result<(), PrintFail> {
-    let tx = PRINTER_TX
-        .get()
-        .ok_or_else(|| PrintFail { text: "принтер не запущен".into(), unknown: false })?;
+fn request_print(
+    build: impl FnOnce(mpsc::Sender<Result<(), PrintFail>>) -> PrinterRequest,
+) -> Result<(), PrintFail> {
+    let tx = PRINTER_TX.get().ok_or_else(|| PrintFail {
+        text: "принтер не запущен".into(),
+        unknown: false,
+    })?;
     let (ack_tx, ack_rx) = mpsc::channel();
-    tx.send(build(ack_tx))
-        .map_err(|_| PrintFail { text: "поток принтера не запущен".into(), unknown: false })?;
-    ack_rx.recv_timeout(Duration::from_secs(90)).unwrap_or_else(|_| {
-        // Нет ответа демона: задание вставало в очередь — достоверно
-        // сказать, отправлялось ли оно в порт, нельзя.
-        Err(PrintFail { text: "принтер не отвечает".into(), unknown: true })
-    })
+    tx.send(build(ack_tx)).map_err(|_| PrintFail {
+        text: "поток принтера не запущен".into(),
+        unknown: false,
+    })?;
+    ack_rx
+        .recv_timeout(Duration::from_secs(90))
+        .unwrap_or_else(|_| {
+            // Нет ответа демона: задание вставало в очередь — достоверно
+            // сказать, отправлялось ли оно в порт, нельзя.
+            Err(PrintFail {
+                text: "принтер не отвечает".into(),
+                unknown: true,
+            })
+        })
 }
 pub fn spawn_daemon(cfg: &crate::config::Config) {
     let (tx, rx) = mpsc::channel();
     if PRINTER_TX.set(tx).is_err() {
-        return; 
+        return;
     }
     if !cfg.printer.enabled {
         log::info!("демон принтера: отключён в конфиге ([printer].enabled = false)");
@@ -687,17 +800,29 @@ struct Monitor {
 }
 impl Monitor {
     fn feed(&mut self, sample: Option<u8>) {
-        self.health.seen = true;
         match sample {
             Some(b) => {
+                // seen — только после реального ответа принтера; отсутствие
+                // ответа (None) не переводит устройство в «готов».
+                self.health.seen = true;
+                self.health.silent = false;
                 self.silent_streak = 0;
-                self.fault_streak =
-                    if escpos::l4_fault(b) { self.fault_streak.saturating_add(1) } else { 0 };
+                self.fault_streak = if escpos::l4_fault(b) {
+                    self.fault_streak.saturating_add(1)
+                } else {
+                    0
+                };
                 self.health.fault = self.fault_streak >= FAULT_CONFIRM;
                 if !escpos::l4_fault(b) {
                     self.recover_attempts = 0;
                     self.health.power_cycle_hint = false;
                 }
+                // Бумага — из битов L4 того же протокола, что декодирует
+                // decode_l4: бит 0x40 — «бумаги нет», бит 0x08 — near-end
+                // (бит 0x04 — авария и проверяется отдельно). При аварии
+                // статус бумаги недостоверен.
+                self.health.paper_end = !escpos::l4_fault(b) && b & 0x40 != 0;
+                self.health.paper_near_end = !escpos::l4_fault(b) && b & 0x08 != 0;
                 let in_tray = escpos::label_in_tray(b);
                 if in_tray && !self.health.label_waiting {
                     self.label_since = Some(std::time::Instant::now());
@@ -708,9 +833,13 @@ impl Monitor {
                 self.health.label_waiting = in_tray;
             }
             None => {
+                // Нет ответа — нет данных и о бумаге: не выдумываем статус.
+                self.health.paper_end = false;
+                self.health.paper_near_end = false;
                 self.silent_streak = self.silent_streak.saturating_add(1);
                 if self.silent_streak >= SILENT_CONFIRM {
                     self.health.fault = true;
+                    self.health.silent = true;
                     self.health.label_waiting = false;
                     self.label_since = None;
                 }
@@ -721,12 +850,18 @@ impl Monitor {
     fn note_failure(&mut self) {
         self.fault_streak = FAULT_CONFIRM;
         self.health.fault = true;
+        // Сбой канала: статус бумаги недостоверен — не показываем старый.
+        self.health.paper_end = false;
+        self.health.paper_near_end = false;
         set_health(self.health);
     }
     fn next_probe(&self) -> Duration {
         if self.fault_streak > 0 || self.silent_streak > 0 {
             PROBE_FAST
-        } else if self.label_since.is_some_and(|t| t.elapsed() < LABEL_WATCH_MAX) {
+        } else if self
+            .label_since
+            .is_some_and(|t| t.elapsed() < LABEL_WATCH_MAX)
+        {
             PROBE_LABEL
         } else {
             PROBE_IDLE
@@ -773,7 +908,11 @@ fn scan_phase(
         if started.elapsed() > total {
             return Err(Fail::Printer(format!("шаг-скан: дедлайн фазы «{what}»")));
         }
-        if port.write_all(&[escpos::ESC, b'J', SCAN_STEP_UNITS]).is_err() || port.flush().is_err() {
+        if port
+            .write_all(&[escpos::ESC, b'J', SCAN_STEP_UNITS])
+            .is_err()
+            || port.flush().is_err()
+        {
             return Err(Fail::Io("шаг-скан: запись в порт".into()));
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -789,21 +928,30 @@ fn scan_phase(
 }
 fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, Fail> {
     const TOTAL_DEADLINE: Duration = Duration::from_secs(150);
-    const STEP_CAP: u32 = 350; 
-    const GAP_CAP: u32 = 60; 
+    const STEP_CAP: u32 = 350;
+    const GAP_CAP: u32 = 60;
     let started = std::time::Instant::now();
-    let expired = |what: &str| {
-        Fail::Printer(format!("шаг-скан: дедлайн фазы «{what}»"))
-    };
+    let expired = |what: &str| Fail::Printer(format!("шаг-скан: дедлайн фазы «{what}»"));
     let res = (|| {
         scan_phase(port, false, STEP_CAP, "зазор", started, TOTAL_DEADLINE)?;
-        scan_phase(port, true, GAP_CAP, "начало этикетки", started, TOTAL_DEADLINE)?;
+        scan_phase(
+            port,
+            true,
+            GAP_CAP,
+            "начало этикетки",
+            started,
+            TOTAL_DEADLINE,
+        )?;
         let mut len = 0u32;
         while len < STEP_CAP {
             if started.elapsed() > TOTAL_DEADLINE {
                 return Err(expired("счёт длины"));
             }
-            if port.write_all(&[escpos::ESC, b'J', SCAN_STEP_UNITS]).is_err() || port.flush().is_err() {
+            if port
+                .write_all(&[escpos::ESC, b'J', SCAN_STEP_UNITS])
+                .is_err()
+                || port.flush().is_err()
+            {
                 return Err(Fail::Io("шаг-скан: запись в порт".into()));
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -952,9 +1100,23 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
             next_prune = std::time::Instant::now() + Duration::from_secs(6 * 3600);
         }
         match rx.recv_timeout(mon.next_probe()) {
-            Ok(PrinterRequest::Print { bytes, ack, queued_at, meta, log_rowid, cancel }) => {
+            Ok(PrinterRequest::Print {
+                bytes,
+                ack,
+                queued_at,
+                meta,
+                log_rowid,
+                cancel,
+            }) => {
                 if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                    finish_print(ack, Err(PrintFail { text: "задание печати отменено".into(), unknown: false }), "отмена");
+                    finish_print(
+                        ack,
+                        Err(PrintFail {
+                            text: "задание печати отменено".into(),
+                            unknown: false,
+                        }),
+                        "отмена",
+                    );
                     continue;
                 }
                 if queued_at.elapsed() > STALE_JOB {
@@ -962,7 +1124,14 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                         "принтер: задание устарело ({} с в очереди) — пропущено",
                         queued_at.elapsed().as_secs()
                     );
-                    finish_print(ack, Err(PrintFail { text: "задание печати устарело".into(), unknown: false }), "печать");
+                    finish_print(
+                        ack,
+                        Err(PrintFail {
+                            text: "задание печати устарело".into(),
+                            unknown: false,
+                        }),
+                        "печать",
+                    );
                     continue;
                 }
                 let wait = Duration::from_secs(cfg.printer.present_wait_secs.max(1) as u64)
@@ -981,7 +1150,10 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                     ack,
                     res.map_err(|e| {
                         let unknown = e.is_uncertain();
-                        PrintFail { text: e.text(), unknown }
+                        PrintFail {
+                            text: e.text(),
+                            unknown,
+                        }
                     }),
                     "печать",
                 );
@@ -989,8 +1161,16 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                     if let Ok(conn) = datastore::open(&cfg.db_path) {
                         if let Some(rowid) = log_rowid {
                             match mark {
-                                Some(ok) => datastore::print_log_mark(&conn, rowid, ok),
-                                None => log::warn!("печать: результат не подтверждён, запись #{rowid} остаётся в журнале как неизвестная"),
+                                Some(ok) => {
+                                    if let Err(e) = datastore::print_log_mark(&conn, rowid, ok) {
+                                        log::error!(
+                                            "печать: журнал: запись #{rowid} не обновлена ({e}): оператор получил ответ, журнал мог остаться без маркировки"
+                                        );
+                                    }
+                                }
+                                None => log::warn!(
+                                    "печать: результат не подтверждён, запись #{rowid} остаётся в журнале как неизвестная"
+                                ),
                             }
                         } else if let Some(m) = meta {
                             // Легаси-путь без журнала попытки: пишем как раньше.
@@ -1012,6 +1192,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                                     price: None,
                                     shelflife: None,
                                     origin_id: None,
+                                    rounding: None,
                                 },
                             );
                         }
@@ -1022,7 +1203,8 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 let res = with_port(cfg, &mut prn, |p| {
                     let port = p.port_mut();
                     ensure_ready(port)?;
-                    port.write_all(&[escpos::GS, escpos::FF]).map_err(Fail::io)?;
+                    port.write_all(&[escpos::GS, escpos::FF])
+                        .map_err(Fail::io)?;
                     port.flush().map_err(Fail::io)?;
                     log::info!("принтер: подача до метки");
                     std::thread::sleep(Duration::from_millis(500));
@@ -1054,7 +1236,10 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                     ack,
                     res.map_err(|e| {
                         let unknown = e.is_uncertain();
-                        PrintFail { text: e.text(), unknown }
+                        PrintFail {
+                            text: e.text(),
+                            unknown,
+                        }
                     }),
                     "тестовая печать",
                 );
@@ -1063,9 +1248,12 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 let mut d = PrinterDiagnostics::default();
                 let _ = with_port(cfg, &mut prn, |p| {
                     let port = p.port_mut();
-                    for (_level, slot) in
-                        [(1u8, &mut d.l1), (2, &mut d.l2), (3, &mut d.l3), (4, &mut d.l4)]
-                    {
+                    for (_level, slot) in [
+                        (1u8, &mut d.l1),
+                        (2, &mut d.l2),
+                        (3, &mut d.l3),
+                        (4, &mut d.l4),
+                    ] {
                         *slot = read_l4(port, 2);
                     }
                     d.gs_r = query_byte(port, &[escpos::GS, b'r', 1]);
@@ -1079,7 +1267,14 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 });
                 log::info!(
                     "принтер: диагностика: L1={:?} L2={:?} L3={:?} L4={:?} GSr={:?} fw={:?} vendor={:?} model={:?}",
-                    d.l1, d.l2, d.l3, d.l4, d.gs_r, d.fw_version, d.vendor, d.model
+                    d.l1,
+                    d.l2,
+                    d.l3,
+                    d.l4,
+                    d.gs_r,
+                    d.fw_version,
+                    d.vendor,
+                    d.model
                 );
                 let _ = ack.send(d);
             }
@@ -1145,12 +1340,27 @@ fn with_port<T>(
             .timeout(Duration::from_millis(1500))
             .open()
             .map_err(|e| {
-                set_health(PrinterHealth { fault: true, seen: health().seen, ..PrinterHealth::default() });
+                set_health(PrinterHealth {
+                    fault: true,
+                    seen: health().seen,
+                    ..PrinterHealth::default()
+                });
                 Fail::Io(format!("{}: {e}", cfg.printer.port))
             })?;
-        if port.write_all(&[escpos::ESC, 0x40]).and_then(|_| port.flush()).is_err() {
-            set_health(PrinterHealth { fault: true, seen: health().seen, ..PrinterHealth::default() });
-            return Err(Fail::Io(format!("{}: ESC @ после открытия не прошёл", cfg.printer.port)));
+        if port
+            .write_all(&[escpos::ESC, 0x40])
+            .and_then(|_| port.flush())
+            .is_err()
+        {
+            set_health(PrinterHealth {
+                fault: true,
+                seen: health().seen,
+                ..PrinterHealth::default()
+            });
+            return Err(Fail::Io(format!(
+                "{}: ESC @ после открытия не прошёл",
+                cfg.printer.port
+            )));
         }
         *prn = Some(escpos::EscPosPrinter::new(port));
     }
@@ -1161,7 +1371,11 @@ fn with_port<T>(
     if matches!(&res, Err(Fail::Io(_))) {
         // Ошибка канала — порт недостоверен, печатать через него дальше нельзя.
         *prn = None;
-        set_health(PrinterHealth { fault: true, seen: health().seen, ..PrinterHealth::default() });
+        set_health(PrinterHealth {
+            fault: true,
+            seen: health().seen,
+            ..PrinterHealth::default()
+        });
     }
     res
 }
@@ -1235,7 +1449,7 @@ pub fn label_probe(cfg: &crate::config::Config) -> Result<String, String> {
     let _ = port.flush();
     std::thread::sleep(Duration::from_millis(150));
     drain_port_rx(&mut port);
-    let mut seen: Vec<(u8, u32)> = Vec::new(); 
+    let mut seen: Vec<(u8, u32)> = Vec::new();
     for _step in 0..600u32 {
         if started.elapsed() > Duration::from_secs(150) {
             report.push_str("(дедлайн — остановлено)\n");
@@ -1260,8 +1474,7 @@ pub fn label_probe(cfg: &crate::config::Config) -> Result<String, String> {
     if seen.is_empty() {
         report.push_str("  ASB: байтов нет (не включился или не поддержан)\n");
     } else {
-        let mut list: Vec<String> =
-            seen.iter().map(|(b, c)| format!("{b:02X}×{c}")).collect();
+        let mut list: Vec<String> = seen.iter().map(|(b, c)| format!("{b:02X}×{c}")).collect();
         list.sort();
         report.push_str(&format!("  уникальные байты: {}\n", list.join(" ")));
     }
@@ -1408,10 +1621,7 @@ pub fn feed_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     request(|ack| PrinterRequest::Feed { ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
-fn query_byte(
-    port: &mut Box<dyn serialport::SerialPort>,
-    payload: &[u8],
-) -> Option<u8> {
+fn query_byte(port: &mut Box<dyn serialport::SerialPort>, payload: &[u8]) -> Option<u8> {
     drain_port_rx(port);
     if port.write_all(payload).is_err() || port.flush().is_err() {
         return None;
@@ -1423,10 +1633,7 @@ fn query_byte(
         _ => None,
     }
 }
-fn query_string(
-    port: &mut Box<dyn serialport::SerialPort>,
-    payload: &[u8],
-) -> Option<String> {
+fn query_string(port: &mut Box<dyn serialport::SerialPort>, payload: &[u8]) -> Option<String> {
     drain_port_rx(port);
     if port.write_all(payload).is_err() || port.flush().is_err() {
         return None;
@@ -1538,7 +1745,10 @@ pub fn fmt_diagnostics(
 }
 pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintFail> {
     if !cfg.printer.enabled {
-        return Err(PrintFail { text: "печать отключена в настройках".into(), unknown: false });
+        return Err(PrintFail {
+            text: "печать отключена в настройках".into(),
+            unknown: false,
+        });
     }
     let bytes = crate::calib::test_label_bytes();
     request_print(|ack| PrinterRequest::Test { bytes, ack })
@@ -1560,7 +1770,8 @@ pub fn print_test_label_cli(cfg: &crate::config::Config) -> Result<(), PrintErro
     port.write_all(&[escpos::ESC, 0x40])
         .and_then(|_| port.flush())
         .map_err(|e| PrintError::Io(std::io::Error::other(format!("ESC @: {e}"))))?;
-    let wait = Duration::from_secs(cfg.printer.present_wait_secs.max(1) as u64).min(PRESENT_WAIT_MAX);
+    let wait =
+        Duration::from_secs(cfg.printer.present_wait_secs.max(1) as u64).min(PRESENT_WAIT_MAX);
     let mut mon = Monitor::default();
     print_job(&mut port, &bytes, &mut mon, wait)
         .map_err(|e| PrintError::Io(std::io::Error::other(e.text())))
@@ -1587,7 +1798,9 @@ fn grid_probe_bytes(spec: &crate::label::LabelSpec, item: &datastore::PluItem) -
     for f in &spec.fields {
         if f.kind == crate::label::LabelKind::Barcode {
             let payload = ean13_payload(item, 1350);
-            let bars_top = ((f.y_mm + BARCODE_HEIGHT_MM * if f.size2 { 2.0 } else { 1.0 }) * MM_TO_DOTS as f64).round() as u16;
+            let bars_top = ((f.y_mm + BARCODE_HEIGHT_MM * if f.size2 { 2.0 } else { 1.0 })
+                * MM_TO_DOTS as f64)
+                .round() as u16;
             let _ = job.barcode_ean13(
                 (f.x_mm * MM_TO_DOTS as f64).round() as u16,
                 bars_top,
@@ -1691,8 +1904,9 @@ pub fn print_reprint_with_cancel(
     let conn = datastore::open(&cfg.db_path)?;
     let src = datastore::print_log_get(&conn, origin_rowid)?
         .ok_or_else(|| PrintError::Reprint(format!("операция #{origin_rowid} не найдена")))?;
-    let weight_g = u32::try_from(src.weight_g.unwrap_or(0))
-        .map_err(|_| PrintError::Reprint(format!("операция #{origin_rowid}: некорректная масса")))?;
+    let weight_g = u32::try_from(src.weight_g.unwrap_or(0)).map_err(|_| {
+        PrintError::Reprint(format!("операция #{origin_rowid}: некорректная масса"))
+    })?;
     let item = snapshot_item(&src).ok_or_else(|| {
         PrintError::Reprint(format!(
             "операция #{origin_rowid}: нет снимка покупки (старая запись журнала)"
@@ -1701,11 +1915,18 @@ pub fn print_reprint_with_cancel(
     if weight_g > 99_999 {
         return Err(PrintError::WeightLimit(weight_g));
     }
-    let rounding = datastore::get_calibration(&conn, "price_rounding")
-        .ok()
-        .flatten()
-        .unwrap_or(0)
-        .clamp(0, 2);
+    // Округление исходной покупки: повторная этикетка воспроизводит исходную
+    // сумму. Для старых записей без снимка округления — текущая настройка.
+    let rounding = src
+        .rounding
+        .filter(|r| (0..=2).contains(r))
+        .unwrap_or_else(|| {
+            datastore::get_calibration(&conn, "price_rounding")
+                .ok()
+                .flatten()
+                .unwrap_or(0)
+                .clamp(0, 2)
+        });
     let (date, time) = stamp_for(src.ts);
     let measured = datastore::get_calibration(&conn, "label_length_mm")
         .ok()
@@ -1736,6 +1957,7 @@ pub fn print_reprint_with_cancel(
             price: src.price,
             shelflife: src.shelflife.clone(),
             origin_id: Some(root),
+            rounding: Some(rounding),
         },
     ) {
         Ok(id) => id,
@@ -1744,20 +1966,18 @@ pub fn print_reprint_with_cancel(
             return Err(PrintError::Store(e));
         }
     };
-    request_print(|ack| {
-        PrinterRequest::Print {
-            bytes,
-            ack,
-            queued_at: std::time::Instant::now(),
-            meta: Some(PrintMeta {
-                plu: item.plu,
-                name: item.namefirst,
-                weight_g,
-                sum_kop,
-            }),
-            log_rowid: Some(log_rowid),
-            cancel,
-        }
+    request_print(|ack| PrinterRequest::Print {
+        bytes,
+        ack,
+        queued_at: std::time::Instant::now(),
+        meta: Some(PrintMeta {
+            plu: item.plu,
+            name: item.namefirst,
+            weight_g,
+            sum_kop,
+        }),
+        log_rowid: Some(log_rowid),
+        cancel,
     })
     .map_err(|f| {
         if f.unknown {
@@ -1793,10 +2013,8 @@ pub fn print_for_item_with_cancel(
         .map(|v| v as i32);
     let spec = pick_layout(&conn, measured);
     let bytes = build_label_from_spec(item, weight_g, &date, &time, rounding, spec.as_ref())?;
-    let sum_kop = crate::session::round_sum(
-        crate::session::sum_kopecks(item.price, weight_g),
-        rounding,
-    );
+    let sum_kop =
+        crate::session::round_sum(crate::session::sum_kopecks(item.price, weight_g), rounding);
     // Фиксация попытки до передачи на принтер: крах процесса после записи
     // оставляет операцию в журнале (ok=NULL — исход неизвестен), ошибка
     // печати не теряет её. Снимок покупки обеспечивает повторную печать
@@ -1820,6 +2038,7 @@ pub fn print_for_item_with_cancel(
             price: Some(item.price),
             shelflife: Some(item.shelflife.clone()),
             origin_id: None,
+            rounding: Some(rounding),
         },
     ) {
         Ok(id) => Some(id),
@@ -1828,20 +2047,18 @@ pub fn print_for_item_with_cancel(
             return Err(PrintError::Store(e));
         }
     };
-    request_print(|ack| {
-        PrinterRequest::Print {
-            bytes,
-            ack,
-            queued_at: std::time::Instant::now(),
-            meta: Some(PrintMeta {
-                plu: item.plu.clone(),
-                name: item.namefirst.clone(),
-                weight_g,
-                sum_kop,
-            }),
-            log_rowid,
-            cancel,
-        }
+    request_print(|ack| PrinterRequest::Print {
+        bytes,
+        ack,
+        queued_at: std::time::Instant::now(),
+        meta: Some(PrintMeta {
+            plu: item.plu.clone(),
+            name: item.namefirst.clone(),
+            weight_g,
+            sum_kop,
+        }),
+        log_rowid,
+        cancel,
     })
     .map_err(|f| {
         if f.unknown {
@@ -1881,6 +2098,119 @@ mod tests {
     const L4_OK: u8 = 0x36;
     const L4_IN_TRAY: u8 = 0x16;
     const L4_FAULT: u8 = 0x12;
+
+    // ===== Волна 20, часть C: достоверность статусов =====
+
+    #[test]
+    fn feed_none_does_not_mark_seen() {
+        let mut mon = Monitor::default();
+        mon.feed(None);
+        assert!(
+            !mon.health.seen,
+            "отсутствие ответа не означает, что принтер ответил"
+        );
+        assert!(!mon.health.paper_end, "нет ответа — нет данных о бумаге");
+        assert!(!mon.health.paper_near_end);
+        // После реального валидного ответа — seen.
+        mon.feed(Some(L4_OK));
+        assert!(mon.health.seen, "валидный L4 устанавливает seen");
+        assert!(!mon.health.fault);
+    }
+
+    #[test]
+    fn paper_states_come_from_l4_bits() {
+        let mut mon = Monitor::default();
+        // near-end: бит 0x08 (без fault-бита).
+        mon.feed(Some(0x3E)); // 0x36 | 0x08: норма + near-end
+        assert!(mon.health.paper_near_end, "near-end из L4");
+        assert!(!mon.health.paper_end);
+        // бумага закончилась: бит 0x40.
+        mon.feed(Some(0x76)); // 0x36 | 0x40
+        assert!(mon.health.paper_end, "paper_end из L4");
+        assert!(!mon.health.paper_near_end);
+        // Валидный статус без признаков — бумага в порядке.
+        mon.feed(Some(L4_OK));
+        assert!(!mon.health.paper_end && !mon.health.paper_near_end);
+    }
+
+    #[test]
+    fn silence_is_link_error_and_clears_paper_status() {
+        let mut mon = Monitor::default();
+        mon.feed(Some(0x76)); // paper_end
+        for _ in 0..SILENT_CONFIRM {
+            mon.feed(None);
+        }
+        assert!(
+            mon.health.fault && mon.health.silent,
+            "молчание — ошибка связи"
+        );
+        assert!(
+            !mon.health.paper_end,
+            "статус бумаги недостоверен без ответа"
+        );
+        // Валидный ответ снимает ошибку связи и статусы бумаги.
+        mon.feed(Some(L4_OK));
+        assert!(
+            !mon.health.fault && !mon.health.silent,
+            "связь восстановлена"
+        );
+        assert!(!mon.health.paper_end);
+    }
+
+    #[test]
+    fn status_line_respects_enabled_seen_and_fault() {
+        // Отключённый в настройках принтер не бывает «готовым».
+        assert_eq!(status_line(false).1, 1);
+        assert!(status_line(false).0.contains("выключен"));
+        // Без ответов — не «готов».
+        set_health(PrinterHealth::default());
+        let (text, state) = status_line(true);
+        assert_eq!(state, 0, "нет ответа — нейтрально");
+        assert!(text.contains("нет ответа"), "{text}");
+        // Авария связи.
+        set_health(PrinterHealth {
+            fault: true,
+            silent: true,
+            ..PrinterHealth::default()
+        });
+        let (text, state) = status_line(true);
+        assert_eq!(state, 2);
+        assert!(text.contains("ошибка связи"), "{text}");
+        // Авария принтера (бит L4).
+        set_health(PrinterHealth {
+            fault: true,
+            silent: false,
+            ..PrinterHealth::default()
+        });
+        let (text, _) = status_line(true);
+        assert!(text.contains("авария"), "{text}");
+        // Бумага.
+        set_health(PrinterHealth {
+            seen: true,
+            paper_end: true,
+            ..PrinterHealth::default()
+        });
+        let (text, state) = status_line(true);
+        assert_eq!(state, 2);
+        assert!(text.contains("кончилась бумага"), "{text}");
+        set_health(PrinterHealth {
+            seen: true,
+            paper_near_end: true,
+            ..PrinterHealth::default()
+        });
+        let (text, state) = status_line(true);
+        assert_eq!(state, 1);
+        assert!(text.contains("заканчивается"), "{text}");
+        // Готов — только с подтверждённым ответом.
+        set_health(PrinterHealth {
+            seen: true,
+            ..PrinterHealth::default()
+        });
+        let (text, state) = status_line(true);
+        assert_eq!(state, 0);
+        assert!(text.contains("готов"), "{text}");
+        set_health(PrinterHealth::default());
+    }
 
     #[test]
     fn monitor_marks_fault_after_two_confirmations_and_clears_it() {
@@ -1951,6 +2281,7 @@ mod tests {
             price: Some(19999),
             shelflife: Some("20/09/2026".into()),
             origin_id: None,
+            rounding: Some(0),
         };
         row.id = 0;
         row
@@ -2003,7 +2334,7 @@ mod tests {
         row.ok = None;
         let a = datastore::print_log_add(&conn, &row).unwrap();
         let b = datastore::print_log_add(&conn, &row).unwrap();
-        datastore::print_log_mark(&conn, a, false);
+        datastore::print_log_mark(&conn, a, false).unwrap();
         let rows = datastore::print_log_filtered(&conn, None, None, 10).unwrap();
         let by_id = |id: i64| rows.iter().find(|r| r.id == id).unwrap();
         assert_eq!(by_id(a).ok, Some(false), "достоверная ошибка: ok=0");
@@ -2065,7 +2396,9 @@ mod tests {
         assert!(matches!(err, PrintError::PrinterDisabled));
         let conn = datastore::open(&path).unwrap();
         assert_eq!(
-            datastore::print_log_filtered(&conn, None, None, 10).unwrap().len(),
+            datastore::print_log_filtered(&conn, None, None, 10)
+                .unwrap()
+                .len(),
             1,
             "повторная печать не создаёт попытку при отказе"
         );
@@ -2130,15 +2463,33 @@ mod tests {
         assert!(text.contains("13.10.26"), "дата: {text:?}");
         assert!(text.contains("18:40:00"), "время: {text:?}");
         assert!(text.contains("20.09.2026"), "срок: {text:?}");
-        assert!(!text.contains("18:25:45"), "время из срока не печатается: {text:?}");
+        assert!(
+            !text.contains("18:25:45"),
+            "время из срока не печатается: {text:?}"
+        );
     }
     #[test]
     fn shelflife_label_formats() {
-        assert_eq!(shelflife_label("20/09/2026 18:25:45").as_deref(), Some("Годен до 20.09.2026"));
-        assert_eq!(shelflife_label("20/09/2026").as_deref(), Some("Годен до 20.09.2026"));
-        assert_eq!(shelflife_label("20.09.2026").as_deref(), Some("Годен до 20.09.2026"));
-        assert_eq!(shelflife_label("01.01.27").as_deref(), Some("Годен до 01.01.2027"));
-        assert_eq!(shelflife_label("2026-09-20").as_deref(), Some("Годен до 20.09.2026"));
+        assert_eq!(
+            shelflife_label("20/09/2026 18:25:45").as_deref(),
+            Some("Годен до 20.09.2026")
+        );
+        assert_eq!(
+            shelflife_label("20/09/2026").as_deref(),
+            Some("Годен до 20.09.2026")
+        );
+        assert_eq!(
+            shelflife_label("20.09.2026").as_deref(),
+            Some("Годен до 20.09.2026")
+        );
+        assert_eq!(
+            shelflife_label("01.01.27").as_deref(),
+            Some("Годен до 01.01.2027")
+        );
+        assert_eq!(
+            shelflife_label("2026-09-20").as_deref(),
+            Some("Годен до 20.09.2026")
+        );
         assert_eq!(shelflife_label(""), None);
         assert_eq!(shelflife_label(" soon"), None);
         assert_eq!(shelflife_label("99/99/2026"), None);
@@ -2149,13 +2500,19 @@ mod tests {
         item.shelflife = String::new();
         let bytes = build_label(&item, 1350, LIVE_LAYOUT, "13.10.26", "18:40:00", 0).unwrap();
         let text = String::from_utf8_lossy(&bytes);
-        assert!(!text.contains("20/09"), "пустой срок не должен печататься: {text:?}");
+        assert!(
+            !text.contains("20/09"),
+            "пустой срок не должен печататься: {text:?}"
+        );
     }
     #[test]
     fn label_barcode_from_itemcode() {
         let bytes = build_label(&sample(), 500, LIVE_LAYOUT, "01.09.26", "10:31:53", 0).unwrap();
         let needle = b"\x1dk\x02";
-        let pos = bytes.windows(needle.len()).position(|w| w == needle).unwrap();
+        let pos = bytes
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .unwrap();
         assert_eq!(&bytes[pos + 3..pos + 15], b"210213600500");
     }
     #[test]
@@ -2187,40 +2544,100 @@ mod tests {
     }
     #[test]
     fn spec_label_area_and_field_positions() {
-        let bytes = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
-        assert!(bytes.windows(10).any(|w| w == &[escpos::ESC, b'W', 0, 0, 0, 0, 0xC0, 0x01, 0x40, 0x01][..]), "ESC W 448x320");
-        assert!(bytes.windows(4).any(|w| w == &[escpos::ESC, b'$', 0x10, 0x00][..]), "ESC $ x=16");
-        assert!(bytes.windows(4).any(|w| w == &[escpos::GS, b'$', 0x08, 0x00][..]), "GS $ y=8");
+        let bytes = build_label_from_spec(
+            &sample(),
+            1350,
+            "13.10.26",
+            "18:40:00",
+            0,
+            Some(&spec_58x40()),
+        )
+        .unwrap();
+        assert!(
+            bytes
+                .windows(10)
+                .any(|w| w == &[escpos::ESC, b'W', 0, 0, 0, 0, 0xC0, 0x01, 0x40, 0x01][..]),
+            "ESC W 448x320"
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|w| w == &[escpos::ESC, b'$', 0x10, 0x00][..]),
+            "ESC $ x=16"
+        );
+        assert!(
+            bytes
+                .windows(4)
+                .any(|w| w == &[escpos::GS, b'$', 0x08, 0x00][..]),
+            "GS $ y=8"
+        );
     }
     #[test]
     fn spec_label_renders_kinds() {
-        let bytes = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
+        let bytes = build_label_from_spec(
+            &sample(),
+            1350,
+            "13.10.26",
+            "18:40:00",
+            0,
+            Some(&spec_58x40()),
+        )
+        .unwrap();
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.contains("1,350"));
         assert!(text.contains("199,99"));
         assert!(text.contains("269,99"));
         assert!(text.contains("PLU 2502192"));
-        for s in ["ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ", "СПАСИБО ЗА ПОКУПКУ", "Годен до 20.09.2026"] {
+        for s in [
+            "ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ",
+            "СПАСИБО ЗА ПОКУПКУ",
+            "Годен до 20.09.2026",
+        ] {
             let enc = escpos::to_cp866(s).unwrap();
             assert!(bytes.windows(enc.len()).any(|w| w == &enc[..]), "{s}");
         }
         let needle = b"\x1dk\x02";
-        let pos = bytes.windows(needle.len()).position(|w| w == needle).unwrap();
+        let pos = bytes
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .unwrap();
         assert_eq!(&bytes[pos + 3..pos + 15], b"210213601350");
     }
     #[test]
     fn spec_label_sum_uses_dbl_when_size2() {
-        let bytes = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
-        assert!(bytes.windows(6).any(|w| w == &[escpos::ESC, b'!', 0x20, escpos::GS, b'!', 0x11][..]));
+        let bytes = build_label_from_spec(
+            &sample(),
+            1350,
+            "13.10.26",
+            "18:40:00",
+            0,
+            Some(&spec_58x40()),
+        )
+        .unwrap();
+        assert!(
+            bytes
+                .windows(6)
+                .any(|w| w == &[escpos::ESC, b'!', 0x20, escpos::GS, b'!', 0x11][..])
+        );
     }
     #[test]
     fn spec_label_cardprice_only_when_present() {
-        let bytes = build_label_from_spec(&sample(), 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
+        let bytes = build_label_from_spec(
+            &sample(),
+            1350,
+            "13.10.26",
+            "18:40:00",
+            0,
+            Some(&spec_58x40()),
+        )
+        .unwrap();
         let text = String::from_utf8_lossy(&bytes);
         assert!(!text.contains("179,99"), "{text:?}");
         let mut item = sample();
         item.card_price = Some(17999);
-        let bytes = build_label_from_spec(&item, 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40())).unwrap();
+        let bytes =
+            build_label_from_spec(&item, 1350, "13.10.26", "18:40:00", 0, Some(&spec_58x40()))
+                .unwrap();
         assert!(String::from_utf8_lossy(&bytes).contains("179,99"));
     }
     #[test]
@@ -2283,7 +2700,11 @@ mod tests {
         let bars: Vec<_> = items.iter().filter(|i| i.barcode).collect();
         assert!(!bars.is_empty());
         let last = bars.last().unwrap();
-        let bc = spec.fields.iter().find(|f| f.kind == crate::label::LabelKind::Barcode).unwrap();
+        let bc = spec
+            .fields
+            .iter()
+            .find(|f| f.kind == crate::label::LabelKind::Barcode)
+            .unwrap();
         let end = last.x_mm + last.w_mm;
         assert!((end - (bc.x_mm + 95.0 * 0.25)).abs() < 0.01);
         let hri: String = items
@@ -2301,7 +2722,11 @@ mod tests {
         let first = items.iter().find(|i| i.text == "В").unwrap();
         assert_eq!((first.x_mm, first.y_mm), (2.0, 1.0));
         assert_eq!((first.w_mm, first.h_mm), (1.5, 3.0));
-        assert!(items.iter().any(|i| i.text == ":" && (i.y_mm - 21.0).abs() < 0.01));
+        assert!(
+            items
+                .iter()
+                .any(|i| i.text == ":" && (i.y_mm - 21.0).abs() < 0.01)
+        );
     }
     #[test]
     fn ean13_encoding_matches_spec() {
@@ -2325,5 +2750,3 @@ mod tests {
         assert!(pick_layout(&conn, Some(10)).is_none());
     }
 }
-
-

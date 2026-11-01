@@ -119,10 +119,11 @@ fn build_app_with_catalog(tag: &str, extra_items: usize) -> App {
     let ui = MainWindow::new().unwrap();
     ui.set_screen_w(cfg.ui.screen_width as f32);
     ui.set_screen_h(cfg.ui.screen_height as f32);
-    ui.window().set_size(slint::WindowSize::Physical(slint::PhysicalSize::new(
-        cfg.ui.screen_width,
-        cfg.ui.screen_height,
-    )));
+    ui.window()
+        .set_size(slint::WindowSize::Physical(slint::PhysicalSize::new(
+            cfg.ui.screen_width,
+            cfg.ui.screen_height,
+        )));
 
     let catalog: Rc<RefCell<Vec<datastore::PluEntry>>> = Rc::new(RefCell::new(
         datastore::open(&cfg.db_path)
@@ -134,7 +135,13 @@ fn build_app_with_catalog(tag: &str, extra_items: usize) -> App {
             .borrow()
             .iter()
             .enumerate()
-            .map(|(i, p)| (p.name.to_uppercase(), format!("{} {}", p.itemcode, p.plu), i))
+            .map(|(i, p)| {
+                (
+                    p.name.to_uppercase(),
+                    format!("{} {}", p.itemcode, p.plu),
+                    i,
+                )
+            })
             .collect(),
     ));
     let kiosk = Rc::new(RefCell::new(Kiosk::new()));
@@ -175,10 +182,20 @@ fn build_app_with_catalog(tag: &str, extra_items: usize) -> App {
     let handles = crate::flow::install(&ctx);
     crate::settings::install(&ctx, &handles);
     (handles.relayout)();
-    let timer =
-        crate::tick::start(&ctx, handles.go_root.clone(), handles.refresh_data.clone(), None);
+    let timer = crate::tick::start(
+        &ctx,
+        handles.go_root.clone(),
+        handles.refresh_data.clone(),
+        None,
+    );
     std::mem::forget(timer);
-    App { ui, handles, kiosk, snap, dir }
+    App {
+        ui,
+        handles,
+        kiosk,
+        snap,
+        dir,
+    }
 }
 
 /// Один оборот event loop: выполняются накопленные job'ы
@@ -210,6 +227,9 @@ async fn wait_until(what: &str, mut cond: impl FnMut() -> bool) {
             return;
         }
         advance(TICK.as_millis() as u64).await;
+        // Фоновые потоки живут в реальном времени, mock-цикл — нет: без
+        // реальной паузы потоки не успевают завершиться до исчерпания тиков.
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
     panic!("сценарий {what}: условие не выполнено за отведённое mock-время");
 }
@@ -459,6 +479,7 @@ fn ui_scenarios() {
                 price: Some(19999),
                 shelflife: Some(String::new()),
                 origin_id: None,
+                rounding: Some(0),
             };            row.ok = None;
             let unknown_id = datastore::print_log_add(&conn, &row).unwrap();
             row.ok = Some(false);
@@ -861,5 +882,3 @@ fn ui_scenarios() {
     .unwrap();
     slint::run_event_loop().unwrap();
 }
-
-

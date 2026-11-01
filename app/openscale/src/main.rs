@@ -1,23 +1,25 @@
-
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use openscale::*;
 use openscale::cli::{Mode, parse_cli};
 use openscale::context::AppContext;
 use openscale::session::Kiosk;
+use openscale::*;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 fn init_logger(cfg: &openscale::config::Config) {
     use simplelog::*;
-    let mut loggers: Vec<Box<dyn SharedLogger>> =
-        vec![TermLogger::new(
-            LevelFilter::Info,
-            Config::default(),
-            TerminalMode::Mixed,
-            ColorChoice::Auto,
-        )];
+    let mut loggers: Vec<Box<dyn SharedLogger>> = vec![TermLogger::new(
+        LevelFilter::Info,
+        Config::default(),
+        TerminalMode::Mixed,
+        ColorChoice::Auto,
+    )];
     if let Some(dir) = cfg.log_file.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    match std::fs::OpenOptions::new().create(true).append(true).open(&cfg.log_file) {
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&cfg.log_file)
+    {
         Ok(f) => loggers.push(WriteLogger::new(LevelFilter::Info, Config::default(), f)),
         Err(e) => eprintln!("лог-файл {} недоступен: {e}", cfg.log_file.display()),
     }
@@ -47,15 +49,13 @@ fn main() {
         Mode::Diag => {
             println!("{}", diag::collect(&cfg));
         }
-        Mode::LabelProbe => {
-            match print::label_probe(&cfg) {
-                Ok(report) => println!("{report}"),
-                Err(e) => {
-                    eprintln!("label-probe: {e}");
-                    std::process::exit(1);
-                }
+        Mode::LabelProbe => match print::label_probe(&cfg) {
+            Ok(report) => println!("{report}"),
+            Err(e) => {
+                eprintln!("label-probe: {e}");
+                std::process::exit(1);
             }
-        }
+        },
         Mode::Weight => {
             let src = weight::WeightSource::spawn(&cfg.scales);
             let deadline = Instant::now() + Duration::from_secs(15);
@@ -68,7 +68,11 @@ fn main() {
             };
             println!(
                 "{}{:.3}",
-                if snap.stable { "" } else { "НЕ СТАБИЛЬНО: " },
+                if snap.stable {
+                    ""
+                } else {
+                    "НЕ СТАБИЛЬНО: "
+                },
                 snap.mass_kg
             );
             if !snap.stable {
@@ -94,7 +98,9 @@ fn main() {
                         crate::sync_status::finish(&cfg.db_path, true, &report, None);
                     }
                     println!("{report}");
-                    println!("для показа на весах перезапустите: systemctl restart openscale-kiosk");
+                    println!(
+                        "для показа на весах перезапустите: systemctl restart openscale-kiosk"
+                    );
                 }
                 Err(e) => {
                     crate::sync_status::finish(&cfg.db_path, false, "", Some(&e));
@@ -157,17 +163,26 @@ fn main() {
         Mode::DeptRemove(name) => depts_cli::remove(&cfg, &name),
         Mode::DeptMove(name, ord) => depts_cli::move_dept(&cfg, &name, ord),
         Mode::GroupAssign(group, dept) => depts_cli::group_assign(&cfg, &group, &dept),
-        Mode::Backup(dir) => match backup::create_backup(&cfg, dir.as_deref()) {
-            Ok(p) => {
-                println!("снимок создан: {}", p.display());
-                log::info!("резерв: снимок {}", p.display());
+        Mode::Backup(dir) => {
+            // SH-блокировка обслуживания: снимок согласован, restore не
+            // начнётся во время копирования; киоск (shared) не конфликтует.
+            let _lock = backup::MaintLock::acquire_shared(&backup::maint_lock_path(&cfg.db_path))
+                .unwrap_or_else(|e| {
+                    eprintln!("резерв: {e}");
+                    std::process::exit(1);
+                });
+            match backup::create_backup(&cfg, dir.as_deref()) {
+                Ok(p) => {
+                    println!("снимок создан: {}", p.display());
+                    log::info!("резерв: снимок {}", p.display());
+                }
+                Err(e) => {
+                    log::error!("резерв: {e}");
+                    eprintln!("резерв: {e}");
+                    std::process::exit(1);
+                }
             }
-            Err(e) => {
-                log::error!("резерв: {e}");
-                eprintln!("резерв: {e}");
-                std::process::exit(1);
-            }
-        },
+        }
         Mode::Restore(path) => match backup::restore_backup(&cfg, &path, None) {
             Ok(msg) => {
                 println!("{msg}");
@@ -206,13 +221,26 @@ fn main() {
                 stat("SELECT COUNT(*) FROM admin_user"),
             );
         }
-        Mode::PrintTest => match print::print_test_label_cli(&cfg) {
-            Ok(()) => println!("тестовая этикетка напечатана"),
-            Err(e) => {
-                eprintln!("print-test: {e}");
+        Mode::PrintTest => {
+            // Порт принтера принадлежит демону киоска: одновременный доступ
+            // CLI и демона недопустим. Проверка по документации функции —
+            // киоск должен быть остановлен.
+            if backup::kiosk_running() {
+                eprintln!(
+                    "print-test: киоск работает ({}) — порт принтера занят демоном; \
+                     сначала остановите: systemctl stop openscale-kiosk",
+                    backup::kiosk_pid_info()
+                );
                 std::process::exit(1);
             }
-        },
+            match print::print_test_label_cli(&cfg) {
+                Ok(()) => println!("тестовая этикетка напечатана"),
+                Err(e) => {
+                    eprintln!("print-test: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Mode::Kiosk => run_kiosk(cfg),
     }
 }
@@ -225,16 +253,14 @@ fn run_kiosk(cfg: openscale::config::Config) {
     // Shared-блокировка обслуживания: пока киоск работает с БД, --restore
     // не сможет начать замену. Занято обслуживанием — выход (systemd
     // повторит запуск после завершения восстановления).
-    let maint_lock = match backup::MaintLock::acquire_shared_retry(
-        &backup::maint_lock_path(&cfg.db_path),
-        15,
-    ) {
-        Ok(l) => Some(l),
-        Err(e) => {
-            log::error!("запуск: {e} — идёт обслуживание, повтор запуска позже");
-            std::process::exit(1);
-        }
-    };
+    let maint_lock =
+        match backup::MaintLock::acquire_shared_retry(&backup::maint_lock_path(&cfg.db_path), 15) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                log::error!("запуск: {e} — идёт обслуживание, повтор запуска позже");
+                std::process::exit(1);
+            }
+        };
     // Fail-closed: существующая БД должна открыться, пройти integrity_check,
     // миграции и отдать данные. Иначе — экран недоступности, не торговля.
     let db_unavailable = match backup::probe_startup(&cfg) {
@@ -246,7 +272,9 @@ fn run_kiosk(cfg: openscale::config::Config) {
         }
         backup::DbStartup::Unavailable(e) => {
             log::error!("БД недоступна, торговля заблокирована: {e}");
-            log::error!("диагностика: openscale --db-check; восстановление: остановите openscale-kiosk и выполните openscale --restore <снимок>");
+            log::error!(
+                "диагностика: openscale --db-check; восстановление: остановите openscale-kiosk и выполните openscale --restore <снимок>"
+            );
             true
         }
     };
@@ -264,10 +292,11 @@ fn run_kiosk(cfg: openscale::config::Config) {
     let ui = MainWindow::new().expect("UI init");
     ui.set_screen_w(cfg.ui.screen_width as f32);
     ui.set_screen_h(cfg.ui.screen_height as f32);
-    ui.window().set_size(slint::WindowSize::Physical(slint::PhysicalSize::new(
-        cfg.ui.screen_width,
-        cfg.ui.screen_height,
-    )));
+    ui.window()
+        .set_size(slint::WindowSize::Physical(slint::PhysicalSize::new(
+            cfg.ui.screen_width,
+            cfg.ui.screen_height,
+        )));
     if cfg.ui.fullscreen {
         ui.window().set_fullscreen(true);
     }
@@ -327,15 +356,13 @@ fn run_kiosk(cfg: openscale::config::Config) {
     let cal_value = |conn: &rusqlite::Connection, key: &str| {
         datastore::get_calibration(conn, key).ok().flatten()
     };
-    let idle_secs: std::rc::Rc<std::cell::Cell<u64>> = std::rc::Rc::new(
-        std::cell::Cell::new(
-            datastore::open(&cfg.db_path)
-                .ok()
-                .and_then(|c| cal_value(&c, "idle_timeout_secs"))
-                .map(|v| v.clamp(10, 60) as u64)
-                .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 60)),
-        ),
-    );
+    let idle_secs: std::rc::Rc<std::cell::Cell<u64>> = std::rc::Rc::new(std::cell::Cell::new(
+        datastore::open(&cfg.db_path)
+            .ok()
+            .and_then(|c| cal_value(&c, "idle_timeout_secs"))
+            .map(|v| v.clamp(10, 60) as u64)
+            .unwrap_or(cfg.kiosk.idle_timeout_secs.clamp(10, 60)),
+    ));
     let trade = {
         let db = datastore::open(&cfg.db_path).ok();
         let cal = |key: &str| db.as_ref().and_then(|c| cal_value(c, key));
@@ -349,12 +376,20 @@ fn run_kiosk(cfg: openscale::config::Config) {
                     .clamp(1, max_dept_cols as usize)
                     .max(1),
             )),
-            sort_alpha: std::rc::Rc::new(std::cell::Cell::new(cal("dept_sort_alpha").unwrap_or(1) != 0)),
-            item_sort_pop: std::rc::Rc::new(std::cell::Cell::new(cal("item_sort_pop").unwrap_or(0) != 0)),
+            sort_alpha: std::rc::Rc::new(std::cell::Cell::new(
+                cal("dept_sort_alpha").unwrap_or(1) != 0,
+            )),
+            item_sort_pop: std::rc::Rc::new(std::cell::Cell::new(
+                cal("item_sort_pop").unwrap_or(0) != 0,
+            )),
             dept_cell: std::rc::Rc::new(std::cell::Cell::new(cal("dept_cell").unwrap_or(0) != 0)),
-            rounding: std::rc::Rc::new(std::cell::Cell::new(cal("price_rounding").unwrap_or(0).clamp(0, 2))),
+            rounding: std::rc::Rc::new(std::cell::Cell::new(
+                cal("price_rounding").unwrap_or(0).clamp(0, 2),
+            )),
             min_weight_g: std::rc::Rc::new(std::cell::Cell::new(
-                cal("min_weight_g").map(|v| v.clamp(10, 1000) as f64).unwrap_or(10.0),
+                cal("min_weight_g")
+                    .map(|v| v.clamp(10, 1000) as f64)
+                    .unwrap_or(10.0),
             )),
             card_show_name: std::rc::Rc::new(std::cell::Cell::new(
                 cal("card_show_name").map(|v| v != 0).unwrap_or(true),
@@ -363,7 +398,10 @@ fn run_kiosk(cfg: openscale::config::Config) {
                 cal("catalog_back_btn").map(|v| v != 0).unwrap_or(true),
             )),
             item_cols: std::rc::Rc::new(std::cell::Cell::new(
-                cal("item_cols").map(|v| v.clamp(4, 12) as usize).unwrap_or(9).max(2),
+                cal("item_cols")
+                    .map(|v| v.clamp(4, 12) as usize)
+                    .unwrap_or(9)
+                    .max(2),
             )),
         }
     };
@@ -471,7 +509,12 @@ fn run_kiosk(cfg: openscale::config::Config) {
     let sync_rx = sync::spawn_auto_sync(&cfg);
     print::spawn_daemon(&cfg);
     net::spawn_live_monitor();
-    let timer = tick::start(&ctx, flow_handles.go_root, flow_handles.refresh_data, Some(sync_rx));
+    let timer = tick::start(
+        &ctx,
+        flow_handles.go_root,
+        flow_handles.refresh_data,
+        Some(sync_rx),
+    );
     let cfg_plain = Arc::new((*cfg).clone());
     let _backup_thread = backup::spawn_daily(cfg_plain);
     ui.run().expect("UI loop failed");

@@ -1,7 +1,6 @@
-
+use rusqlite::Connection;
 use std::path::Path;
 use std::sync::Mutex;
-use rusqlite::Connection;
 use thiserror::Error;
 pub mod auth;
 #[derive(Debug, Error)]
@@ -46,11 +45,7 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
     let key = path.to_string_lossy().into_owned();
-    let already = key != ":memory:"
-        && migrated_paths()
-            .lock()
-            .unwrap()
-            .contains(&key);
+    let already = key != ":memory:" && migrated_paths().lock().unwrap().contains(&key);
     if already {
         return Ok(conn);
     }
@@ -90,7 +85,8 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              namesecond TEXT,
              price      INTEGER,
              shelflife  TEXT,
-             origin_id  INTEGER
+             origin_id  INTEGER,
+             rounding   INTEGER
          );
          CREATE TABLE IF NOT EXISTS label_layouts (
              name      TEXT PRIMARY KEY NOT NULL,
@@ -140,6 +136,11 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              COMMIT;",
         )?;
     }
+    // Округление суммы, с которым была совершена покупка: повторная печать
+    // воспроизводит исходную этикетку, даже если настройку позже изменили.
+    if !table_has_column(&conn, "print_log", "rounding")? {
+        conn.execute_batch("ALTER TABLE print_log ADD COLUMN rounding INTEGER;")?;
+    }
     let has_group = table_has_column(&conn, "plucodes", "group")?;
     if !has_group {
         conn.execute_batch(
@@ -147,8 +148,8 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              UPDATE plucodes SET \"group\" = UPPER(substr(namefirst, 1, instr(namefirst || ' ', ' ') - 1));",
         )?;
     }
-    let group_normed: bool =
-        conn.query_row(
+    let group_normed: bool = conn
+        .query_row(
             "SELECT COUNT(*) FROM app_settings WHERE key = 'group_norm_v2'",
             [],
             |r| r.get::<_, i64>(0),
@@ -192,8 +193,8 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
              ALTER TABLE depts ADD COLUMN fg TEXT;",
         )?;
     }
-    let seeded: bool =
-        conn.query_row(
+    let seeded: bool = conn
+        .query_row(
             "SELECT COUNT(*) FROM app_settings WHERE key = 'seed_done'",
             [],
             |r| r.get::<_, i64>(0),
@@ -201,8 +202,7 @@ pub fn open(path: &Path) -> Result<Connection, StoreError> {
         .map(|n| n > 0)
         .unwrap_or(false);
     if !seeded {
-        let dept_count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM depts", [], |r| r.get(0))?;
+        let dept_count: i64 = conn.query_row("SELECT COUNT(*) FROM depts", [], |r| r.get(0))?;
         if dept_count == 0 {
             for (i, (name, img)) in SEED_DEPTS.iter().enumerate() {
                 conn.execute(
@@ -245,7 +245,11 @@ pub struct PluEntry {
     pub itemcode: String,
 }
 fn display_name(first: &str, second: &str) -> String {
-    if second.is_empty() { first.into() } else { format!("{first} {second}") }
+    if second.is_empty() {
+        first.into()
+    } else {
+        format!("{first} {second}")
+    }
 }
 pub fn plu_count(conn: &Connection) -> Result<i64, StoreError> {
     Ok(conn.query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))?)
@@ -288,7 +292,9 @@ pub fn get_item(conn: &Connection, plu: &str) -> Result<Option<PluItem>, StoreEr
         })
         .transpose()
 }
-fn rows_collect_warn<T>(rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>>) -> Vec<T> {
+fn rows_collect_warn<T>(
+    rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>>,
+) -> Vec<T> {
     let mut out = Vec::new();
     for r in rows {
         match r {
@@ -315,25 +321,60 @@ const SEED_DEPTS: &[(&str, &str)] = &[
     ("ОРЕХИ", "orehi.png"),
 ];
 const SEED_GROUP_DEPT: &[(&str, &str)] = &[
-    ("БАКЛАЖАНЫ", "ОВОЩИ"), ("ГРИБЫ", "ОВОЩИ"), ("ИМБИРЬ", "ОВОЩИ"),
-    ("КАБАЧКИ", "ОВОЩИ"), ("КАПУСТА", "ОВОЩИ"), ("КАРТОФЕЛЬ", "ОВОЩИ"),
-    ("КУКУРУЗА", "ОВОЩИ"), ("ЛУК", "ОВОЩИ"), ("МОРКОВЬ", "ОВОЩИ"),
-    ("ОГУРЦЫ", "ОВОЩИ"), ("ПЕРЕЦ", "ОВОЩИ"), ("РЕДИС", "ОВОЩИ"), ("СВЕКЛА", "ОВОЩИ"),
-    ("ТОМАТЫ", "ОВОЩИ"), ("ЧЕСНОК", "ОВОЩИ"),
-    ("АВОКАДО", "ФРУКТЫ"), ("АПЕЛЬСИНЫ", "ФРУКТЫ"), ("АРБУЗЫ", "ФРУКТЫ"),
-    ("БАНАНЫ", "ФРУКТЫ"), ("ВИНОГРАД", "ФРУКТЫ"), ("ГРАНАТ", "ФРУКТЫ"),
-    ("ГРЕЙПФРУТЫ", "ФРУКТЫ"), ("ГРУША", "ФРУКТЫ"), ("ДЫНЯ", "ФРУКТЫ"),
-    ("КИВИ", "ФРУКТЫ"), ("ЛИМОНЫ", "ФРУКТЫ"), ("МАНГО", "ФРУКТЫ"),
-    ("МАНДАРИНЫ", "ФРУКТЫ"), ("НЕКТАРИН", "ФРУКТЫ"), ("ПЕРСИКИ", "ФРУКТЫ"),
-    ("ПОМЕЛО", "ФРУКТЫ"), ("СЛИВА", "ФРУКТЫ"), ("ЯБЛОКИ", "ФРУКТЫ"),
-    ("БАТОНЧИКИ", "КОНФЕТЫ"), ("ДЕСЕРТ", "КОНФЕТЫ"), ("КАРАМЕЛЬ", "КОНФЕТЫ"),
-    ("КОНФЕТЫ", "КОНФЕТЫ"), ("НАБОР", "КОНФЕТЫ"),
-    ("ГОРБУША", "РЫБА"), ("КАМБАЛА", "РЫБА"), ("КЕТА", "РЫБА"),
-    ("КРЕВЕТКИ", "РЫБА"), ("МИНТАЙ", "РЫБА"), ("ОКУНЬ", "РЫБА"),
-    ("СКУМБРИЯ", "РЫБА"), ("ТЕРПУГ", "РЫБА"), ("ФОРЕЛЬ", "РЫБА"),
+    ("БАКЛАЖАНЫ", "ОВОЩИ"),
+    ("ГРИБЫ", "ОВОЩИ"),
+    ("ИМБИРЬ", "ОВОЩИ"),
+    ("КАБАЧКИ", "ОВОЩИ"),
+    ("КАПУСТА", "ОВОЩИ"),
+    ("КАРТОФЕЛЬ", "ОВОЩИ"),
+    ("КУКУРУЗА", "ОВОЩИ"),
+    ("ЛУК", "ОВОЩИ"),
+    ("МОРКОВЬ", "ОВОЩИ"),
+    ("ОГУРЦЫ", "ОВОЩИ"),
+    ("ПЕРЕЦ", "ОВОЩИ"),
+    ("РЕДИС", "ОВОЩИ"),
+    ("СВЕКЛА", "ОВОЩИ"),
+    ("ТОМАТЫ", "ОВОЩИ"),
+    ("ЧЕСНОК", "ОВОЩИ"),
+    ("АВОКАДО", "ФРУКТЫ"),
+    ("АПЕЛЬСИНЫ", "ФРУКТЫ"),
+    ("АРБУЗЫ", "ФРУКТЫ"),
+    ("БАНАНЫ", "ФРУКТЫ"),
+    ("ВИНОГРАД", "ФРУКТЫ"),
+    ("ГРАНАТ", "ФРУКТЫ"),
+    ("ГРЕЙПФРУТЫ", "ФРУКТЫ"),
+    ("ГРУША", "ФРУКТЫ"),
+    ("ДЫНЯ", "ФРУКТЫ"),
+    ("КИВИ", "ФРУКТЫ"),
+    ("ЛИМОНЫ", "ФРУКТЫ"),
+    ("МАНГО", "ФРУКТЫ"),
+    ("МАНДАРИНЫ", "ФРУКТЫ"),
+    ("НЕКТАРИН", "ФРУКТЫ"),
+    ("ПЕРСИКИ", "ФРУКТЫ"),
+    ("ПОМЕЛО", "ФРУКТЫ"),
+    ("СЛИВА", "ФРУКТЫ"),
+    ("ЯБЛОКИ", "ФРУКТЫ"),
+    ("БАТОНЧИКИ", "КОНФЕТЫ"),
+    ("ДЕСЕРТ", "КОНФЕТЫ"),
+    ("КАРАМЕЛЬ", "КОНФЕТЫ"),
+    ("КОНФЕТЫ", "КОНФЕТЫ"),
+    ("НАБОР", "КОНФЕТЫ"),
+    ("ГОРБУША", "РЫБА"),
+    ("КАМБАЛА", "РЫБА"),
+    ("КЕТА", "РЫБА"),
+    ("КРЕВЕТКИ", "РЫБА"),
+    ("МИНТАЙ", "РЫБА"),
+    ("ОКУНЬ", "РЫБА"),
+    ("СКУМБРИЯ", "РЫБА"),
+    ("ТЕРПУГ", "РЫБА"),
+    ("ФОРЕЛЬ", "РЫБА"),
     ("ЗЕЛЕНЬ", "ЗЕЛЕНЬ"),
-    ("АРАХИС", "ОРЕХИ"), ("ГРЕЦКИЙ", "ОРЕХИ"), ("КАШТАН", "ОРЕХИ"),
-    ("МИНДАЛЬ", "ОРЕХИ"), ("ОРЕХИ", "ОРЕХИ"), ("ФИСТАШКИ", "ОРЕХИ"),
+    ("АРАХИС", "ОРЕХИ"),
+    ("ГРЕЦКИЙ", "ОРЕХИ"),
+    ("КАШТАН", "ОРЕХИ"),
+    ("МИНДАЛЬ", "ОРЕХИ"),
+    ("ОРЕХИ", "ОРЕХИ"),
+    ("ФИСТАШКИ", "ОРЕХИ"),
 ];
 #[derive(Debug, Clone, PartialEq)]
 pub struct LabelLayoutRow {
@@ -355,10 +396,12 @@ pub fn label_layout_put(
     )?;
     Ok(())
 }
-pub fn label_layout_get(conn: &Connection, name: &str) -> Result<Option<LabelLayoutRow>, StoreError> {
-    let mut stmt = conn.prepare(
-        "SELECT name, width_mm, height_mm, json FROM label_layouts WHERE name = ?1",
-    )?;
+pub fn label_layout_get(
+    conn: &Connection,
+    name: &str,
+) -> Result<Option<LabelLayoutRow>, StoreError> {
+    let mut stmt =
+        conn.prepare("SELECT name, width_mm, height_mm, json FROM label_layouts WHERE name = ?1")?;
     let mut rows = stmt.query([name])?;
     Ok(rows
         .next()?
@@ -373,9 +416,8 @@ pub fn label_layout_get(conn: &Connection, name: &str) -> Result<Option<LabelLay
         .transpose()?)
 }
 pub fn label_layout_list(conn: &Connection) -> Result<Vec<LabelLayoutRow>, StoreError> {
-    let mut stmt = conn.prepare(
-        "SELECT name, width_mm, height_mm, json FROM label_layouts ORDER BY name",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT name, width_mm, height_mm, json FROM label_layouts ORDER BY name")?;
     let rows = stmt.query_map([], |r| {
         Ok(LabelLayoutRow {
             name: r.get(0)?,
@@ -463,22 +505,28 @@ pub fn dept_remove(conn: &Connection, name: &str) -> Result<(), StoreError> {
 }
 pub fn dept_move(conn: &Connection, name: &str, ord: Option<i64>) -> Result<(), StoreError> {
     let tx = conn.unchecked_transaction()?;
-    let exists: i64 = tx
-        .query_row("SELECT COUNT(*) FROM depts WHERE name = ?1", [name], |r| r.get(0))?;
+    let exists: i64 = tx.query_row("SELECT COUNT(*) FROM depts WHERE name = ?1", [name], |r| {
+        r.get(0)
+    })?;
     if exists == 0 {
         return Err(StoreError::UnknownDept(name.to_string()));
     }
     if let Some(n) = ord {
         tx.execute("UPDATE depts SET ord = ord + 1 WHERE ord >= ?1", [n])?;
     }
-    tx.execute("UPDATE depts SET ord = ?2 WHERE name = ?1", rusqlite::params![name, ord])?;
+    tx.execute(
+        "UPDATE depts SET ord = ?2 WHERE name = ?1",
+        rusqlite::params![name, ord],
+    )?;
     tx.commit()?;
     Ok(())
 }
 pub fn dept_reorder(conn: &Connection, names: &[String]) -> Result<(), StoreError> {
     for name in names {
-        let exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM depts WHERE name = ?1", [name], |r| r.get(0))?;
+        let exists: i64 =
+            conn.query_row("SELECT COUNT(*) FROM depts WHERE name = ?1", [name], |r| {
+                r.get(0)
+            })?;
         if exists == 0 {
             return Err(StoreError::UnknownDept(name.clone()));
         }
@@ -542,6 +590,9 @@ pub struct PrintLogRow {
     pub shelflife: Option<String>,
     /// rowid исходной операции для повторной печати (None — сама покупка).
     pub origin_id: Option<i64>,
+    /// Округление копеек при расчёте суммы (None — старая запись или повторы
+    /// до появления поля; повторная печать тогда берёт текущую настройку).
+    pub rounding: Option<i64>,
 }
 impl PrintLogRow {
     #[cfg(test)]
@@ -559,6 +610,7 @@ impl PrintLogRow {
             price: None,
             shelflife: None,
             origin_id: None,
+            rounding: None,
         }
     }
     pub fn is_reprint(&self) -> bool {
@@ -575,7 +627,9 @@ pub fn print_popularity(
          WHERE ok = 1 AND origin_id IS NULL AND ts >= ?1 AND plu IS NOT NULL AND plu <> ''
          GROUP BY plu",
     )?;
-    let rows = st.query_map([since_ts], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    let rows = st.query_map([since_ts], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+    })?;
     let mut out = std::collections::HashMap::new();
     for row in rows {
         let (plu, n) = row?;
@@ -589,8 +643,8 @@ pub fn print_log_add(conn: &Connection, row: &PrintLogRow) -> Result<i64, StoreE
     conn.execute(
         "INSERT INTO print_log
              (ts, plu, name, weight_g, sum_kop, ok,
-              itemcode, namesecond, price, shelflife, origin_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+              itemcode, namesecond, price, shelflife, origin_id, rounding)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         rusqlite::params![
             row.ts,
             row.plu,
@@ -603,17 +657,19 @@ pub fn print_log_add(conn: &Connection, row: &PrintLogRow) -> Result<i64, StoreE
             row.price,
             row.shelflife,
             row.origin_id,
+            row.rounding,
         ],
     )
     .map(|_| conn.last_insert_rowid())
     .map_err(StoreError::from)
 }
 /// Помечает исход попытки печати по rowid после завершения задания.
-pub fn print_log_mark(conn: &Connection, rowid: i64, ok: bool) {
-    let _ = conn.execute(
+pub fn print_log_mark(conn: &Connection, rowid: i64, ok: bool) -> Result<(), StoreError> {
+    conn.execute(
         "UPDATE print_log SET ok = ?2 WHERE rowid = ?1",
         rusqlite::params![rowid, ok as i64],
-    );
+    )?;
+    Ok(())
 }
 pub fn print_log_count_since(conn: &Connection, ts: i64) -> Result<i64, StoreError> {
     conn.query_row(
@@ -675,13 +731,9 @@ pub fn action_log_add(
     )?;
     Ok(())
 }
-pub fn action_log_recent(
-    conn: &Connection,
-    limit: usize,
-) -> Result<Vec<ActionLogRow>, StoreError> {
-    let mut stmt = conn.prepare(
-        "SELECT ts, role, action, details FROM action_log ORDER BY id DESC LIMIT ?1",
-    )?;
+pub fn action_log_recent(conn: &Connection, limit: usize) -> Result<Vec<ActionLogRow>, StoreError> {
+    let mut stmt =
+        conn.prepare("SELECT ts, role, action, details FROM action_log ORDER BY id DESC LIMIT ?1")?;
     let rows = stmt
         .query_map([limit as i64], |r| {
             Ok(ActionLogRow {
@@ -704,7 +756,7 @@ pub fn print_log_filtered(
     // Фильтр как в count_filtered: Some(false) включает прерванные попытки.
     let mut stmt = conn.prepare(
         "SELECT id, ts, plu, name, weight_g, sum_kop, ok,
-                itemcode, namesecond, price, shelflife, origin_id
+                itemcode, namesecond, price, shelflife, origin_id, rounding
          FROM print_log
          WHERE (?1 IS NULL OR ts >= ?1)
            AND (?2 IS NULL
@@ -734,13 +786,14 @@ fn print_log_row_from(r: &rusqlite::Row<'_>) -> rusqlite::Result<PrintLogRow> {
         price: r.get(9)?,
         shelflife: r.get(10)?,
         origin_id: r.get(11)?,
+        rounding: r.get(12)?,
     })
 }
 /// Читает одну запись журнала по rowid (для повторной печати).
 pub fn print_log_get(conn: &Connection, rowid: i64) -> Result<Option<PrintLogRow>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT id, ts, plu, name, weight_g, sum_kop, ok,
-                itemcode, namesecond, price, shelflife, origin_id
+                itemcode, namesecond, price, shelflife, origin_id, rounding
          FROM print_log WHERE id = ?1",
     )?;
     let mut rows = stmt.query([rowid])?;
@@ -750,16 +803,19 @@ pub fn print_log_get(conn: &Connection, rowid: i64) -> Result<Option<PrintLogRow
     }
 }
 /// Последние записи журнала с rowid (список повторной печати в UI).
-pub fn print_log_recent(
-    conn: &Connection,
-    limit: usize,
-) -> Result<Vec<PrintLogRow>, StoreError> {
+pub fn print_log_recent(conn: &Connection, limit: usize) -> Result<Vec<PrintLogRow>, StoreError> {
     print_log_filtered(conn, None, None, limit)
 }
 pub const MAX_PRICE_KOP: i64 = 99_999_999;
 pub fn sanitize_text(s: &str) -> String {
     s.chars()
-        .map(|c| if (c as u32) < 0x20 || c == '\u{7f}' { ' ' } else { c })
+        .map(|c| {
+            if (c as u32) < 0x20 || c == '\u{7f}' {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect()
 }
 fn group_of(namefirst: &str) -> String {
@@ -769,9 +825,7 @@ fn group_of(namefirst: &str) -> String {
         .unwrap_or_default()
         .to_uppercase()
 }
-pub fn ean_code5_collisions(
-    conn: &Connection,
-) -> Result<Vec<(String, Vec<String>)>, StoreError> {
+pub fn ean_code5_collisions(conn: &Connection) -> Result<Vec<(String, Vec<String>)>, StoreError> {
     let mut stmt = conn.prepare("SELECT plu, itemcode FROM plucodes")?;
     let rows = stmt
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
@@ -788,10 +842,8 @@ pub fn ean_code5_collisions(
         };
         by_code5.entry(code5).or_default().push(plu);
     }
-    let mut out: Vec<(String, Vec<String>)> = by_code5
-        .into_iter()
-        .filter(|(_, v)| v.len() > 1)
-        .collect();
+    let mut out: Vec<(String, Vec<String>)> =
+        by_code5.into_iter().filter(|(_, v)| v.len() > 1).collect();
     out.sort();
     Ok(out)
 }
@@ -989,7 +1041,9 @@ pub fn parse_plu_xml_counted(data: &str) -> Result<(Vec<PluItem>, usize), StoreE
         buf.clear();
     }
     if depth != 0 {
-        return Err(StoreError::Xml("файл оборван: не закрыт корневой тег".into()));
+        return Err(StoreError::Xml(
+            "файл оборван: не закрыт корневой тег".into(),
+        ));
     }
     if skipped > 0 && (items.is_empty() || skipped * 10 > items.len() + skipped) {
         return Err(StoreError::Xml(format!(
@@ -1085,11 +1139,10 @@ fn apply_layout_step(
     let mut regrouped = 0usize;
     for (group, plus) in groups {
         for plu in plus {
-            regrouped += conn
-                .execute(
-                    "UPDATE plucodes SET groupcode = ?1 WHERE plu = ?2",
-                    rusqlite::params![group, plu],
-                )?;
+            regrouped += conn.execute(
+                "UPDATE plucodes SET groupcode = ?1 WHERE plu = ?2",
+                rusqlite::params![group, plu],
+            )?;
         }
     }
     let orphans: i64 = conn.query_row(
@@ -1138,7 +1191,11 @@ mod tests {
         let _ = print_log_add(&conn, &row(2000, "10", Some(true), Some(1)));
         let _ = print_log_add(&conn, &row(100, "30", Some(true), None));
         let pop = print_popularity(&conn, 1000).unwrap();
-        assert_eq!(pop.get("10"), Some(&3), "повторные печати не считаются продажами");
+        assert_eq!(
+            pop.get("10"),
+            Some(&3),
+            "повторные печати не считаются продажами"
+        );
         assert_eq!(pop.get("20"), Some(&1), "ошибочные печати не считаются");
         assert_eq!(pop.get("30"), None, "старше окна — не считается");
         let sales = print_log_count_since(&conn, 1000).unwrap();
@@ -1151,8 +1208,8 @@ mod tests {
         let id_ok = print_log_add(&conn, &row).unwrap();
         let id_err = print_log_add(&conn, &row).unwrap();
         assert_ne!(id_ok, id_err, "rowid попыток различается");
-        print_log_mark(&conn, id_ok, true);
-        print_log_mark(&conn, id_err, false);
+        print_log_mark(&conn, id_ok, true).unwrap();
+        print_log_mark(&conn, id_err, false).unwrap();
         let ok_rows = print_log_count_filtered(&conn, None, Some(true)).unwrap();
         let err_rows = print_log_count_filtered(&conn, None, Some(false)).unwrap();
         assert_eq!(ok_rows, 1, "успешная попытка помечена как продажа");
@@ -1170,7 +1227,10 @@ mod tests {
         let id = print_log_add(&conn, &row).unwrap();
         let total = print_log_count_filtered(&conn, None, None).unwrap();
         assert_eq!(total, 1, "зафиксированная попытка видна в журнале");
-        assert_eq!(print_log_count_filtered(&conn, None, Some(true)).unwrap(), 0);
+        assert_eq!(
+            print_log_count_filtered(&conn, None, Some(true)).unwrap(),
+            0
+        );
         assert_eq!(
             print_log_count_filtered(&conn, None, Some(false)).unwrap(),
             1,
@@ -1188,7 +1248,7 @@ mod tests {
         row.price = Some(19999);
         row.shelflife = Some("20/09/2026".into());
         let id = print_log_add(&conn, &row).unwrap();
-        print_log_mark(&conn, id, true);
+        print_log_mark(&conn, id, true).unwrap();
         let got = print_log_get(&conn, id).unwrap().unwrap();
         assert_eq!(got.id, id);
         assert_eq!(got.plu.as_deref(), Some("2502192"));
@@ -1208,10 +1268,8 @@ mod tests {
     fn print_log_migration_keeps_old_rows() {
         // База старой схемы: NOT NULL ok, без снимка. open() должен
         // перестроить таблицу, сохранив записи.
-        let file = std::env::temp_dir().join(format!(
-            "openscale-mig-test-{}.sqlite",
-            std::process::id()
-        ));
+        let file =
+            std::env::temp_dir().join(format!("openscale-mig-test-{}.sqlite", std::process::id()));
         let _ = std::fs::remove_file(&file);
         let conn = rusqlite::Connection::open(&file).unwrap();
         conn.execute_batch(
@@ -1254,7 +1312,9 @@ mod tests {
         assert_eq!(recent.len(), 50);
         assert_eq!(recent[0].ts, 2099, "последние — сверху");
         // Ротация: старше 1000 удалены.
-        let n: i64 = conn.query_row("SELECT COUNT(*) FROM action_log", [], |r| r.get(0)).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM action_log", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(n, 1000);
     }
     #[test]
@@ -1274,12 +1334,18 @@ mod tests {
     #[test]
     fn group_column_uses_full_unicode_uppercase() {
         let conn = open(":memory:".as_ref()).unwrap();
-        let xml = r#"<body><item plunumber="77" price="10000" namefirst="вишня морозная кг" /></body>"#;
+        let xml =
+            r#"<body><item plunumber="77" price="10000" namefirst="вишня морозная кг" /></body>"#;
         import_plu(&conn, &parse_plu_xml(xml).unwrap()).unwrap();
         let g: String = conn
-            .query_row("SELECT \"group\" FROM plucodes WHERE plu='77'", [], |r| r.get(0))
+            .query_row("SELECT \"group\" FROM plucodes WHERE plu='77'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
-        assert_eq!(g, "ВИШНЯ", "SQL UPPER не поднимает кириллицу — нужен Rust uppercase");
+        assert_eq!(
+            g, "ВИШНЯ",
+            "SQL UPPER не поднимает кириллицу — нужен Rust uppercase"
+        );
     }
     #[test]
     fn seeding_happens_once_per_database() {
@@ -1430,7 +1496,9 @@ mod tests {
             .unwrap();
         assert_eq!(n, 2);
         let price: i64 = conn
-            .query_row("SELECT price FROM plucodes WHERE plu='2502192'", [], |r| r.get(0))
+            .query_row("SELECT price FROM plucodes WHERE plu='2502192'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(price, 19999);
     }
@@ -1467,10 +1535,10 @@ mod tests {
         assert_eq!(imported, 2);
         assert_eq!(removed, 0);
         assert_eq!(layout, Some((1, 1)), "переназначен A, без группы остался B");
-        assert_eq!(catalog(&conn), vec![
-            ("A".into(), 100, "ГР".into()),
-            ("B".into(), 200, "".into()),
-        ]);
+        assert_eq!(
+            catalog(&conn),
+            vec![("A".into(), 100, "ГР".into()), ("B".into(), 200, "".into()),]
+        );
     }
     #[test]
     fn apply_upload_rolls_back_import_on_removal_failure() {
@@ -1489,7 +1557,11 @@ mod tests {
         let groups = vec![("ГР".to_string(), vec!["A".to_string()])];
         let err = apply_upload(&conn, &items, Some(&groups)).unwrap_err();
         assert!(err.to_string().contains("обрезанный файл"), "{err}");
-        assert_eq!(catalog(&conn), before, "каталог полностью неизменён после отката");
+        assert_eq!(
+            catalog(&conn),
+            before,
+            "каталог полностью неизменён после отката"
+        );
     }
     #[test]
     fn apply_upload_rolls_back_all_on_layout_failure() {
@@ -1511,7 +1583,11 @@ mod tests {
         let groups = vec![("FAIL".to_string(), vec!["A".to_string()])];
         let err = apply_upload(&conn, &items, Some(&groups)).unwrap_err();
         assert!(err.to_string().contains("layout fail"), "{err}");
-        assert_eq!(catalog(&conn), before, "импорт и снятие откатились вместе с раскладкой");
+        assert_eq!(
+            catalog(&conn),
+            before,
+            "импорт и снятие откатились вместе с раскладкой"
+        );
     }
     #[test]
     fn apply_upload_repeated_is_idempotent() {
@@ -1525,12 +1601,17 @@ mod tests {
             let (imported, removed, layout) = apply_upload(&conn, &items, Some(&groups)).unwrap();
             assert_eq!(imported, 2, "повтор {round}: upsert возвращает все позиции");
             assert_eq!(removed, 0, "повтор {round}: снимать нечего");
-            assert_eq!(layout, Some((1, 1)), "повтор {round}: раскладка воспроизводится");
+            assert_eq!(
+                layout,
+                Some((1, 1)),
+                "повтор {round}: раскладка воспроизводится"
+            );
         }
-        assert_eq!(catalog(&conn), vec![
-            ("A".into(), 100, "ГР".into()),
-            ("B".into(), 200, "".into()),
-        ], "после двух применений каталог идентичен однократному");
+        assert_eq!(
+            catalog(&conn),
+            vec![("A".into(), 100, "ГР".into()), ("B".into(), 200, "".into()),],
+            "после двух применений каталог идентичен однократному"
+        );
     }
     #[test]
     fn card_price_follows_center_mirror() {
@@ -1538,7 +1619,11 @@ mod tests {
         // Первая выгрузка задаёт скидочную цену.
         import_plu(&conn, &parse_plu_xml(SAMPLE).unwrap()).unwrap();
         let card: Option<i64> = conn
-            .query_row("SELECT card_price FROM plucodes WHERE plu='2502192'", [], |r| r.get(0))
+            .query_row(
+                "SELECT card_price FROM plucodes WHERE plu='2502192'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(card, Some(17999));
         // Вторая выгрузка без атрибута: центр больше не даёт скидку —
@@ -1558,7 +1643,11 @@ mod tests {
         let reset = r#"<body><item plunumber="2502192" price="20999" cardprice="0" itemcode="02136" namefirst="ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ" namesecond="" groupcode="21" shelflife="x" /></body>"#;
         import_plu(&conn, &parse_plu_xml(reset).unwrap()).unwrap();
         let card: Option<i64> = conn
-            .query_row("SELECT card_price FROM plucodes WHERE plu='2502192'", [], |r| r.get(0))
+            .query_row(
+                "SELECT card_price FROM plucodes WHERE plu='2502192'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(card, None);
     }
@@ -1656,37 +1745,65 @@ mod tests {
         assert_eq!(list[0].img.as_deref(), Some("ovoshi.png"));
         // Новый отдел — в алфавитную секцию, то есть в конец списка.
         dept_add(&conn, "ЯГОДЫ", None, None, None).unwrap();
-        let names: Vec<String> =
-            depts_list(&conn).unwrap().into_iter().map(|d| d.name).collect();
+        let names: Vec<String> = depts_list(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
         assert_eq!(names.last().unwrap(), "ЯГОДЫ");
         // Ручная позиция поднимает отдел в начало ряда, остальные сдвигаются.
         dept_move(&conn, "ЯГОДЫ", Some(0)).unwrap();
         assert_eq!(depts_list(&conn).unwrap()[0].name, "ЯГОДЫ");
         // Стиль: цвет и картинка пишутся, снятие возвращает авто.
-        dept_style(&conn, "ЯГОДЫ", Some(Some("yagody.png")), Some(Some("FFEEDD")), None)
+        dept_style(
+            &conn,
+            "ЯГОДЫ",
+            Some(Some("yagody.png")),
+            Some(Some("FFEEDD")),
+            None,
+        )
+        .unwrap();
+        let row = depts_list(&conn)
+            .unwrap()
+            .into_iter()
+            .find(|d| d.name == "ЯГОДЫ")
             .unwrap();
-        let row = depts_list(&conn).unwrap().into_iter().find(|d| d.name == "ЯГОДЫ").unwrap();
         assert_eq!(row.img.as_deref(), Some("yagody.png"));
         assert_eq!(row.bg.as_deref(), Some("FFEEDD"));
         assert_eq!(row.fg, None);
         dept_style(&conn, "ЯГОДЫ", Some(None), None, None).unwrap();
-        let row = depts_list(&conn).unwrap().into_iter().find(|d| d.name == "ЯГОДЫ").unwrap();
+        let row = depts_list(&conn)
+            .unwrap()
+            .into_iter()
+            .find(|d| d.name == "ЯГОДЫ")
+            .unwrap();
         assert_eq!(row.img, None);
         // Неизвестный отдел — ошибка, а не тихий успех.
         assert!(dept_move(&conn, "НЕТ", Some(1)).is_err());
         // Полный перепорядок: список имён = экранный порядок.
-        let mut names: Vec<String> =
-            depts_list(&conn).unwrap().into_iter().map(|d| d.name).collect();
+        let mut names: Vec<String> = depts_list(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
         names.reverse();
         dept_reorder(&conn, &names).unwrap();
-        let after: Vec<String> =
-            depts_list(&conn).unwrap().into_iter().map(|d| d.name).collect();
+        let after: Vec<String> = depts_list(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
         assert_eq!(after, names);
         assert!(dept_reorder(&conn, &["НЕТ".to_string()]).is_err());
         // Привязка группы живёт отдельно; удаление отдела её снимает.
         group_assign(&conn, "КЛЮКВА", "ЯГОДЫ").unwrap();
         dept_remove(&conn, "ЯГОДЫ").unwrap();
-        assert!(group_depts(&conn).unwrap().iter().all(|(_, d)| d != "ЯГОДЫ"));
+        assert!(
+            group_depts(&conn)
+                .unwrap()
+                .iter()
+                .all(|(_, d)| d != "ЯГОДЫ")
+        );
     }
     #[test]
     fn label_layout_roundtrip_and_list() {
@@ -1742,12 +1859,24 @@ mod tests {
         let conn = open(std::path::Path::new(":memory:")).unwrap();
         let mut gd: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         gd.insert("ВИНОГРАД".into(), "ФРУКТЫ".into());
-        let groups = vec![("ВИНОГРАД".to_string(), 3i64), ("КИНЗА".to_string(), 2), ("ПУСТО".to_string(), 0)];
+        let groups = vec![
+            ("ВИНОГРАД".to_string(), 3i64),
+            ("КИНЗА".to_string(), 2),
+            ("ПУСТО".to_string(), 0),
+        ];
         let un = route_unmapped_groups(&conn, &mut gd, &groups).unwrap();
         assert_eq!(un, vec!["КИНЗА".to_string()]);
         assert_eq!(gd.get("КИНЗА").map(String::as_str), Some(FALLBACK_DEPT));
-        assert!(!gd.contains_key("ПУСТО"), "пустая группа не маршрутизируется");
-        assert!(depts_list(&conn).unwrap().iter().any(|d| d.name == FALLBACK_DEPT));
+        assert!(
+            !gd.contains_key("ПУСТО"),
+            "пустая группа не маршрутизируется"
+        );
+        assert!(
+            depts_list(&conn)
+                .unwrap()
+                .iter()
+                .any(|d| d.name == FALLBACK_DEPT)
+        );
     }
     #[test]
     fn rows_with_null_names_are_not_dropped() {

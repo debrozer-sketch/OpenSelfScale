@@ -1,7 +1,6 @@
-
 use crate::config::Config;
-use std::path::Path;
 use serde::Deserialize;
+use std::path::Path;
 use suppaftp::FtpStream;
 const EXTERNAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 #[derive(Debug, Deserialize)]
@@ -94,7 +93,10 @@ fn run_external(cmd: &str, input: &Path) -> Result<String, String> {
             Ok(None) if std::time::Instant::now() > deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                break Err(format!("конвертер не уложился в {} с", EXTERNAL_TIMEOUT.as_secs()));
+                break Err(format!(
+                    "конвертер не уложился в {} с",
+                    EXTERNAL_TIMEOUT.as_secs()
+                ));
             }
             Ok(None) => {
                 // Лимит проверяем во время записи: конвертер, пишущий
@@ -167,10 +169,7 @@ pub fn take_lock(dir: &Path) -> Result<SyncLock, String> {
         if rc != 0 {
             let e = std::io::Error::last_os_error();
             return if e.kind() == std::io::ErrorKind::WouldBlock {
-                Err(
-                    "каталог обмена занят другим процессом приёма (sync.lock удерживается)"
-                        .into(),
-                )
+                Err("каталог обмена занят другим процессом приёма (sync.lock удерживается)".into())
             } else {
                 Err(format!("sync.lock: {e}"))
             };
@@ -197,7 +196,9 @@ pub fn take_lock(dir: &Path) -> Result<SyncLock, String> {
                         .map(|d| d.as_secs() > LOCK_STALE_SECS)
                         .unwrap_or(false);
                     if stale && attempt == 0 {
-                        log::warn!("sync.lock старше {LOCK_STALE_SECS} с — считаю зависшим, снимаю");
+                        log::warn!(
+                            "sync.lock старше {LOCK_STALE_SECS} с — считаю зависшим, снимаю"
+                        );
                         let _ = std::fs::remove_file(&path);
                         continue;
                     }
@@ -288,18 +289,29 @@ fn stamp() -> String {
     )
 }
 fn listing_name(line: &str) -> Option<&str> {
-    line.split_whitespace().next_back().filter(|s| !s.is_empty())
+    line.split_whitespace()
+        .next_back()
+        .filter(|s| !s.is_empty())
 }
 fn connect(cfg: &crate::config::CenterProfile) -> Result<FtpStream, String> {
-    let mut ftp = FtpStream::connect((cfg.host.as_str(), cfg.port))
-        .map_err(|e| format!("{}:{}: {e}", cfg.host, cfg.port))?;
-    ftp.login(&cfg.user, &cfg.password).map_err(|e| format!("вход: {e}"))?;
+    use std::net::ToSocketAddrs as _;
+    // Ограничиваем и установление соединения, и авторизацию: без этого
+    // зависший сервер останавливал приём на неограниченное время.
     let t = std::time::Duration::from_secs(cfg.timeout_secs.max(1) as u64);
+    let addr = (cfg.host.as_str(), cfg.port)
+        .to_socket_addrs()
+        .map_err(|e| format!("{}:{}: {e}", cfg.host, cfg.port))?
+        .next()
+        .ok_or_else(|| format!("{}: адрес не разрешён", cfg.host))?;
+    let mut ftp = FtpStream::connect_timeout(addr, t)
+        .map_err(|e| format!("{}:{}: {e}", cfg.host, cfg.port))?;
     let s = ftp.get_ref();
     s.set_read_timeout(Some(t))
         .map_err(|e| format!("таймаут чтения: {e}"))?;
     s.set_write_timeout(Some(t))
         .map_err(|e| format!("таймаут записи: {e}"))?;
+    ftp.login(&cfg.user, &cfg.password)
+        .map_err(|e| format!("вход: {e}"))?;
     Ok(ftp)
 }
 /// Лимит размера XML из выгрузки: центр может отдать ошибку HTML-страницей
@@ -309,7 +321,9 @@ const MAX_XML_BYTES: usize = 64 * 1024 * 1024;
 /// большой; защита от декодирования огромного файла в UI-потоке.
 const MAX_IMG_BYTES: u64 = 4 * 1024 * 1024;
 fn fetch_string(ftp: &mut FtpStream, path: &str) -> Result<String, String> {
-    let bytes = ftp.retr_as_buffer(path).map_err(|e| format!("{path}: {e}"))?;
+    let bytes = ftp
+        .retr_as_buffer(path)
+        .map_err(|e| format!("{path}: {e}"))?;
     let bytes = bytes.into_inner();
     if bytes.len() > MAX_XML_BYTES {
         return Err(format!(
@@ -322,17 +336,27 @@ fn fetch_string(ftp: &mut FtpStream, path: &str) -> Result<String, String> {
     decode_xml(&dummy, bytes)
 }
 fn fetch_bytes(ftp: &mut FtpStream, path: &str) -> Result<Vec<u8>, String> {
-    let bytes = ftp
-        .retr_as_buffer(path)
-        .map(|b| b.into_inner())
-        .map_err(|e| format!("{path}: {e}"))?;
-    if bytes.len() > MAX_XML_BYTES {
-        return Err(format!(
-            "{path}: {} МБ — больше лимита, файл отклонён",
-            bytes.len() / 1024 / 1024
-        ));
-    }
-    Ok(bytes)
+    // Потоковое чтение с лимитом: даже когда FTP SIZE недоступен, файл
+    // больше лимита не попадает в память целиком.
+    ftp.retr(path, |stream| {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 16 * 1024];
+        loop {
+            let n = stream
+                .read(&mut chunk)
+                .map_err(suppaftp::FtpError::ConnectionError)?;
+            if n == 0 {
+                return Ok(buf);
+            }
+            if buf.len() as u64 + n as u64 > MAX_IMG_BYTES {
+                return Err(suppaftp::FtpError::ConnectionError(std::io::Error::other(
+                    format!("размер превысил лимит {} МБ", MAX_IMG_BYTES / (1024 * 1024)),
+                )));
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        }
+    })
+    .map_err(|e| format!("{path}: {e}"))
 }
 /// Декодирует XML выгрузки. Кассовая система иногда дописывает мусор после
 /// закрывающего `</body>` (вплоть до обрывка другого документа со своим
@@ -342,8 +366,12 @@ fn decode_xml(name: &std::path::Path, bytes: Vec<u8>) -> Result<String, String> 
         Some(p) => p + 7,
         None => bytes.len(),
     };
-    String::from_utf8(bytes[..end].to_vec())
-        .map_err(|_| format!("{}: файл не UTF-8, проверьте выгрузку на сервере", name.display()))
+    String::from_utf8(bytes[..end].to_vec()).map_err(|_| {
+        format!(
+            "{}: файл не UTF-8, проверьте выгрузку на сервере",
+            name.display()
+        )
+    })
 }
 fn read_xml(name: &std::path::Path) -> Result<String, String> {
     let bytes = std::fs::read(name).map_err(|e| format!("{}: {e}", name.display()))?;
@@ -370,7 +398,11 @@ fn apply_upload(
     let (imported, removed, layout) =
         datastore::apply_upload(&db.conn, items, groups.map(|g| g.as_slice()))
             .map_err(|e| format!("приём выгрузки: {e}"))?;
-    let removed_note = if removed > 0 { format!(", снято {removed}") } else { String::new() };
+    let removed_note = if removed > 0 {
+        format!(", снято {removed}")
+    } else {
+        String::new()
+    };
     let layout_note = match (groups, layout) {
         (Some(g), Some((regrouped, orphans))) => format!(
             ", раскладка: {} групп / {} переназначено / {} без группы",
@@ -392,7 +424,8 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let _lock = take_lock(dir)?;
-    // Приём реально начался — фиксируем попытку (успех запишется в finish).
+    // Приём реально начался: блокировка получена — фиксируем попытку.
+    // finish завершит только эту попытку (идентификатор в записи статуса).
     crate::sync_status::begin(&cfg.db_path);
     let ready = dir.join("ready.flg");
     let ready_cap = snapshot_meta(&ready);
@@ -437,16 +470,21 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
         datastore::parse_plu_xml_counted(&plu_data).map_err(|e| format!("разбор plu.xml: {e}"))?
     };
     if skipped > 0 {
-        log::warn!("{}: пропущено битых записей: {skipped}", input_name.display());
+        log::warn!(
+            "{}: пропущено битых записей: {skipped}",
+            input_name.display()
+        );
     }
     if items.is_empty() {
-        return Err(format!("{} не содержит товаров — выгрузка не принята", input_name.display()));
+        return Err(format!(
+            "{} не содержит товаров — выгрузка не принята",
+            input_name.display()
+        ));
     }
     let layout = dir.join("layout.xml");
     let (groups, ldata, layout_cap) = if layout.exists() {
         let s = read_xml(&layout)?;
-        let g = datastore::parse_layout_xml(&s)
-            .map_err(|e| format!("разбор layout.xml: {e}"))?;
+        let g = datastore::parse_layout_xml(&s).map_err(|e| format!("разбор layout.xml: {e}"))?;
         let cap = snapshot_meta(&layout);
         (Some(g), s, cap)
     } else {
@@ -484,7 +522,7 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
             .iter()
             .zip(images.iter())
             .any(|(s1, (p, _))| match s1 {
-                None => false, 
+                None => false,
                 Some(s1) => p.metadata().map(|m| m.len()).ok() != Some(*s1),
             });
         if !hot || std::time::Instant::now() > hot_deadline {
@@ -499,7 +537,7 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
             std::fs::metadata(p).map(|m| m.len()).ok(),
         ) {
             (Some(a), Some(b)) => a != b,
-            _ => true, 
+            _ => true,
         };
         if stale {
             let data = std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?;
@@ -513,8 +551,7 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     if imgs_new > 0 {
         crate::thumbs::ensure_dir(&local, std::time::Duration::from_secs(25));
     }
-    let (imported, layout_note) =
-        apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata)?;
+    let (imported, layout_note) = apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata)?;
     let mut deferred = 0usize;
     let mut rm = |p: &std::path::Path, cap: &Option<MetaCap>| {
         if !delete_if_unchanged(p, *cap) {
@@ -548,24 +585,27 @@ pub fn run(cfg: &Config) -> Result<String, String> {
     if !c.enabled() {
         return Err("центр не настроен: заполните [center] в config.toml (host, plu_path)".into());
     }
-    // Попытка началась: предварительные проверки пройдены.
+    // Единая блокировка с drop-приёмом: CLI --sync и авто-синхронизация
+    // не могут применять выгрузки параллельно (защита от отката каталога
+    // к старому состоянию). Занятая блокировка — штатный отказ: статус
+    // выполняющейся операции не трогается (begin ещё не вызван).
+    std::fs::create_dir_all(&cfg.incoming_dir)
+        .map_err(|e| format!("{}: {e}", cfg.incoming_dir.display()))?;
+    let _sync_lock = take_lock(&cfg.incoming_dir)?;
+    // Попытка началась: предварительные проверки пройдены, блокировка наша.
     crate::sync_status::begin(&cfg.db_path);
     let mut ftp = match c.protocol.as_str() {
         "ftp" => connect(c)?,
-        "ftps" => {
-            return Err("протокол ftps не реализован: используйте ftp или drop-режим".into())
-        }
-        "external" => {
-            return Err(
-                "protocol = \"external\" работает только в drop-конвейере (incoming_dir + ready.flg)"
-                    .into(),
-            )
-        }
+        "ftps" => return Err("протокол ftps не реализован: используйте ftp или drop-режим".into()),
+        "external" => return Err(
+            "protocol = \"external\" работает только в drop-конвейере (incoming_dir + ready.flg)"
+                .into(),
+        ),
         other => return Err(format!("протокол «{other}» не поддерживается (ftp)")),
     };
     let plu_data = fetch_string(&mut ftp, &c.plu_path)?;
-    let (items, skipped) = datastore::parse_plu_xml_counted(&plu_data)
-        .map_err(|e| format!("разбор plu.xml: {e}"))?;
+    let (items, skipped) =
+        datastore::parse_plu_xml_counted(&plu_data).map_err(|e| format!("разбор plu.xml: {e}"))?;
     if skipped > 0 {
         log::warn!("plu.xml: пропущено битых записей: {skipped}");
     }
@@ -585,7 +625,9 @@ pub fn run(cfg: &Config) -> Result<String, String> {
             .list(Some(&c.img_dir))
             .map_err(|e| format!("листинг {}: {e}", c.img_dir))?;
         for line in &listing {
-            let Some(name) = listing_name(line) else { continue };
+            let Some(name) = listing_name(line) else {
+                continue;
+            };
             if !(name.ends_with(".jpg") || name.ends_with(".png")) {
                 continue;
             }
@@ -603,7 +645,10 @@ pub fn run(cfg: &Config) -> Result<String, String> {
                     continue;
                 }
             }
-            let skip = match (std::fs::metadata(&local_path).map(|m| m.len()).ok(), ftp.size(&remote)) {
+            let skip = match (
+                std::fs::metadata(&local_path).map(|m| m.len()).ok(),
+                ftp.size(&remote),
+            ) {
                 (Some(local_len), Ok(remote_len)) => local_len == remote_len as u64,
                 (Some(_), Err(_)) => true,
                 (None, _) => false,
@@ -634,67 +679,69 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
         );
         let cfg_sync = cfg.clone();
         let tx = tx.clone();
-        std::thread::spawn(move || loop {
-            let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                match run_drop(&cfg_sync) {
-                    Ok(Some(r)) => {
-                        log::info!("{r}");
-                        crate::sync_status::finish(&cfg_sync.db_path, true, &r, None);
-                        let _ = tx.send(r);
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        log::error!("выгрузка (drop): {e}");
-                        crate::sync_status::finish(&cfg_sync.db_path, false, "", Some(&e));
-                        std::thread::sleep(std::time::Duration::from_secs(60));
-                    }
+        std::thread::spawn(move || {
+            loop {
+                let guard =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        match run_drop(&cfg_sync) {
+                            Ok(Some(r)) => {
+                                log::info!("{r}");
+                                crate::sync_status::finish(&cfg_sync.db_path, true, &r, None);
+                                let _ = tx.send(r);
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                log::error!("выгрузка (drop): {e}");
+                                crate::sync_status::finish(&cfg_sync.db_path, false, "", Some(&e));
+                                std::thread::sleep(std::time::Duration::from_secs(60));
+                            }
+                        }
+                    }));
+                if guard.is_err() {
+                    log::error!("авто-синхронизация (drop): поток паниковал, перезапуск цикла");
+                    crate::sync_status::finish(
+                        &cfg_sync.db_path,
+                        false,
+                        "",
+                        Some("авто-приём: поток прерван внутренней ошибкой"),
+                    );
                 }
-            }));
-            if guard.is_err() {
-                log::error!("авто-синхронизация (drop): поток паниковал, перезапуск цикла");
-                crate::sync_status::finish(
-                    &cfg_sync.db_path,
-                    false,
-                    "",
-                    Some("авто-приём: поток прерван внутренней ошибкой"),
-                );
+                std::thread::sleep(std::time::Duration::from_secs(5));
             }
-            std::thread::sleep(std::time::Duration::from_secs(5));
         });
     } else if cfg.center.enabled() && cfg.center.interval_secs > 0 {
         let cfg_sync = cfg.clone();
         let tx = tx.clone();
-        let interval =
-            std::time::Duration::from_secs(cfg.center.interval_secs.max(30) as u64);
-        std::thread::spawn(move || loop {
-            std::thread::sleep(interval);
-            let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                match run(&cfg_sync) {
-                    Ok(r) => {
-                        log::info!("авто-синхронизация: {r}");
-                        crate::sync_status::finish(&cfg_sync.db_path, true, &r, None);
-                        let _ = tx.send(r);
+        let interval = std::time::Duration::from_secs(cfg.center.interval_secs.max(30) as u64);
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(interval);
+                let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    match run(&cfg_sync) {
+                        Ok(r) => {
+                            log::info!("авто-синхронизация: {r}");
+                            crate::sync_status::finish(&cfg_sync.db_path, true, &r, None);
+                            let _ = tx.send(r);
+                        }
+                        Err(e) => {
+                            log::error!("авто-синхронизация: {e}");
+                            crate::sync_status::finish(&cfg_sync.db_path, false, "", Some(&e));
+                        }
                     }
-                    Err(e) => {
-                        log::error!("авто-синхронизация: {e}");
-                        crate::sync_status::finish(&cfg_sync.db_path, false, "", Some(&e));
-                    }
+                }));
+                if guard.is_err() {
+                    log::error!("авто-синхронизация: поток паниковал, продолжаем цикл");
+                    crate::sync_status::finish(
+                        &cfg_sync.db_path,
+                        false,
+                        "",
+                        Some("авто-синхронизация: поток прерван внутренней ошибкой"),
+                    );
                 }
-            }));
-            if guard.is_err() {
-                log::error!("авто-синхронизация: поток паниковал, продолжаем цикл");
-                crate::sync_status::finish(
-                    &cfg_sync.db_path,
-                    false,
-                    "",
-                    Some("авто-синхронизация: поток прерван внутренней ошибкой"),
-                );
             }
         });
     } else {
-        log::info!(
-            "авто-синхронизация выключена ([center].host пуст или interval_secs = 0)"
-        );
+        log::info!("авто-синхронизация выключена ([center].host пуст или interval_secs = 0)");
     }
     rx
 }
@@ -719,7 +766,10 @@ mod tests {
         std::fs::write(&p, b"old-data").unwrap();
         let cap = snapshot_meta(&p);
         std::fs::write(&p, b"new-rewritten-data-longer").unwrap();
-        assert!(!delete_if_unchanged(&p, cap), "переписанный файл не удаляется");
+        assert!(
+            !delete_if_unchanged(&p, cap),
+            "переписанный файл не удаляется"
+        );
         assert!(p.exists(), "новая выгрузка пережила приём старой");
         let cap2 = snapshot_meta(&p);
         assert!(delete_if_unchanged(&p, cap2), "неизменённый файл удаляется");
@@ -742,8 +792,9 @@ mod tests {
         // Касса дописала мусор (битый UTF-8, вплоть до обрывка со своим
         // </body>): полезная часть принимается по ПЕРВОМУ маркеру.
         let name = std::path::PathBuf::from("/var/ftp/scale/plu.xml");
-        let mut bytes = b"<body>\r\n<item plunumber=\"1\" price=\"100\" namefirst=\"A\" />\r\n</body>\r\n"
-            .to_vec();
+        let mut bytes =
+            b"<body>\r\n<item plunumber=\"1\" price=\"100\" namefirst=\"A\" />\r\n</body>\r\n"
+                .to_vec();
         bytes.extend_from_slice(&[0x96, 0xD0, 0x95, 0xFF, 0xFE]);
         bytes.extend_from_slice(b"\" namesecond=\"\" />dfg</body>\r\n");
         let s = decode_xml(&name, bytes).expect("мусор обрезан, XML декодирован");
@@ -756,7 +807,10 @@ mod tests {
     fn xml_fully_broken_encoding_is_rejected() {
         let name = std::path::PathBuf::from("/var/ftp/scale/plu.xml");
         let bytes = vec![0xFF, 0xFE, 0xD1, 0x8F];
-        assert!(decode_xml(&name, bytes).is_err(), "без маркера </body> битый файл отклонён");
+        assert!(
+            decode_xml(&name, bytes).is_err(),
+            "без маркера </body> битый файл отклонён"
+        );
     }
     #[test]
     fn canonical_json_minimal_and_optional() {
@@ -785,7 +839,9 @@ mod tests {
         // 2 битых из 22 (~9%) — ниже порога 10%, файл принимается.
         let mut rows: Vec<String> = Vec::new();
         for i in 0..20 {
-            rows.push(format!(r#"{{"plu":"9{i:02}","name":"ТОВАР {i}","price_kop":100}}"#));
+            rows.push(format!(
+                r#"{{"plu":"9{i:02}","name":"ТОВАР {i}","price_kop":100}}"#
+            ));
         }
         rows.push(r#"{"plu":"","name":"БЕЗ КОДА","price_kop":100}"#.into());
         rows.push(r#"{"plu":"31","name":"","price_kop":-5}"#.into());
