@@ -76,6 +76,64 @@ pub fn ensure_marker(db_path: &Path) {
     let _ = std::fs::write(marker_path(db_path), "openscale\n");
 }
 
+/// SQLite URI открытия существующей БД на запись (mode=rw, без CREATE).
+fn uri_rw(path: &Path) -> String {
+    let s = path.to_string_lossy();
+    let enc = s.replace('%', "%25").replace('?', "%3f").replace(' ', "%20").replace('#', "%23");
+    format!("file:{enc}?mode=rw")
+}
+
+/// Соединение CLI с блокировкой обслуживания. Единая точка доступа CLI к БД:
+/// fail-closed и flock действуют для всех служебных команд одинаково.
+pub struct CliDb {
+    pub conn: rusqlite::Connection,
+    _lock: MaintLock,
+}
+
+impl CliDb {
+    /// Чтение/изменение существующей БД: SH-блокировка, создание запрещено.
+    /// exclusive=true — только для операций замены файла БД.
+    pub fn open(cfg: &crate::config::Config, exclusive: bool, allow_create: bool) -> Result<CliDb, String> {
+        let lock = if exclusive {
+            MaintLock::acquire_exclusive(&maint_lock_path(&cfg.db_path))?
+        } else {
+            MaintLock::acquire_shared(&maint_lock_path(&cfg.db_path))?
+        };
+        let opened = match probe_startup(cfg) {
+            DbStartup::Ready => {
+                // URI mode=rw: открыть только существующий файл, без создания —
+                // БД не появится пустой, даже если файл исчез между проверками.
+                let uri = uri_rw(&cfg.db_path);
+                rusqlite::Connection::open_with_flags(
+                    uri,
+                    rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                        | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+                )
+                .map_err(|e| format!("{}: {e}", cfg.db_path.display()))?;
+                datastore::open(&cfg.db_path)
+                    .map(|conn| CliDb { conn, _lock: lock })
+                    .map_err(|e| format!("база: {e}"))
+            }
+            DbStartup::FirstInstall if allow_create => {
+                if let Some(dir) = cfg.db_path.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                datastore::open(&cfg.db_path)
+                    .map(|conn| {
+                        ensure_marker(&cfg.db_path);
+                        CliDb { conn, _lock: lock }
+                    })
+                    .map_err(|e| format!("база: {e}"))
+            }
+            DbStartup::FirstInstall => {
+                Err("базы ещё нет (первичная установка) — команда требует существующей БД".to_string())
+            }
+            DbStartup::Unavailable(e) => Err(format!("БД недоступна, операция отменена: {e}")),
+        };
+        opened
+    }
+}
+
 // ===== Межпроцессная блокировка обслуживания (flock) =====
 
 /// Shared-блокировка у работающего киоска на всё время использования БД,
@@ -693,7 +751,7 @@ mod tests {
         let bdir = dir.join("backups");
         std::fs::create_dir_all(&bdir).unwrap();
         let lock = take_lock(&bdir).unwrap();
-        let err = create_backup(&cfg, Some(&bdir)).unwrap_err();
+        let err = create_backup(&cfg, Some(&bdir)).err().unwrap();
         assert!(err.contains("уже выполняется"), "получено: {err}");
         drop(std::fs::remove_file(&lock));
         create_backup(&cfg, Some(&bdir)).unwrap();
@@ -732,7 +790,7 @@ mod tests {
         let snap = create_backup(&cfg, Some(&bdir)).unwrap();
         add_item(&cfg, "102");
         std::fs::write(&snap, b"not a database at all").unwrap();
-        let err = restore_backup(&cfg, &snap, Some(&bdir)).unwrap_err();
+        let err = restore_backup(&cfg, &snap, Some(&bdir)).err().unwrap();
         assert!(err.contains("повреждён"), "получено: {err}");
         assert_eq!(plu_count(&cfg.db_path), 2, "рабочая база изменена при отказе");
         let _ = std::fs::remove_dir_all(&dir);
@@ -747,7 +805,7 @@ mod tests {
         let conn = rusqlite::Connection::open(&fake).unwrap();
         conn.execute_batch("CREATE TABLE t (x); INSERT INTO t VALUES (1);").unwrap();
         drop(conn);
-        let err = restore_backup(&cfg, &fake, Some(&bdir)).unwrap_err();
+        let err = restore_backup(&cfg, &fake, Some(&bdir)).err().unwrap();
         assert!(err.contains("plucodes"), "получено: {err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -865,10 +923,75 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // ===== Единый безопасный доступ CLI (волна 10) =====
+
+    #[test]
+    fn cli_db_never_creates_installed_but_missing_db() {
+        let (dir, cfg) = setup("cli-no-create");
+        ensure_marker(&cfg.db_path);
+        let err = CliDb::open(&cfg, false, false).err().unwrap();
+        assert!(err.contains("недоступна"), "{err}");
+        assert!(!cfg.db_path.exists(), "CLI создал пустую БД");
+        // Даже allow_create не спасает: маркер установленной БД имеет приоритет.
+        let err = CliDb::open(&cfg, false, true).err().unwrap();
+        assert!(err.contains("недоступна"), "{err}");
+        assert!(!cfg.db_path.exists(), "CLI создал пустую БД (allow_create)");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cli_db_readonly_refuses_first_install() {
+        let (dir, cfg) = setup("cli-first");
+        let err = CliDb::open(&cfg, false, false).err().unwrap();
+        assert!(err.contains("первичн"), "{err}");
+        assert!(!cfg.db_path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cli_db_create_allowed_only_on_first_install() {
+        let (dir, cfg) = setup("cli-create");
+        let db = CliDb::open(&cfg, false, true).unwrap();
+        assert!(cfg.db_path.exists(), "первичная установка: БД создана");
+        assert!(marker_path(&cfg.db_path).exists(), "маркер записан");
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cli_db_refuses_corrupt_db() {
+        let (dir, cfg) = setup("cli-corrupt");
+        std::fs::write(&cfg.db_path, b"garbage").unwrap();
+        let err = CliDb::open(&cfg, false, false).err().unwrap();
+        assert!(err.contains("недоступна"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cli_db_sync_path_writes_through_safe_mechanism() {
+        let (dir, cfg) = setup("cli-sync");
+        add_item(&cfg, "101");
+        // Сценарий apply_upload: соединение через CliDb, запись работает.
+        let db = CliDb::open(&cfg, false, true).unwrap();
+        let item = PluItem {
+            plu: "102".into(),
+            price: 19_999,
+            card_price: None,
+            itemcode: "2000001".into(),
+            namefirst: "СЫР РОКФОР КГ".into(),
+            namesecond: String::new(),
+            groupcode: String::new(),
+            shelflife: String::new(),
+        };
+        datastore::import_plu(&db.conn, &[item]).unwrap();
+        drop(db);
+        assert_eq!(plu_count(&cfg.db_path), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[cfg(unix)]
     #[test]
-    fn restore_refuses_while_exclusive_held() {
-        let (dir, cfg) = setup("restorelock");
+    fn restore_refuses_while_exclusive_held() {        let (dir, cfg) = setup("restorelock");
         add_item(&cfg, "101");
         let bdir = dir.join("backups");
         let snap = create_backup(&cfg, Some(&bdir)).unwrap();
@@ -876,7 +999,7 @@ mod tests {
         // Чужой процесс держит EX (как работающий киоск или второй --restore).
         let holder = MaintLock::acquire_exclusive(&maint_lock_path(&cfg.db_path)).unwrap();
         let before = plu_count(&cfg.db_path);
-        let err = restore_backup(&cfg, &snap, Some(&bdir)).unwrap_err();
+        let err = restore_backup(&cfg, &snap, Some(&bdir)).err().unwrap();
         assert!(err.contains("обслуживания") || err.contains("работает"), "{err}");
         assert_eq!(plu_count(&cfg.db_path), before, "БД изменена при занятой блокировке");
         drop(holder);
@@ -884,3 +1007,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+

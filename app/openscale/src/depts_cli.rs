@@ -1,16 +1,17 @@
 
 use crate::config;
-fn db(cfg: &config::Config) -> rusqlite::Connection {
-    match datastore::open(&cfg.db_path) {
-        Ok(conn) => conn,
+fn db(cfg: &config::Config) -> crate::backup::CliDb {
+    match crate::backup::CliDb::open(cfg, false, true) {
+        Ok(db) => db,
         Err(e) => {
-            eprintln!("база {}: {e}", cfg.db_path.display());
+            eprintln!("kiosk: {e}");
             std::process::exit(1);
         }
     }
 }
 pub fn list(cfg: &config::Config) {
-    let conn = db(cfg);
+    let db = db(cfg);
+    let conn = &db.conn;
     let depts = datastore::depts_list(&conn).unwrap_or_default();
     let gd = datastore::group_depts(&conn).unwrap_or_default();
     println!("Отделы (порядок экранный; «альф» = по алфавиту):");
@@ -30,7 +31,8 @@ pub fn list(cfg: &config::Config) {
     }
 }
 pub fn add(cfg: &config::Config, name: &str, img: Option<&str>, bg: Option<&str>, fg: Option<&str>) {
-    let conn = db(cfg);
+    let db = db(cfg);
+    let conn = &db.conn;
     let existed = datastore::depts_list(&conn)
         .unwrap_or_default()
         .iter()
@@ -46,7 +48,8 @@ pub fn add(cfg: &config::Config, name: &str, img: Option<&str>, bg: Option<&str>
     }
 }
 pub fn style(cfg: &config::Config, name: &str, img: Option<String>, bg: Option<String>, fg: Option<String>) {
-    let conn = db(cfg);
+    let db = db(cfg);
+    let conn = &db.conn;
     let opt = |v: &Option<String>| match v.as_deref() {
         None | Some("-") => None,
         Some("none") => Some(None),
@@ -69,7 +72,8 @@ pub fn style(cfg: &config::Config, name: &str, img: Option<String>, bg: Option<S
     println!("стиль отдела «{name}» обновлён");
 }
 pub fn remove(cfg: &config::Config, name: &str) {
-    let conn = db(cfg);
+    let db = db(cfg);
+    let conn = &db.conn;
     datastore::dept_remove(&conn, name).unwrap_or_else(|e| {
         eprintln!("удаление отдела: {e}");
         std::process::exit(1);
@@ -77,7 +81,8 @@ pub fn remove(cfg: &config::Config, name: &str) {
     println!("отдел «{name}» удалён, привязки групп сняты");
 }
 pub fn move_dept(cfg: &config::Config, name: &str, ord: Option<i64>) {
-    let conn = db(cfg);
+    let db = db(cfg);
+    let conn = &db.conn;
     datastore::dept_move(&conn, name, ord).unwrap_or_else(|e| {
         eprintln!("перестановка: {e}");
         std::process::exit(1);
@@ -88,7 +93,8 @@ pub fn move_dept(cfg: &config::Config, name: &str, ord: Option<i64>) {
     );
 }
 pub fn group_assign(cfg: &config::Config, group: &str, dept: &str) {
-    let conn = db(cfg);
+    let db = db(cfg);
+    let conn = &db.conn;
     let depts: Vec<String> =
         datastore::depts_list(&conn).unwrap_or_default().into_iter().map(|d| d.name).collect();
     if !depts.iter().any(|d| d == dept) {
@@ -101,3 +107,5 @@ pub fn group_assign(cfg: &config::Config, group: &str, dept: &str) {
     });
     println!("группа «{group}» → отдел «{dept}»");
 }
+
+

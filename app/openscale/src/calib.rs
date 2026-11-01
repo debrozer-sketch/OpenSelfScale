@@ -65,8 +65,11 @@ pub fn test_label_bytes() -> Vec<u8> {
     bytes
 }
 pub fn run_cli(cfg: &Config) -> Result<(), String> {
-    let conn = datastore::open(&cfg.db_path).map_err(|e| e.to_string())?;
-    let mut cal = FeedCalibration::load(&conn).map_err(|e| e.to_string())?;
+    // Единый безопасный доступ CLI: flock SH + fail-closed; создание БД
+    // допустимо только при первичной установке.
+    let db = crate::backup::CliDb::open(cfg, false, true)?;
+    let conn = &db.conn;
+    let mut cal = FeedCalibration::load(conn).map_err(|e| e.to_string())?;
     println!("Калибровка печати. Текущие значения: {cal:?}");
     println!("На этикетке напечатаны текущие числа. Оцените печать и ответьте:");
     println!("  Enter=в норме и сохранить, n=изображение смещено вниз(+16),");
@@ -80,7 +83,7 @@ pub fn run_cli(cfg: &Config) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         match line.trim() {
             "" => {
-                cal.save(&conn).map_err(|e| e.to_string())?;
+                cal.save(conn).map_err(|e| e.to_string())?;
                 println!("Сохранено в БД: {cal:?}");
                 return Ok(());
             }
@@ -150,3 +153,5 @@ mod tests {
         assert_eq!(FeedCalibration::load(&conn).unwrap().opto_thermo_space, 362);
     }
 }
+
+

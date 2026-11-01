@@ -363,10 +363,12 @@ fn apply_upload(
             .chain(groups.map(|_| ("layout.xml", ldata)))
             .collect::<Vec<_>>(),
     );
-    let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
+    // Единый безопасный доступ: flock SH + fail-closed (потерянная/повреждённая
+    // установленная БД не заменяется пустой); создание — только первичная установка.
+    let db = crate::backup::CliDb::open(cfg, false, true).map_err(|e| format!("база: {e}"))?;
     // Атомарное применение: импорт, снятие и раскладка в одной транзакции.
     let (imported, removed, layout) =
-        datastore::apply_upload(&conn, items, groups.map(|g| g.as_slice()))
+        datastore::apply_upload(&db.conn, items, groups.map(|g| g.as_slice()))
             .map_err(|e| format!("приём выгрузки: {e}"))?;
     let removed_note = if removed > 0 { format!(", снято {removed}") } else { String::new() };
     let layout_note = match (groups, layout) {

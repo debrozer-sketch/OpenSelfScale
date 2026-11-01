@@ -43,14 +43,43 @@ fn report(cfg: &Config, live: Option<&crate::weight::Snapshot>) -> String {
     r.push_str(&format!(
         "База PLU {}: {}\n",
         cfg.db_path.display(),
-        probe_db(&cfg.db_path)
+        probe_db(cfg)
     ));
+    r.push_str(&format!("Резервные копии: {}\n", last_backup(cfg)));
     r.push_str(&format!(
         "Набор от центра {}: {}\n",
         cfg.incoming_dir.display(),
         probe_incoming(&cfg.incoming_dir)
     ));
     r
+}
+/// Последний снимок и возраст; каталог может отсутствовать (первичная установка).
+fn last_backup(cfg: &Config) -> String {
+    let dir = crate::backup::default_backup_dir(&cfg.db_path);
+    let best = std::fs::read_dir(&dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name();
+            let n = n.to_string_lossy();
+            n.starts_with("openscale-") && n.ends_with(".db")
+        })
+        .max_by_key(|e| e.file_name());
+    match best {
+        Some(e) => {
+            let age = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .map(|d| format!("{:.0} ч назад", d.as_secs_f64() / 3600.0))
+                .unwrap_or_else(|| "давность неизвестна".into());
+            format!("{} ({})", e.file_name().to_string_lossy(), age)
+        }
+        None => "снимков нет (выполните openscale --backup)".into(),
+    }
 }
 fn probe_serial(path: &Path, baud: u32) -> String {
     match serialport::new(path.to_string_lossy(), baud)
@@ -61,10 +90,12 @@ fn probe_serial(path: &Path, baud: u32) -> String {
         Err(e) => format!("ошибка: {e}"),
     }
 }
-fn probe_db(path: &Path) -> String {
-    match datastore::open(path) {
-        Ok(conn) => {
-            let n: i64 = conn
+fn probe_db(cfg: &Config) -> String {
+    // Единый безопасный доступ CLI: flock + fail-closed, создание запрещено.
+    match crate::backup::CliDb::open(cfg, false, false) {
+        Ok(db) => {
+            let n: i64 = db
+                .conn
                 .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
                 .unwrap_or(-1);
             format!("ок, {n} товаров")

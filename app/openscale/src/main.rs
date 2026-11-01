@@ -109,11 +109,14 @@ fn main() {
                 eprintln!("разбор plu.xml: {e}");
                 std::process::exit(1);
             });
-            let conn = datastore::open(&cfg.db_path).unwrap_or_else(|e| {
-                eprintln!("база {}: {e}", cfg.db_path.display());
+            // Единый безопасный доступ: flock SH; создание — только при
+            // первичной установке (без маркера).
+            let db = backup::CliDb::open(&cfg, false, true).unwrap_or_else(|e| {
+                eprintln!("import: {e}");
                 std::process::exit(1);
             });
-            match datastore::import_plu(&conn, &items) {
+            let conn = &db.conn;
+            match datastore::import_plu(conn, &items) {
                 Ok(n) => println!("импортировано {n} товаров"),
                 Err(e) => {
                     eprintln!("импорт: {e}");
@@ -171,14 +174,13 @@ fn main() {
             }
         },
         Mode::DbCheck => {
-            let conn = match datastore::open(&cfg.db_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("база {}: {e}", cfg.db_path.display());
-                    std::process::exit(1);
-                }
-            };
-            drop(conn);
+            // Единый безопасный доступ: flock SH, создание и миграции без
+            // существующей БД запрещены.
+            let db = backup::CliDb::open(&cfg, false, false).unwrap_or_else(|e| {
+                eprintln!("db-check: {e}");
+                std::process::exit(1);
+            });
+            let conn = &db.conn;
             match backup::integrity_check(&cfg.db_path) {
                 Ok(r) => println!("integrity_check: {r}"),
                 Err(e) => {
@@ -186,7 +188,6 @@ fn main() {
                     std::process::exit(1);
                 }
             }
-            let conn = datastore::open(&cfg.db_path).unwrap();
             let stat = |sql: &str| -> String {
                 conn.query_row(sql, [], |r| r.get::<_, i64>(0))
                     .map(|n| n.to_string())
