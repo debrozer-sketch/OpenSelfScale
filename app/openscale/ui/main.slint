@@ -564,6 +564,8 @@ export component MainWindow inherits Window {
     in property <string> popup-card-sum;
     in property <bool> popup-empty: true;
     in property <bool> popup-under-min: false;
+    in property <bool> popup-unstable: false;
+    in property <bool> popup-scales-off: false;
     in property <bool> db-unavailable: false;
     in property <string> db-error-text: "";
     callback plu-confirm();
@@ -1389,7 +1391,7 @@ export component MainWindow inherits Window {
                 vertical-alignment: center;
                 color: Theme.success-bright;
             }
-            if !root.popup-empty : Text { // ВЕС
+            Text { // ВЕС — виден всегда, оператор читает показания весов
                 x: 544px; y: 266px;
                 width: 220px; height: 20px;
                 text: "ВЕС";
@@ -1398,16 +1400,18 @@ export component MainWindow inherits Window {
                 color: Theme.ink-mute;
                 vertical-alignment: center;
             }
-            if !root.popup-empty : Text {
+            Text {
                 x: 544px; y: 286px;
                 width: 220px; height: 34px;
                 text: root.popup-weight;
                 font-size: 26px;
                 font-weight: 700;
                 vertical-alignment: center;
-                color: Theme.ink;
+                color: root.popup-empty
+                    ? (root.popup-scales-off ? Theme.ink-faint : Theme.warning-deep)
+                    : Theme.ink;
             }
-            if !root.popup-empty : Text { // ЦЕНА
+            Text { // ЦЕНА — известна из карточки, видна без веса
                 x: 784px; y: 266px;
                 width: 216px; height: 20px;
                 text: "ЦЕНА";
@@ -1416,7 +1420,7 @@ export component MainWindow inherits Window {
                 color: Theme.ink-mute;
                 vertical-alignment: center;
             }
-            if !root.popup-empty : Text {
+            Text {
                 x: 784px; y: 286px;
                 width: 216px; height: 34px;
                 text: root.popup-plu.price;
@@ -1428,11 +1432,15 @@ export component MainWindow inherits Window {
             if root.popup-empty : Text {
                 x: 24px; y: 140px;
                 width: parent.width - 540px; height: 48px;
-                text: root.popup-under-min ? "Вес слишком мал" : "Положите товар на весы";
+                text: root.popup-scales-off ? "Весы недоступны"
+                    : root.popup-unstable ? "Вес нестабилен"
+                    : root.popup-under-min ? "Вес слишком мал"
+                    : "Положите товар на весы";
                 font-size: Theme.font-lg;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-                color: root.popup-under-min ? Theme.danger : Theme.ink-faint;
+                color: root.popup-scales-off || root.popup-under-min ? Theme.danger
+                     : root.popup-unstable ? Theme.warning-deep : Theme.ink-faint;
             }
             Rectangle { // отмена
                 x: 24px; y: 340px;

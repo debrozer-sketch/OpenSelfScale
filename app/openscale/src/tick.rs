@@ -42,7 +42,13 @@ pub fn start(
                 crate::watchdog::beat();
                 let Some(ui) = ui_handle.upgrade() else { return };
                 let snap = app_state.snapshot();
-                let ws = weight_state(&snap, trade.min_weight_g.get() / 1000.0);
+                // Отключённые или протухшие весы — состояние «недоступно»,
+                // как бы хорош ни был последний снимок массы.
+                let ws = if snap.port_up {
+                    weight_state(&snap, trade.min_weight_g.get() / 1000.0)
+                } else {
+                    0
+                };
                 let wt = if snap.port_up {
                     format!("{:.3}", snap.mass_kg)
                 } else {
@@ -107,12 +113,17 @@ pub fn start(
                         // данных) не участвует в расчёте покупки.
                         let live = ws == 2 && snap.port_up;
                         ui.set_popup_empty(!live);
+                        // Причины недоступности подтверждения — разными
+                        // сообщениями: отключённые весы, нестабильный вес,
+                        // масса ниже минимума и пустая платформа.
+                        ui.set_popup_scales_off(!snap.port_up);
+                        ui.set_popup_unstable(snap.port_up && ws == 1);
                         ui.set_popup_under_min(
-                            live && snap.mass_kg > 0.0
+                            snap.port_up && snap.mass_kg > 0.0
                                 && snap.mass_kg < trade.min_weight_g.get() / 1000.0,
                         );
                         ui.set_popup_weight(
-                            if live { format!("{:.3} кг", snap.mass_kg) } else { "—".into() }
+                            if snap.port_up { format!("{:.3} кг", snap.mass_kg) } else { "—".into() }
                                 .into(),
                         );
                         let g = if live { (snap.mass_kg.max(0.0) * 1000.0).round() as u32 } else { 0 };

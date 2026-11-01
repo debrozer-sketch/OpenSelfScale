@@ -359,6 +359,54 @@ fn ui_scenarios() {
         advance(TICK.as_millis() as u64).await;
         assert!(!ui.get_popup_open(), "N4: неизвестный PLU отклонён");
 
+        // S13. Нестабильный вес в карточке: показания видны, подтверждение
+        // недоступно, причина названа. Стабилизация возвращает карточку.
+        app.set_weight(1.500, false, true);
+        ui.invoke_plu_tapped("101".into());
+        advance(TICK.as_millis() as u64).await;
+        assert!(ui.get_popup_open(), "S13: карточка открыта");
+        assert!(ui.get_popup_unstable(), "S13: причина — нестабильный вес");
+        assert!(ui.get_popup_empty(), "S13: подтверждение не готово");
+        assert_eq!(ui.get_popup_weight().as_str(), "1.500 кг", "S13: показание весов видно");
+        ui.invoke_plu_confirm();
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(app.kiosk.borrow().phase, 0, "S13: подтверждение отклонено");
+        assert!(ui.get_popup_open(), "S13: карточка остаётся");
+        app.set_weight(1.500, true, true);
+        advance(TICK.as_millis() as u64).await;
+        assert!(!ui.get_popup_empty(), "S13: после стабилизации вес готов");
+        assert!(!ui.get_popup_unstable(), "S13: признак нестабильности снят");
+
+        // S14. Слишком малый вес: отдельная причина, а не «положите товар».
+        app.set_weight(0.008, true, true);
+        advance(TICK.as_millis() as u64).await;
+        assert!(ui.get_popup_under_min(), "S14: масса ниже минимума");
+        assert!(ui.get_popup_empty(), "S14: подтверждение не готово");
+        app.set_weight(1.500, true, true);
+        advance(TICK.as_millis() as u64).await;
+
+        // S15. Быстрое двойное подтверждение: одна операция печати.
+        ui.invoke_plu_confirm();
+        ui.invoke_plu_confirm();
+        advance(TICK.as_millis() as u64).await;
+        {
+            let k = app.kiosk.borrow();
+            assert_eq!(k.phase, 2, "S15: печать запущена");
+            assert!(k.print_weight_g.is_some(), "S15: вес зафиксирован");
+        }
+        let ops = app.kiosk.borrow().print_op;
+        ui.invoke_plu_confirm();
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(app.kiosk.borrow().print_op, ops, "S15: повторный вызов игнорирован");
+        wait_until("S15: печать вернула ошибку", || app.kiosk.borrow().phase == 4).await;
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.error_at = Some(Instant::now() - std::time::Duration::from_secs(9));
+        }
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(app.kiosk.borrow().phase, 0, "S15: возврат в каталог-состояние");
+
+
         // Быстрые повторные переходы и двойные нажатия.
         (app.handles.go_root)();
         advance(TICK.as_millis() as u64).await;

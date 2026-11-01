@@ -71,7 +71,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let cfg = ctx.cfg.clone();
         move || {
             let mut k = kiosk.borrow_mut();
-            if k.db_unavailable {
+            // Подтверждение допустимо только до начала печати (фазы 2+ —
+            // операция уже идёт или завершена): повторный вызов игнорируется.
+            if k.phase >= 2 || k.db_unavailable {
                 return;
             }
             let Some(entry) = k.pending.clone() else { return };
@@ -81,7 +83,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             // не выполняется — сумма подтверждения равна сумме печати.
             let snap = app_state.snapshot();
             let ws = weight_state(&snap, min_kg);
-            if ws != 2 {
+            if ws != 2 || !snap.port_up {
                 return;
             }
             let item = match datastore::open(&cfg.db_path)
