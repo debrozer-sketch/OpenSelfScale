@@ -44,7 +44,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let img_dir = img_dir.clone();
         move |plu| {
             let mut k = kiosk.borrow_mut();
-            if k.phase >= 2 {
+            if k.db_unavailable || k.phase >= 2 {
                 return; 
             }
             k.idle_since = None;
@@ -71,6 +71,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let cfg = ctx.cfg.clone();
         move || {
             let mut k = kiosk.borrow_mut();
+            if k.db_unavailable {
+                return;
+            }
             let Some(entry) = k.pending.clone() else { return };
             let min_kg = trade.min_weight_g.get() / 1000.0;
             // Один снимок на подтверждение: та же масса, по которой popup
@@ -225,9 +228,11 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let kiosk = kiosk.clone();
         let open_dept = open_dept.clone();
         move |dept| {
-            if kiosk.borrow().phase >= 2 {
-                return; 
+            let kiosk_ref = kiosk.borrow();
+            if kiosk_ref.db_unavailable || kiosk_ref.phase >= 2 {
+                return;
             }
+            drop(kiosk_ref);
             kiosk.borrow_mut().idle_since = None;
             open_dept(&dept);
         }
@@ -483,6 +488,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let query = search_query.clone();
         let apply = search_apply.clone();
         move || {
+            if kiosk.borrow().db_unavailable {
+                return;
+            }
             kiosk.borrow_mut().idle_since = None;
             let Some(ui) = ui_handle.upgrade() else { return };
             query.borrow_mut().clear();
@@ -497,6 +505,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let query = search_query.clone();
         let apply = search_apply.clone();
         move |key| {
+            if kiosk.borrow().db_unavailable {
+                return;
+            }
             kiosk.borrow_mut().idle_since = None;
             {
                 let mut q = query.borrow_mut();

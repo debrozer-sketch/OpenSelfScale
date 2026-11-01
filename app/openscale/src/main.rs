@@ -205,14 +205,48 @@ fn main() {
 }
 fn run_kiosk(cfg: openscale::config::Config) {
     let app_state = Arc::new(weight::WeightSource::spawn(&cfg.scales));
+    // Каталог БД нужен и для файла блокировки обслуживания.
+    if let Some(dir) = cfg.db_path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // Shared-блокировка обслуживания: пока киоск работает с БД, --restore
+    // не сможет начать замену. Занято обслуживанием — выход (systemd
+    // повторит запуск после завершения восстановления).
+    let maint_lock = match backup::MaintLock::acquire_shared_retry(
+        &backup::maint_lock_path(&cfg.db_path),
+        15,
+    ) {
+        Ok(l) => Some(l),
+        Err(e) => {
+            log::error!("запуск: {e} — идёт обслуживание, повтор запуска позже");
+            std::process::exit(1);
+        }
+    };
+    // Fail-closed: существующая БД должна открыться, пройти integrity_check,
+    // миграции и отдать данные. Иначе — экран недоступности, не торговля.
+    let db_unavailable = match backup::probe_startup(&cfg) {
+        backup::DbStartup::Ready => false,
+        backup::DbStartup::FirstInstall => {
+            backup::ensure_marker(&cfg.db_path);
+            log::info!("первичная установка: база будет создана при первой настройке");
+            false
+        }
+        backup::DbStartup::Unavailable(e) => {
+            log::error!("БД недоступна, торговля заблокирована: {e}");
+            log::error!("диагностика: openscale --db-check; восстановление: остановите openscale-kiosk и выполните openscale --restore <снимок>");
+            true
+        }
+    };
     let cfg = Arc::new(cfg);
-    match datastore::open(&cfg.db_path) {
-        Ok(conn) => match datastore::auth::user_exists(&conn) {
-            Ok(true) => log::info!("вход: пользователи есть"),
-            Ok(false) => log::info!("вход: пользователей нет — обязателен мастер настройки"),
-            Err(e) => log::error!("вход: база: {e}"),
-        },
-        Err(e) => log::error!("вход: база недоступна: {e}"),
+    if !db_unavailable {
+        match datastore::open(&cfg.db_path) {
+            Ok(conn) => match datastore::auth::user_exists(&conn) {
+                Ok(true) => log::info!("вход: пользователи есть"),
+                Ok(false) => log::info!("вход: пользователей нет — обязателен мастер настройки"),
+                Err(e) => log::error!("вход: база: {e}"),
+            },
+            Err(e) => log::error!("вход: база недоступна: {e}"),
+        }
     }
     let ui = MainWindow::new().expect("UI init");
     ui.set_screen_w(cfg.ui.screen_width as f32);
@@ -226,20 +260,24 @@ fn run_kiosk(cfg: openscale::config::Config) {
     }
     let group_dept: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, String>>> =
         std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new()));
-    let catalog: Vec<datastore::PluEntry> = match datastore::open(&cfg.db_path) {
-        Ok(conn) => match datastore::load_all(&conn) {
-            Ok(items) => {
-                log::info!("загружено товаров: {}", items.len());
-                items
-            }
+    let catalog: Vec<datastore::PluEntry> = if db_unavailable {
+        Vec::new()
+    } else {
+        match datastore::open(&cfg.db_path) {
+            Ok(conn) => match datastore::load_all(&conn) {
+                Ok(items) => {
+                    log::info!("загружено товаров: {}", items.len());
+                    items
+                }
+                Err(e) => {
+                    log::error!("чтение PLU: {e}");
+                    Vec::new()
+                }
+            },
             Err(e) => {
-                log::error!("чтение PLU: {e}");
+                log::error!("база {}: {e}", cfg.db_path.display());
                 Vec::new()
             }
-        },
-        Err(e) => {
-            log::error!("база {}: {e}", cfg.db_path.display());
-            Vec::new()
         }
     };
     let catalog: std::rc::Rc<std::cell::RefCell<Vec<datastore::PluEntry>>> =
@@ -349,6 +387,20 @@ fn run_kiosk(cfg: openscale::config::Config) {
     }
     let flow_handles = flow::install(&ctx);
     settings::install(&ctx, &flow_handles);
+    if db_unavailable {
+        // Экран недоступности вместо торговли: блокируем операции в логике
+        // и показываем оверлей. Блокировку обслуживания отпускаем —
+        // администратор может выполнить --restore без остановки сервиса.
+        ctx.kiosk.borrow_mut().db_unavailable = true;
+        let ui = ui.as_weak().upgrade().expect("UI init");
+        ui.set_db_unavailable(true);
+        ui.set_db_error_text("Проверьте журнал: /var/log/openscale/kiosk.log".into());
+        drop(maint_lock);
+        let timer = tick::start(&ctx, flow_handles.go_root, flow_handles.refresh_data, None);
+        ui.run().expect("UI loop failed");
+        drop(timer);
+        return;
+    }
     match datastore::open(&cfg.db_path) {
         Ok(conn) => {
             if datastore::get_setting(&conn, "label_layout_name")
@@ -400,9 +452,10 @@ fn run_kiosk(cfg: openscale::config::Config) {
     let sync_rx = sync::spawn_auto_sync(&cfg);
     print::spawn_daemon(&cfg);
     net::spawn_live_monitor();
-    let timer = tick::start(&ctx, flow_handles.go_root, flow_handles.refresh_data, sync_rx);
+    let timer = tick::start(&ctx, flow_handles.go_root, flow_handles.refresh_data, Some(sync_rx));
     let cfg_plain = Arc::new((*cfg).clone());
     let _backup_thread = backup::spawn_daily(cfg_plain);
     ui.run().expect("UI loop failed");
     drop(timer);
+    drop(maint_lock);
 }

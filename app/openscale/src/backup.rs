@@ -19,6 +19,144 @@ pub fn default_backup_dir(db_path: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("backups"))
 }
 
+// ===== Безопасный запуск (волна 9) =====
+
+/// Маркер установленного киоска: отличает первичную установку от потери
+/// существующей базы. Рядом с БД, создаётся после успешного открытия.
+pub fn marker_path(db_path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.installed", db_path.display()))
+}
+
+/// Файл межпроцессной блокировки обслуживания (flock).
+pub fn maint_lock_path(db_path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.lock", db_path.display()))
+}
+
+#[derive(Debug)]
+pub enum DbStartup {
+    /// БД ещё не создана — штатная первичная установка.
+    FirstInstall,
+    /// Существующая БД открылась, цела, данные читаются.
+    Ready,
+    /// Существующая БД не пригодна: торговля запрещена.
+    Unavailable(String),
+}
+
+/// Проверка существующей БД перед запуском торговли. Ничего не создаёт
+/// и не чинит: любое сомнение — в сторону отказа.
+pub fn probe_startup(cfg: &crate::config::Config) -> DbStartup {
+    if !cfg.db_path.exists() {
+        if marker_path(&cfg.db_path).exists() {
+            return DbStartup::Unavailable(format!(
+                "файл базы {} отсутствует, хотя киоск уже установлен — база потеряна",
+                cfg.db_path.display()
+            ));
+        }
+        return DbStartup::FirstInstall;
+    }
+    match integrity_check(&cfg.db_path) {
+        Ok(r) if r == "ok" => {}
+        Ok(r) => {
+            return DbStartup::Unavailable(format!(
+                "integrity_check не пройден: {r}"
+            ))
+        }
+        Err(e) => return DbStartup::Unavailable(format!("файл базы не читается: {e}")),
+    }
+    match datastore::open(&cfg.db_path).and_then(|c| datastore::load_all(&c).map(|_| ())) {
+        Ok(()) => {
+            let _ = std::fs::write(marker_path(&cfg.db_path), "openscale\n");
+            DbStartup::Ready
+        }
+        Err(e) => DbStartup::Unavailable(format!("база не обслуживается: {e}")),
+    }
+}
+
+pub fn ensure_marker(db_path: &Path) {
+    let _ = std::fs::write(marker_path(db_path), "openscale\n");
+}
+
+// ===== Межпроцессная блокировка обслуживания (flock) =====
+
+/// Shared-блокировка у работающего киоска на всё время использования БД,
+/// exclusive — у `--restore` до любых изменений. flock освобождается ядром
+/// при любом завершении процесса, включая SIGKILL.
+pub struct MaintLock {
+    #[cfg_attr(not(unix), allow(dead_code))]
+    path: PathBuf,
+    #[cfg(unix)]
+    _file: std::fs::File,
+}
+
+#[cfg(unix)]
+impl MaintLock {
+    fn acquire(path: &Path, exclusive: bool) -> Result<MaintLock, String> {
+        use std::os::unix::io::AsRawFd;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(path)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let op = if exclusive { libc::LOCK_EX } else { libc::LOCK_SH };
+        let rc = unsafe { libc::flock(file.as_raw_fd(), op | libc::LOCK_NB) };
+        if rc != 0 {
+            return Err(format!(
+                "блокировка {} занята другим процессом",
+                path.display()
+            ));
+        }
+        Ok(MaintLock { path: path.to_path_buf(), _file: file })
+    }
+
+    pub fn acquire_shared(path: &Path) -> Result<MaintLock, String> {
+        Self::acquire(path, false)
+    }
+
+    pub fn acquire_exclusive(path: &Path) -> Result<MaintLock, String> {
+        Self::acquire(path, true)
+    }
+
+    /// Киоск: несколько попыток получить shared-блокировку; занято
+    /// обслуживанием — ошибка (systemd повторит запуск позже).
+    pub fn acquire_shared_retry(path: &Path, attempts: u32) -> Result<MaintLock, String> {
+        let mut last = String::new();
+        for _ in 0..attempts {
+            match Self::acquire_shared(path) {
+                Ok(l) => return Ok(l),
+                Err(e) => {
+                    last = e;
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            }
+        }
+        Err(last)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for MaintLock {
+    fn drop(&mut self) {
+        use std::os::unix::io::AsRawFd;
+        unsafe { libc::flock(self._file.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+#[cfg(not(unix))]
+impl MaintLock {
+    // На рабочих станциях разработчика межпроцессная блокировка не
+    // применяется; семантика проверяется на Linux-стенде.
+    pub fn acquire_shared(_path: &Path) -> Result<MaintLock, String> {
+        Ok(MaintLock { path: _path.to_path_buf() })
+    }
+    pub fn acquire_exclusive(path: &Path) -> Result<MaintLock, String> {
+        Ok(MaintLock { path: path.to_path_buf() })
+    }
+    pub fn acquire_shared_retry(path: &Path, _attempts: u32) -> Result<MaintLock, String> {
+        Ok(MaintLock { path: path.to_path_buf() })
+    }
+}
+
 /// UTC из unix-секунд (годы Ховарда Хиннанта); имена файлов — без точек.
 fn ts_name() -> String {
     let secs = SystemTime::now()
@@ -119,6 +257,11 @@ fn schema_ok(path: &Path) -> Result<(), String> {
 pub fn create_backup(cfg: &crate::config::Config, dir: Option<&Path>) -> Result<PathBuf, String> {
     let dir = dir.map(|p| p.to_path_buf()).unwrap_or_else(|| default_backup_dir(&cfg.db_path));
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    // Каталог снимков должен остаться доступным сервисному пользователю
+    // (суточное автокопирование), даже если CLI выполнялся через sudo.
+    if let Some(db_dir) = cfg.db_path.parent() {
+        match_owner_to(db_dir, &[&dir]);
+    }
     let lock = take_lock(&dir)?;
     let result = do_backup(cfg, &dir);
     let _ = std::fs::remove_file(&lock);
@@ -160,6 +303,9 @@ fn do_backup(cfg: &crate::config::Config, dir: &Path) -> Result<PathBuf, String>
     }
     std::fs::rename(&tmp, &final_path)
         .map_err(|e| format!("{} → {}: {e}", tmp.display(), final_path.display()))?;
+    if let Some(db_dir) = cfg.db_path.parent() {
+        match_owner_to(db_dir, &[&final_path]);
+    }
     // Побочные файлы снимка (0-байтовый WAL, SHM) не нужны.
     for suffix in ["-wal", "-shm"] {
         let _ = std::fs::remove_file(dir.join(format!(
@@ -225,6 +371,37 @@ fn copy_fsync(src: &Path, dst: &Path) -> Result<(), String> {
     f.sync_all().map_err(|e| format!("{}: fsync: {e}", dst.display()))?;
     Ok(())
 }
+
+/// CLI обслуживания часто выполняется через sudo: файлы получаются
+/// root:root 0600 и киоск их не читает. Наследуем владельца каталога БД
+/// (сервисного пользователя) для созданных файлов.
+#[cfg(unix)]
+fn match_owner_to(reference: &Path, targets: &[&Path]) {
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::ffi::OsStrExt;
+    let md = match std::fs::metadata(reference) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    for t in targets {
+        let tm = match std::fs::metadata(t) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if tm.uid() == md.uid() && tm.gid() == md.gid() {
+            continue;
+        }
+        let c = match std::ffi::CString::new(t.as_os_str().as_bytes()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        unsafe {
+            libc::chown(c.as_ptr(), md.uid(), md.gid());
+        }
+    }
+}
+#[cfg(not(unix))]
+fn match_owner_to(_reference: &Path, _targets: &[&Path]) {}
 
 /// Работает ли сейчас киоск: восстановление требует остановки сервиса.
 fn kiosk_running() -> bool {
@@ -318,6 +495,10 @@ pub fn restore_backup(
     backup: &Path,
     dir: Option<&Path>,
 ) -> Result<String, String> {
+    // Эксклюзивная блокировка обслуживания ДО любых проверок и изменений:
+    // ни работающий киоск (держит shared), ни второй --restore не пройдут.
+    let _lock = MaintLock::acquire_exclusive(&maint_lock_path(&cfg.db_path))
+        .map_err(|_| "киоск работает или выполняется обслуживание — сначала остановите: systemctl stop openscale-kiosk".to_string())?;
     if kiosk_running() {
         return Err(format!(
             "киоск работает ({}) — сначала остановите: systemctl stop openscale-kiosk",
@@ -360,6 +541,18 @@ pub fn restore_backup(
     let _ = std::fs::remove_file(&tmp_wal);
     std::fs::rename(&tmp, &cfg.db_path)
         .map_err(|e| format!("замена {}: {e}", cfg.db_path.display()))?;
+    // Заменённый файл и созданная блокировка должны принадлежать сервисному
+    // пользователю (владельцу каталога БД): CLI часто выполняется через sudo.
+    if let Some(db_dir) = cfg.db_path.parent() {
+        match_owner_to(
+            db_dir,
+            &[
+                &cfg.db_path,
+                &maint_lock_path(&cfg.db_path),
+                &marker_path(&cfg.db_path),
+            ],
+        );
+    }
     // Старые WAL/SHM несовместимы с заменённой базой — удалить.
     for suffix in ["-wal", "-shm"] {
         let _ = std::fs::remove_file(PathBuf::from(format!("{}{suffix}", cfg.db_path.display())));
@@ -579,6 +772,115 @@ mod tests {
         std::mem::forget(conn);
         assert!(PathBuf::from(format!("{}-wal", cfg.db_path.display())).exists());
         assert_eq!(plu_count(&cfg.db_path), 1, "WAL не восстановлен после аварии");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ===== Безопасный запуск (волна 9) =====
+
+    #[test]
+    fn first_install_passes_probe() {
+        let (dir, cfg) = setup("first");
+        assert!(!marker_path(&cfg.db_path).exists());
+        match probe_startup(&cfg) {
+            DbStartup::FirstInstall => {}
+            other => panic!("ожидалась первичная установка, получено: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn deleted_db_after_install_is_unavailable() {
+        let (dir, cfg) = setup("deleted");
+        add_item(&cfg, "101");
+        ensure_marker(&cfg.db_path);
+        assert!(marker_path(&cfg.db_path).exists());
+        std::fs::remove_file(&cfg.db_path).unwrap();
+        match probe_startup(&cfg) {
+            DbStartup::Unavailable(e) => assert!(e.contains("отсутствует"), "{e}"),
+            other => panic!("ожидался отказ, получено: {other:?}"),
+        }
+        // Повторный probe не создаёт новую пустую БД.
+        assert!(!cfg.db_path.exists(), "создана пустая БД при недоступности");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_db_is_unavailable() {
+        let (dir, cfg) = setup("corruptdb");
+        add_item(&cfg, "101");
+        std::fs::write(&cfg.db_path, b"garbage not a database").unwrap();
+        match probe_startup(&cfg) {
+            DbStartup::Unavailable(_) => {}
+            other => panic!("ожидался отказ, получено: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn migration_or_schema_error_is_unavailable() {
+        let (dir, cfg) = setup("badschema");
+        // Валидный SQLite, но в plucodes нет обязательных колонок —
+        // загрузка данных невозможна.
+        let conn = rusqlite::Connection::open(&cfg.db_path).unwrap();
+        conn.execute_batch("CREATE TABLE plucodes (plu TEXT);").unwrap();
+        drop(conn);
+        match probe_startup(&cfg) {
+            DbStartup::Unavailable(e) => assert!(!e.is_empty()),
+            other => panic!("ожидался отказ, получено: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn healthy_db_probe_writes_marker() {
+        let (dir, cfg) = setup("ready");
+        add_item(&cfg, "101");
+        assert!(!marker_path(&cfg.db_path).exists());
+        match probe_startup(&cfg) {
+            DbStartup::Ready => {}
+            other => panic!("ожидался Ready, получено: {other:?}"),
+        }
+        assert!(marker_path(&cfg.db_path).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn maint_lock_conflicts_and_release() {
+        let (dir, _cfg) = setup("lockx");
+        let lock_path = dir.join("kiosk.db.lock");
+        // Exclusive занят: второй exclusive и shared не проходят.
+        let ex = MaintLock::acquire_exclusive(&lock_path).unwrap();
+        assert!(MaintLock::acquire_exclusive(&lock_path).is_err(), "второй EX должен отклониться");
+        assert!(MaintLock::acquire_shared(&lock_path).is_err(), "SH при активном EX должен отклониться");
+        // После освобождения — доступен и EX, и SH.
+        drop(ex);
+        let sh = MaintLock::acquire_shared(&lock_path).unwrap();
+        assert!(MaintLock::acquire_exclusive(&lock_path).is_err(), "EX при активном SH должен отклониться");
+        let sh2 = MaintLock::acquire_shared(&lock_path);
+        assert!(sh2.is_ok(), "несколько SH должны сосуществовать");
+        drop(sh);
+        drop(sh2);
+        assert!(MaintLock::acquire_exclusive(&lock_path).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_refuses_while_exclusive_held() {
+        let (dir, cfg) = setup("restorelock");
+        add_item(&cfg, "101");
+        let bdir = dir.join("backups");
+        let snap = create_backup(&cfg, Some(&bdir)).unwrap();
+        add_item(&cfg, "102");
+        // Чужой процесс держит EX (как работающий киоск или второй --restore).
+        let holder = MaintLock::acquire_exclusive(&maint_lock_path(&cfg.db_path)).unwrap();
+        let before = plu_count(&cfg.db_path);
+        let err = restore_backup(&cfg, &snap, Some(&bdir)).unwrap_err();
+        assert!(err.contains("обслуживания") || err.contains("работает"), "{err}");
+        assert_eq!(plu_count(&cfg.db_path), before, "БД изменена при занятой блокировке");
+        drop(holder);
+        restore_backup(&cfg, &snap, Some(&bdir)).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

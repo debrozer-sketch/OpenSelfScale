@@ -11,7 +11,7 @@ pub fn start(
     ctx: &AppContext,
     go_root: Rc<dyn Fn()>,
     refresh_data: Rc<dyn Fn()>,
-    sync_rx: Receiver<String>,
+    sync_rx: Option<Receiver<String>>,
 ) -> slint::Timer {
     let (print_tx, print_rx) = std::sync::mpsc::channel::<(u64, Result<u32, String>)>();
     let lock_db: RefCell<Option<rusqlite::Connection>> = RefCell::new(None);
@@ -91,7 +91,7 @@ pub fn start(
                     );
                     ui.set_paper_popup_open(want_popup);
                 }
-                if sync_rx.try_recv().is_ok() {
+                if sync_rx.as_ref().map(|rx| rx.try_recv().is_ok()).unwrap_or(false) {
                     refresh_data();
                 }
                 let mut k = kiosk.borrow_mut();

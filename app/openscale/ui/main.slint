@@ -564,6 +564,8 @@ export component MainWindow inherits Window {
     in property <string> popup-card-sum;
     in property <bool> popup-empty: true;
     in property <bool> popup-under-min: false;
+    in property <bool> db-unavailable: false;
+    in property <string> db-error-text: "";
     callback plu-confirm();
     callback plu-cancel();
     in property <length> dept-font: 30px; 
@@ -2982,9 +2984,54 @@ if root.screen == 26 : MenuPage {
                         color: Theme.surface;
                         overflow: elide;
                     }
-                     lbl-pv-ta := TouchArea { clicked => { root.labels-preview-close(); } }
+                      lbl-pv-ta := TouchArea { clicked => { root.labels-preview-close(); } }
                 }
             }
+    }
+    if root.db-unavailable : Rectangle {
+        // Блокирующий оверлей: торговля и меню недоступны до восстановления БД.
+        x: 0; y: 0;
+        width: root.width;
+        height: root.height;
+        background: Theme.bg;
+        TouchArea { }
+        Rectangle {
+            x: (parent.width - 720px) / 2;
+            y: (parent.height - 240px) / 2;
+            width: 720px;
+            height: 240px;
+            border-radius: Theme.r-button;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.ink;
+            VerticalLayout {
+                padding: 32px;
+                spacing: 16px;
+                alignment: center;
+                Text {
+                    text: "БАЗА ДАННЫХ НЕДОСТУПНА";
+                    font-size: Theme.font-lg;
+                    font-weight: 700;
+                    color: Theme.ink;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Торговля приостановлена. Обратитесь к администратору.";
+                    font-size: Theme.font-md;
+                    color: Theme.ink-soft;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.db-error-text;
+                    font-size: Theme.font-sm;
+                    color: Theme.ink-faint;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    overflow: elide;
+                }
+            }
+        }
     }
 }
 

@@ -150,9 +150,8 @@ fn build_app(tag: &str) -> App {
     let handles = crate::flow::install(&ctx);
     crate::settings::install(&ctx, &handles);
     (handles.relayout)();
-    let (_sync_tx, sync_rx) = std::sync::mpsc::channel::<String>();
     let timer =
-        crate::tick::start(&ctx, handles.go_root.clone(), handles.refresh_data.clone(), sync_rx);
+        crate::tick::start(&ctx, handles.go_root.clone(), handles.refresh_data.clone(), None);
     std::mem::forget(timer);
     App { ui, handles, kiosk, snap, dir }
 }
@@ -383,6 +382,58 @@ fn ui_scenarios() {
             assert!(k.pending.is_none(), "финал: нет зависшей карточки");
         }
         assert!(!ui.get_popup_open(), "финал: нет зависшего popup");
+
+        // S11. Безопасный режим: БД недоступна — торговые операции
+        // запрещены на уровне логики (UI-оверлей визуально перекрыт).
+        reset_to_root(&app).await;
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.db_unavailable = true;
+        }
+        ui.set_db_unavailable(true);
+        ui.set_db_error_text("test: база не читается".into());
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_dept_tapped("ФРУКТЫ".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 0, "S11: каталог не открывается");
+        ui.invoke_plu_tapped("101".into());
+        advance(TICK.as_millis() as u64).await;
+        assert!(!ui.get_popup_open(), "S11: карточка товара не открывается");
+        app.set_weight(1.35, true, true);
+        advance(TICK.as_millis() as u64).await;
+        {
+            // Подтверждение невозможно: pending отсутствует (plu-tapped
+            // отклонён) — печать не формируется.
+            let k = app.kiosk.borrow();
+            assert!(k.pending.is_none(), "S11: есть pending при недоступной БД");
+            assert!(k.print_weight_g.is_none(), "S11: вес для печати задан");
+        }
+        ui.invoke_plu_confirm();
+        advance(TICK.as_millis() as u64).await;
+        {
+            let k = app.kiosk.borrow();
+            assert_eq!(k.phase, 0, "S11: фаза не изменилась");
+            assert!(k.print_weight_g.is_none(), "S11: задание печати не создано");
+        }
+        ui.invoke_search_open();
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 0, "S11: поиск не открывается");
+        ui.invoke_key_tapped("С".into());
+        advance(TICK.as_millis() as u64).await;
+        // Возврат в рабочий режим после восстановления БД (рестарт сервиса).
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.db_unavailable = false;
+        }
+        ui.set_db_unavailable(false);
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_dept_tapped("ФРУКТЫ".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 2, "S11: после восстановления каталог работает");
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.db_unavailable = false;
+        }
 
         let _ = std::fs::remove_dir_all(&app.dir);
         slint::quit_event_loop().unwrap();

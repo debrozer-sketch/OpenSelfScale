@@ -75,6 +75,8 @@ pub struct Kiosk {
     pub role: u8,
     pub status_from: u8,
     pub vnc_on: bool,
+    /// БД недоступна (повреждена/потеряна): торговля и печать заблокированы.
+    pub db_unavailable: bool,
 }
 impl Kiosk {
     pub fn new() -> Self {
@@ -83,6 +85,7 @@ impl Kiosk {
             role: 0,
             status_from: 0,
             vnc_on: true,
+            db_unavailable: false,
             selected: None,
             print_weight_g: None,
             done_at: None,
