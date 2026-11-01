@@ -29,7 +29,7 @@ pub struct AppContext {
     pub kiosk: Rc<RefCell<Kiosk>>,
     pub app_state: Arc<WeightSource>,
     pub catalog: Rc<RefCell<Vec<datastore::PluEntry>>>,
-    pub catalog_up: Rc<RefCell<Vec<(String, usize)>>>,
+    pub catalog_up: Rc<RefCell<Vec<(String, String, usize)>>>,
     pub depts_all: Rc<RefCell<Vec<DeptDef>>>,
     pub items_all: Rc<RefCell<Vec<PluTile>>>,
     pub group_dept: Rc<RefCell<HashMap<String, String>>>,

@@ -16,7 +16,7 @@ struct FlowRc {
     depts_all: Rc<RefCell<Vec<DeptDef>>>,
     group_dept: Rc<RefCell<std::collections::HashMap<String, String>>>,
     catalog: Rc<RefCell<Vec<datastore::PluEntry>>>,
-    catalog_up: Rc<RefCell<Vec<(String, usize)>>>,
+    catalog_up: Rc<RefCell<Vec<(String, String, usize)>>>,
     items_all: Rc<RefCell<Vec<PluTile>>>,
     img_dir: std::path::PathBuf,
     set_header: Rc<dyn Fn(usize)>,
@@ -131,6 +131,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let item_cols = ctx.trade.item_cols.clone();
         let img_dir = img_dir.clone();
         move |page: usize| {
+            let t0 = std::time::Instant::now();
             let Some(ui) = ui_handle.upgrade() else { return };
             let cols = item_cols.get().max(2);
             let col_w = ((ui.get_screen_w() - 16.0 - (cols as f32 - 1.0) * 8.0) / cols as f32)
@@ -164,6 +165,10 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             ui.set_items_pages_total(pages_total as i32);
             ui.set_items_cell_offset(if page == 0 || !back { 0 } else { 1 });
             kiosk.borrow_mut().item_page = page;
+            let dt = t0.elapsed();
+            if dt >= std::time::Duration::from_millis(10) {
+                log::info!("[тайминг] страница товаров {}: {} мс", page + 1, dt.as_millis());
+            }
         }
     };
     let open_dept = {
@@ -183,6 +188,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             }
             kiosk.borrow_mut().idle_since = None;
             let Some(ui) = ui_handle.upgrade() else { return };
+            let t0 = std::time::Instant::now();
             let gd = group_dept.borrow();
             let mut items: Vec<PluTile> = catalog
                 .borrow()
@@ -218,9 +224,14 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 tiles::sort_items(&mut items, None);
             }
             *items_all.borrow_mut() = items;
+            let n_items = items_all.borrow().len();
             ui.set_screen_title(dept.into());
             show(0);
             ui.set_screen(2);
+            let dt = t0.elapsed();
+            if dt >= std::time::Duration::from_millis(10) {
+                log::info!("[тайминг] открытие каталога «{dept}»: {} мс, {} товаров", dt.as_millis(), n_items);
+            }
         }
     };
     let open_dept: Rc<dyn Fn(&str)> = Rc::new(open_dept);
@@ -446,6 +457,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let query = search_query.clone();
         let img_dir = img_dir.clone();
         move || {
+            let t0 = std::time::Instant::now();
             let Some(ui) = ui_handle.upgrade() else { return };
             let q = query.borrow().to_uppercase();
             let items: Vec<PluTile> = if q.is_empty() {
@@ -453,10 +465,12 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             } else {
                 let catalog = catalog.borrow();
                 let up = catalog_up.borrow();
+                // Совпадение по названию или коду (артикул/PLU). Подсветка —
+                // только по названию; попадание по коду показывается без неё.
                 let mut hits: Vec<usize> = up
                     .iter()
-                    .filter(|(n, _)| n.contains(q.as_str()))
-                    .map(|(_, i)| *i)
+                    .filter(|(n, c, _)| n.contains(q.as_str()) || c.contains(q.as_str()))
+                    .map(|(_, _, i)| *i)
                     .collect();
                 let take = hits.len().min(5);
                 if take > 0 {
@@ -468,10 +482,14 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                     .map(|&i| {
                         let p = &catalog[i];
                         let mut t = tiles::tile_of(p, &img_dir);
-                        let (b, m, a) = tiles::hl_parts(&p.name, &q);
-                        t.hl_before = b.into();
-                        t.hl_match = m.into();
-                        t.hl_after = a.into();
+                        if p.name.to_uppercase().contains(q.as_str()) {
+                            let (b, m, a) = tiles::hl_parts(&p.name, &q);
+                            t.hl_before = b.into();
+                            t.hl_match = m.into();
+                            t.hl_after = a.into();
+                        } else {
+                            t.hl_before = p.name.clone().into();
+                        }
                         t
                     })
                     .collect()
@@ -480,6 +498,10 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             ui.set_items_page_no(0);
             ui.set_items_pages_total(1);
             *items_all.borrow_mut() = Vec::new();
+            let dt = t0.elapsed();
+            if dt >= std::time::Duration::from_millis(10) {
+                log::info!("[тайминг] поиск: {} мс", dt.as_millis());
+            }
         }
     };
     ui.on_search_open({
@@ -699,10 +721,16 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                     }
                 };
                 log::info!("данные обновлены: {} товаров", items.len());
-                let up: Vec<(String, usize)> = items
+                let up: Vec<(String, String, usize)> = items
                     .iter()
                     .enumerate()
-                    .map(|(i, p)| (p.name.to_uppercase(), i))
+                    .map(|(i, p)| {
+                        (
+                            p.name.to_uppercase(),
+                            format!("{} {}", p.itemcode, p.plu),
+                            i,
+                        )
+                    })
                     .collect();
                 REFRESHING.store(false, std::sync::atomic::Ordering::SeqCst);
                 let _ = slint::invoke_from_event_loop(move || {
@@ -740,6 +768,11 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                         if cur == 2 {
                             let title = ui.get_screen_title();
                             let gd = st.group_dept.borrow();
+                            // tile_light без изображений: картинки добавляет
+                            // show_items только для видимой страницы, иначе
+                            // после синхронизации UI-поток грузит все картинки
+                            // отдела (на слабом железе — заметное зависание).
+                            let t0 = std::time::Instant::now();
                             let mut tiles: Vec<PluTile> = st
                                 .catalog
                                 .borrow()
@@ -748,11 +781,15 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                                     let g = if p.group.is_empty() { "ПРОЧЕЕ" } else { p.group.as_str() };
                                     gd.get(g).map(|d| d == title.as_str()).unwrap_or(false)
                                 })
-                                .map(|p| tiles::tile_of(p, &st.img_dir))
+                                .map(tiles::tile_light)
                                 .collect();
                             drop(gd);
-                            tiles.sort_by(|a, b| a.name.cmp(&b.name));
+                            tiles::sort_items(&mut tiles, None);
                             *st.items_all.borrow_mut() = tiles;
+                            let dt = t0.elapsed();
+                            if dt >= std::time::Duration::from_millis(10) {
+                                log::info!("[тайминг] обновление каталога после синхронизации: {} мс", dt.as_millis());
+                            }
                             let ipage = st.kiosk.borrow().item_page;
                             (st.show_items)(ipage);
                         }

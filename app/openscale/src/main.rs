@@ -290,13 +290,19 @@ fn run_kiosk(cfg: openscale::config::Config) {
     };
     let catalog: std::rc::Rc<std::cell::RefCell<Vec<datastore::PluEntry>>> =
         std::rc::Rc::new(std::cell::RefCell::new(catalog));
-    let catalog_up: std::rc::Rc<std::cell::RefCell<Vec<(String, usize)>>> =
+    let catalog_up: std::rc::Rc<std::cell::RefCell<Vec<(String, String, usize)>>> =
         std::rc::Rc::new(std::cell::RefCell::new(
             catalog
                 .borrow()
                 .iter()
                 .enumerate()
-                .map(|(i, p)| (p.name.to_uppercase(), i))
+                .map(|(i, p)| {
+                    (
+                        p.name.to_uppercase(),
+                        format!("{} {}", p.itemcode, p.plu),
+                        i,
+                    )
+                })
                 .collect(),
         ));
     let img_dir = cfg.ui.img_dir.clone();

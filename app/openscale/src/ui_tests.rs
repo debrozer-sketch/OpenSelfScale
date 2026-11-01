@@ -69,6 +69,12 @@ fn seed_db(cfg: &Config) {
 }
 
 fn build_app(tag: &str) -> App {
+    build_app_with_catalog(tag, 0)
+}
+
+/// extra_items: добавить синтетических товаров (бенчмарк каталога,
+/// OPSCALE_BENCH=1): 2000 товаров в отделе «БЕНЧ» + коды вида 5000000+N.
+fn build_app_with_catalog(tag: &str, extra_items: usize) -> App {
     let dir = std::env::temp_dir().join(format!("openscale-ui-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -81,6 +87,25 @@ fn build_app(tag: &str) -> App {
     cfg.kiosk.idle_timeout_secs = 60;
     cfg.kiosk.return_to_root_after_print = false;
     seed_db(&cfg);
+    if extra_items > 0 {
+        let conn = datastore::open(&cfg.db_path).unwrap();
+        datastore::dept_add(&conn, "БЕНЧ", None, None, None).unwrap();
+        let items: Vec<datastore::PluItem> = (0..extra_items)
+            .map(|n| datastore::PluItem {
+                plu: format!("{}", 900_000 + n),
+                price: 10_000 + (n % 500) as i64,
+                card_price: None,
+                itemcode: format!("{}", 5_000_000 + n),
+                namefirst: format!("БЕНЧ ТОВАР {}", n),
+                namesecond: String::new(),
+                groupcode: String::new(),
+                shelflife: String::new(),
+            })
+            .collect();
+        datastore::import_plu(&conn, &items).unwrap();
+        // Имя «БЕНЧ …» даёт группу «БЕНЧ» (группа = первое слово имени).
+        datastore::group_assign(&conn, "БЕНЧ", "БЕНЧ").unwrap();
+    }
     let log_file = std::fs::File::create(dir.join("ui.log")).unwrap();
     let _ = log::set_boxed_logger(Box::new(simplelog::WriteLogger::new(
         log::LevelFilter::Debug,
@@ -104,12 +129,12 @@ fn build_app(tag: &str) -> App {
             .and_then(|c| datastore::load_all(&c))
             .unwrap(),
     ));
-    let catalog_up: Rc<RefCell<Vec<(String, usize)>>> = Rc::new(RefCell::new(
+    let catalog_up: Rc<RefCell<Vec<(String, String, usize)>>> = Rc::new(RefCell::new(
         catalog
             .borrow()
             .iter()
             .enumerate()
-            .map(|(i, p)| (p.name.to_uppercase(), i))
+            .map(|(i, p)| (p.name.to_uppercase(), format!("{} {}", p.itemcode, p.plu), i))
             .collect(),
     ));
     let kiosk = Rc::new(RefCell::new(Kiosk::new()));
@@ -469,9 +494,82 @@ fn ui_scenarios() {
             assert_eq!(k.phase, 2, "S12: покупка подтверждена после восстановления");
         }
 
+        // BENCH. Бенчмарк каталога на синтетике 2000 товаров (OPSCALE_BENCH=1):
+        // замер реального отклика UI-потока на слабом железе стенда.
+        if std::env::var("OPSCALE_BENCH").map(|v| v == "1").unwrap_or(false) {
+            let appb = build_app_with_catalog("bench", 2000);
+            let ui = appb.ui.as_weak().upgrade().unwrap();
+            reset_to_root(&appb).await;
+            wait_until("BENCH: relayout отделов", || ui.get_depts().row_count() > 0).await;
+            advance(TICK.as_millis() as u64).await;
+            // Первое открытие отдела с 2000 товаров.
+            let t = Instant::now();
+            ui.invoke_dept_tapped("БЕНЧ".into());
+            advance(TICK.as_millis() as u64).await;
+            assert!(ui.get_screen() == 2 && ui.get_items().row_count() >= 9, "BENCH: каталог открыт");
+            let first_open = t.elapsed().as_millis();
+            // Возврат и повторное открытие.
+            ui.invoke_up();
+            advance(TICK.as_millis() as u64).await;
+            let t = Instant::now();
+            ui.invoke_dept_tapped("БЕНЧ".into());
+            advance(TICK.as_millis() as u64).await;
+            let reopen = t.elapsed().as_millis();
+            // Переключение категорий: БЕНЧ → ФРУКТЫ → БЕНЧ.
+            let t = Instant::now();
+            ui.invoke_dept_tapped("ФРУКТЫ".into());
+            advance(TICK.as_millis() as u64).await;
+            ui.invoke_dept_tapped("БЕНЧ".into());
+            advance(TICK.as_millis() as u64).await;
+            let switch = t.elapsed().as_millis();
+            // Возврат из карточки товара.
+            ui.invoke_plu_tapped("900000".into());
+            advance(TICK.as_millis() as u64).await;
+            assert!(ui.get_popup_open(), "BENCH: карточка открыта");
+            let t = Instant::now();
+            ui.invoke_plu_cancel();
+            advance(TICK.as_millis() as u64).await;
+            let card_back = t.elapsed().as_millis();
+            // Поиск по названию: 8 быстрых нажатий.
+            ui.invoke_up();
+            advance(TICK.as_millis() as u64).await;
+            ui.invoke_search_open();
+            advance(TICK.as_millis() as u64).await;
+            let t = Instant::now();
+            for k in ["Т", "О", "В", "А", "Р", " ", "Б", "5"] {
+                ui.invoke_key_tapped(k.into());
+                advance(TICK.as_millis() as u64).await;
+            }
+            let search_name = t.elapsed().as_millis();
+            // Поиск по коду товара: очистка, «500000» (itemcode).
+            ui.invoke_search_clear();
+            advance(TICK.as_millis() as u64).await;
+            let t = Instant::now();
+            ui.invoke_key_tapped("500000".into());
+            advance(TICK.as_millis() as u64).await;
+            let search_code = t.elapsed().as_millis();
+            assert!(ui.get_items().row_count() >= 1, "BENCH: поиск по коду нашёл");
+            // Обновление после синхронизации (на экране каталога).
+            ui.invoke_up();
+            advance(TICK.as_millis() as u64).await;
+            ui.invoke_dept_tapped("БЕНЧ".into());
+            advance(TICK.as_millis() as u64).await;
+            let t = Instant::now();
+            (appb.handles.refresh_data)();
+            advance(TICK.as_millis() as u64).await;
+            let sync_refresh = t.elapsed().as_millis();
+            println!(
+                "BENCH 2000 товаров: открытие={} мс, повторное={} мс, переключение категорий={} мс, возврат из карточки={} мс, поиск 8 клавиш по названию={} мс, поиск по коду={} мс, обновление после синхронизации={} мс",
+                first_open, reopen, switch, card_back, search_name, search_code, sync_refresh
+            );
+            let _ = std::fs::remove_dir_all(&appb.dir);
+        }
+
         let _ = std::fs::remove_dir_all(&app.dir);
         slint::quit_event_loop().unwrap();
     })
     .unwrap();
     slint::run_event_loop().unwrap();
 }
+
+

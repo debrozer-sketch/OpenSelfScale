@@ -241,6 +241,8 @@ pub struct PluEntry {
     pub price: i64,
     pub card_price: Option<i64>,
     pub group: String,
+    /// Артикул для поиска по коду (в БД itemcode, может быть пустым).
+    pub itemcode: String,
 }
 fn display_name(first: &str, second: &str) -> String {
     if second.is_empty() { first.into() } else { format!("{first} {second}") }
@@ -250,7 +252,7 @@ pub fn plu_count(conn: &Connection) -> Result<i64, StoreError> {
 }
 pub fn load_all(conn: &Connection) -> Result<Vec<PluEntry>, StoreError> {
     let mut stmt = conn.prepare(
-        "SELECT plu, COALESCE(namefirst, ''), COALESCE(namesecond, ''), price, card_price, COALESCE(\"group\", '') FROM plucodes ORDER BY namefirst",
+        "SELECT plu, COALESCE(namefirst, ''), COALESCE(namesecond, ''), price, card_price, COALESCE(\"group\", ''), COALESCE(itemcode, '') FROM plucodes ORDER BY namefirst",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok(PluEntry {
@@ -259,6 +261,7 @@ pub fn load_all(conn: &Connection) -> Result<Vec<PluEntry>, StoreError> {
             price: r.get(3)?,
             card_price: r.get(4)?,
             group: r.get(5)?,
+            itemcode: r.get(6)?,
         })
     })?;
     Ok(rows_collect_warn(rows))
