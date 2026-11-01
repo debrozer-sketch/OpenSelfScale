@@ -61,7 +61,7 @@ pub fn begin(db_path: &std::path::Path) {
 
 /// Фиксация результата. Не затирает дату последнего успеха при ошибке.
 /// Сбой записи логируется и не влияет на результат самой операции.
-pub fn finish(db_path: &std::path::Path, ok: bool, report: &str, err: Option<&str>) {
+pub fn finish(db_path: &std::path::Path, ok: bool, _report: &str, err: Option<&str>) {
     let Some(conn) = open_db(db_path) else { return };
     let prev = read(&conn);
     let attempt = match &prev {

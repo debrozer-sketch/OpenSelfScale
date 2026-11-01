@@ -683,6 +683,11 @@ fn ui_scenarios() {
 
         // Проверка принтера: подтверждение обязательно, отмена не печатает,
         // применение даёт результат (демон не запущен — понятная ошибка).
+        // Снимок журнала до проверки: тестовая печать не добавляет записей.
+        let logs_before = {
+            let conn = datastore::open(&app.dir.join("ui.db")).unwrap();
+            datastore::print_log_filtered(&conn, None, None, 100).unwrap().len()
+        };
         ui.invoke_maint_print_test();
         advance(TICK.as_millis() as u64).await;
         assert!(ui.get_maint_confirm_open(), "S18: подтверждение показано");
@@ -694,11 +699,25 @@ fn ui_scenarios() {
         ui.invoke_maint_print_apply();
         advance(TICK.as_millis() as u64).await;
         wait_until("S18: результат проверки принтера", || ui.get_imp_popup_open()).await;
+        let pt = ui.get_imp_popup_text().to_string();
         assert!(
-            ui.get_imp_popup_text().contains("не удалась"),
-            "S18: ошибка без демона сообщена оператору: {}", ui.get_imp_popup_text()
+            pt.contains("не выполнил задание"),
+            "S18: достоверный отказ сообщён оператору: {pt}"
         );
         ui.invoke_imp_popup_close();
+        advance(TICK.as_millis() as u64).await;
+        // BUSY снят: повторный запуск диалога возможен, статистика не тронута.
+        assert!(!ui.get_maint_busy(), "S18: BUSY снят после ошибки");
+        let conn = datastore::open(&app.dir.join("ui.db")).unwrap();
+        let sales = datastore::print_log_count_since(&conn, 0).unwrap();
+        let logs_after = datastore::print_log_filtered(&conn, None, None, 100).unwrap().len();
+        drop(conn);
+        assert_eq!(sales, 0, "S18: проверка принтера не попала в продажи");
+        assert_eq!(logs_after, logs_before, "S18: проверка принтера не создала print_log");
+        ui.invoke_maint_print_test();
+        advance(TICK.as_millis() as u64).await;
+        assert!(ui.get_maint_confirm_open(), "S18: после ошибки запуск снова возможен");
+        ui.invoke_maint_confirm_close();
         advance(TICK.as_millis() as u64).await;
 
         // S19. Обслуживание: статус синхронизации во всех состояниях.

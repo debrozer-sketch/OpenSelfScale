@@ -532,7 +532,7 @@ pub enum PrinterRequest {
         cancel: Arc<std::sync::atomic::AtomicBool>,
     },
     Feed { ack: mpsc::Sender<Result<(), String>> },
-    Test { bytes: Vec<u8>, ack: mpsc::Sender<Result<(), String>> },
+    Test { bytes: Vec<u8>, ack: mpsc::Sender<Result<(), PrintFail>> },
     Diagnostics { ack: mpsc::Sender<PrinterDiagnostics> },
     Reset { ack: mpsc::Sender<Result<(), String>> },
     Calibrate { ack: mpsc::Sender<Result<u32, String>> },
@@ -670,6 +670,11 @@ impl Fail {
 pub struct PrintFail {
     pub text: String,
     pub unknown: bool,
+}
+impl std::fmt::Display for PrintFail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.text)
+    }
 }
 #[derive(Default)]
 struct Monitor {
@@ -1032,29 +1037,27 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 finish(ack, res.map_err(Fail::text), "подача");
             }
             Ok(PrinterRequest::Test { bytes, ack }) => {
+                // Тот же путь, что у товарной печати: print_job ждёт
+                // подтверждения датчика лотка. Тестовая этикетка выходит
+                // так же, как товарная — PT-561 подтверждает её выдачу.
+                let wait = Duration::from_secs(cfg.printer.present_wait_secs.max(1) as u64)
+                    .min(PRESENT_WAIT_MAX);
                 let res = with_port(cfg, &mut prn, |p| {
-                    let port = p.port_mut();
-                    ensure_ready(port)?;
-                    drain_port_rx(port);
-                    let paced = bytes.len() > 4096;
-                    for chunk in bytes.chunks(2048) {
-                        port.write_all(chunk).map_err(Fail::io)?;
-                        port.flush().map_err(Fail::io)?;
-                        if paced {
-                            std::thread::sleep(Duration::from_millis(300));
-                        }
-                    }
-                    log::info!("принтер: тестовая этикетка напечатана");
-                    std::thread::sleep(Duration::from_millis(800));
-                    let s = read_l4(port, 2);
-                    log::info!("принтер: после теста L4 = {}", fmt_l4(s));
-                    mon.feed(s);
-                    Ok(())
+                    print_job(p.port_mut(), &bytes, &mut mon, wait)
                 });
                 if res.is_err() {
                     mon.note_failure();
                 }
-                finish(ack, res.map_err(Fail::text), "тестовая печать");
+                // В журнал печатей тестовая печать не пишется: статистика
+                // продаж и товарные записи от проверки не меняются.
+                finish_print(
+                    ack,
+                    res.map_err(|e| {
+                        let unknown = e.is_uncertain();
+                        PrintFail { text: e.text(), unknown }
+                    }),
+                    "тестовая печать",
+                );
             }
             Ok(PrinterRequest::Diagnostics { ack }) => {
                 let mut d = PrinterDiagnostics::default();
@@ -1525,13 +1528,12 @@ pub fn fmt_diagnostics(
         layout_name.unwrap_or("не загружен"),
     )
 }
-pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
+pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintFail> {
     if !cfg.printer.enabled {
-        return Err(PrintError::PrinterDisabled);
+        return Err(PrintFail { text: "печать отключена в настройках".into(), unknown: false });
     }
     let bytes = crate::calib::test_label_bytes();
-    request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
-    Ok(())
+    request_print(|ack| PrinterRequest::Test { bytes, ack })
 }
 
 /// CLI-печать тестовой этикетки при остановленном киоске: демон недоступен,
@@ -1628,7 +1630,8 @@ pub fn print_ruler_probe(cfg: &crate::config::Config) -> Result<(), PrintError> 
         shelflife: String::new(),
     };
     let bytes = grid_probe_bytes(&spec, &item);
-    request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
+    request_print(|ack| PrinterRequest::Test { bytes, ack })
+        .map_err(|e| std::io::Error::other(e.text.clone()))?;
     Ok(())
 }
 #[cfg(test)]

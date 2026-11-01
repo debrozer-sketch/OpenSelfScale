@@ -1566,18 +1566,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     print::print_test_label(&cfg)
                 }));
                 PRN_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
-                // Результат Test — «задание отправлено»: подтверждение
-                // физической печати оператор проверяет по этикетке.
+                // Три исхода проверки: датчик подтвердил выдачу, достоверный
+                // отказ до отправки, неопределённый результат (этикетка могла
+                // выйти). Автоповтора при неопределённом результате нет.
                 let msg = match r {
-                    Ok(Ok(())) => Ok("Задание отправлено принтеру.\nПроверьте печать этикетки.".to_string()),
-                    Ok(Err(e)) => {
-                        log::warn!("обслуживание: проверка принтера: {e}");
-                        Err(format!("Проверка не удалась:\n{e}"))
-                    }
-                    Err(_) => {
-                        log::error!("обслуживание: проверка принтера: поток прерван");
-                        Err("Проверка не удалась. Попробуйте ещё раз.".to_string())
-                    }
+                    Ok(ok) => test_print_message(&ok),
+                    Err(_) => Err("Проверка не удалась. Попробуйте ещё раз.".to_string()),
                 };
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_handle.upgrade() {
@@ -2483,6 +2477,24 @@ fn maint_rows(
     rows
 }
 
+/// Сообщение проверки принтера для оператора: три исхода — подтверждённая
+/// выдача, достоверный отказ, неопределённый результат. Подробности в логе.
+fn test_print_message(r: &Result<(), print::PrintFail>) -> Result<String, String> {
+    match r {
+        Ok(()) => Ok("Тестовая этикетка получена.".to_string()),
+        Err(e) => {
+            if e.unknown {
+                Err("Результат не удалось проверить.\n\
+                     Этикетка могла выйти. Проверьте принтер\n\
+                     перед повтором."
+                    .to_string())
+            } else {
+                Err(format!("Принтер не выполнил задание:\n{e}"))
+            }
+        }
+    }
+}
+
 pub fn spawn_maint_refresh(
     cfg: &crate::config::Config,
     app_state: &std::sync::Arc<crate::weight::WeightSource>,
@@ -3308,6 +3320,29 @@ fn spawn_settime_then_advance(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_print_message_distinguishes_three_outcomes() {
+        let ok = test_print_message(&Ok(())).unwrap();
+        assert!(ok.contains("получена"), "{ok}");
+        let fail = |text: &str, unknown: bool| {
+            test_print_message(&Err(print::PrintFail {
+                text: text.into(),
+                unknown,
+            }))
+            .unwrap_err()
+        };
+        let refused = fail("принтер не запущен", false);
+        assert!(refused.contains("не выполнил задание"), "{refused}");
+        assert!(refused.contains("принтер не запущен"), "{refused}");
+        let uncertain = fail("выдача этикетки не подтверждена датчиком лотка", true);
+        assert!(uncertain.contains("не удалось проверить"), "{uncertain}");
+        assert!(uncertain.contains("могла выйти"), "{uncertain}");
+        assert!(
+            !uncertain.contains("повтор") || !uncertain.to_lowercase().contains("повторю"),
+            "без обещания автоповтора: {uncertain}"
+        );
+    }
 
     #[test]
     fn cmd_timeout_returns_status_of_finished_process() {
