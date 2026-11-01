@@ -880,7 +880,11 @@ fn print_job(
                 fault_hits += 1;
                 if fault_hits >= FAULT_CONFIRM {
                     log::warn!("принтер: авария во время печати, трасса L4: {trace}");
-                    return Err(Fail::Printer(format!(
+                    // Байты задания уже отправлены: авария (лента, крышка)
+                    // могла случиться и после того, как этикетка вышла
+                    // частично или полностью. Отсутствие этикетки в лотке —
+                    // не доказательство того, что печати не было.
+                    return Err(Fail::Uncertain(format!(
                         "авария принтера во время печати (L4 = {b:#04X})"
                     )));
                 }
@@ -907,6 +911,16 @@ fn print_job(
         Err(Fail::Uncertain(
             "выдача этикетки не подтверждена датчиком лотка".into(),
         ))
+    }
+}
+/// Итог задания для журнала: Some(ok) — маркировать (0/1), None — оставить
+/// ok=NULL (результат не подтверждён). Достоверно false — только отказ ДО
+/// начала отправки (порт, статус, отмена, устаревание): там этикетки не было.
+fn outcome_mark(res: &Result<(), Fail>) -> Option<bool> {
+    match res {
+        Ok(()) => Some(true),
+        Err(Fail::Uncertain(_)) => None,
+        Err(Fail::Io(_) | Fail::Printer(_)) => Some(false),
     }
 }
 fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>) {
@@ -953,8 +967,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 // ok=NULL в журнале означает «результат неизвестен»: только
                 // Uncertain остаётся без маркировки. Достоверная ошибка — ok=0,
                 // успех — ok=1. Задним числом неизвестную запись не правим.
-                let uncertain = res.as_ref().is_err_and(Fail::is_uncertain);
-                let print_ok = res.is_ok();
+                let mark = outcome_mark(&res);
                 finish_print(
                     ack,
                     res.map_err(|e| {
@@ -966,10 +979,9 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 if log_rowid.is_some() || meta.is_some() {
                     if let Ok(conn) = datastore::open(&cfg.db_path) {
                         if let Some(rowid) = log_rowid {
-                            if uncertain {
-                                log::warn!("печать: результат не подтверждён, запись #{rowid} остаётся в журнале как неизвестная");
-                            } else {
-                                datastore::print_log_mark(&conn, rowid, print_ok);
+                            match mark {
+                                Some(ok) => datastore::print_log_mark(&conn, rowid, ok),
+                                None => log::warn!("печать: результат не подтверждён, запись #{rowid} остаётся в журнале как неизвестная"),
                             }
                         } else if let Some(m) = meta {
                             // Легаси-путь без журнала попытки: пишем как раньше.
@@ -985,7 +997,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                                     name: Some(m.name),
                                     weight_g: Some(m.weight_g as i64),
                                     sum_kop: Some(m.sum_kop),
-                                    ok: if uncertain { None } else { Some(print_ok) },
+                                    ok: mark,
                                     itemcode: None,
                                     namesecond: None,
                                     price: None,
@@ -1984,6 +1996,45 @@ mod tests {
         // Фильтр «проблемные» покрывает и ошибки, и неизвестные.
         let bad = datastore::print_log_filtered(&conn, None, Some(false), 10).unwrap();
         assert_eq!(bad.len(), 2, "ok=0 и ok=NULL попадают в проблемные");
+    }
+
+    // Границы достоверности: журнал маркируется только тем, что известно
+    // наверняка. Отказы после начала отправки — всегда NULL.
+    #[test]
+    fn outcome_mark_success_and_pre_send_failures_are_verified() {
+        assert_eq!(outcome_mark(&Ok(())), Some(true), "успех: ok=1");
+        assert_eq!(
+            outcome_mark(&Err(Fail::Io("порт не открылся".into()))),
+            Some(false),
+            "отказ до отправки: ok=0"
+        );
+        assert_eq!(
+            outcome_mark(&Err(Fail::Printer("статус до отправки: авария".into()))),
+            Some(false),
+            "отказ до отправки (ensure_ready): ok=0"
+        );
+    }
+    #[test]
+    fn outcome_mark_post_send_failures_are_unknown() {
+        assert_eq!(
+            outcome_mark(&Err(Fail::Uncertain("ошибка записи в порт".into()))),
+            None,
+            "ошибка записи: ok=NULL"
+        );
+        assert_eq!(
+            outcome_mark(&Err(Fail::Uncertain(
+                "авария принтера во время печати (L4 = 0x12)".into()
+            ))),
+            None,
+            "fault после начала отправки: ok=NULL (частичная печать возможна)"
+        );
+        assert_eq!(
+            outcome_mark(&Err(Fail::Uncertain(
+                "выдача этикетки не подтверждена датчиком лотка".into()
+            ))),
+            None,
+            "нет подтверждения выдачи: ok=NULL"
+        );
     }
 
     #[test]
