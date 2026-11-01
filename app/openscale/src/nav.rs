@@ -28,6 +28,7 @@ pub const SCREENS: &[Screen] = &[
     Screen { stage: 21, slint: 20, title: "ЭТИКЕТКИ", parent: 6, back: true },
     Screen { stage: 22, slint: 23, title: "ЖУРНАЛ ДЕЙСТВИЙ", parent: 25, back: true },
     Screen { stage: 23, slint: 24, title: "СОСТОЯНИЕ", parent: 2, back: true },
+    Screen { stage: 24, slint: 27, title: "ОБСЛУЖИВАНИЕ", parent: 2, back: true },
     Screen { stage: 25, slint: 26, title: "ДОСТУП И СЕРВИС", parent: 2, back: true },
     Screen { stage: 30, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
     Screen { stage: 31, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },

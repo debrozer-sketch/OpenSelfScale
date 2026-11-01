@@ -1123,6 +1123,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     refresh_action_log(&cfg, &ui_handle);
                     kiosk.borrow_mut().admin_stage = 22;
                 }
+                "maint" => {
+                    kiosk.borrow_mut().admin_stage = 24;
+                    spawn_maint_refresh(&cfg, &app_state, &ui_handle);
+                }
                 "status" => {
                     let status_from = kiosk.borrow().admin_stage;
                     kiosk.borrow_mut().status_from = status_from;
@@ -1447,6 +1451,146 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 }
                 other => log::warn!("меню: неизвестный пункт {other}"),
             }
+        }
+    });
+    // Обслуживание (экран 27).
+    ui.on_maint_refresh({
+        let cfg = cfg.clone();
+        let app_state = app_state.clone();
+        let ui_handle = ui_handle.clone();
+        move || spawn_maint_refresh(&cfg, &app_state, &ui_handle)
+    });
+    ui.on_maint_backup({
+        let cfg = cfg.clone();
+        let app_state = app_state.clone();
+        let ui_handle = ui_handle.clone();
+        move || {
+            // Повторный запуск занятой операции игнорируется.
+            if MAINT_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                log::info!("обслуживание: операция уже выполняется");
+                return;
+            }
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_maint_busy(true);
+            }
+            let ui_handle = ui_handle.clone();
+            let app_state = app_state.clone();
+            let cfg = cfg.clone();
+            std::thread::spawn(move || {
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::backup::create_backup(&cfg, None)
+                }));
+                let res = match r {
+                    Ok(Ok(path)) => {
+                        log::info!("обслуживание: резервная копия: {}", path.display());
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        Ok(name)
+                    }
+                    Ok(Err(e)) => {
+                        log::warn!("обслуживание: резервная копия не удалась: {e}");
+                        Err("Не удалось создать резервную копию.\nПопробуйте ещё раз.")
+                    }
+                    Err(_) => {
+                        log::error!("обслуживание: резервная копия: поток прерван");
+                        Err("Не удалось создать резервную копию.\nПопробуйте ещё раз.")
+                    }
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle.upgrade() {
+                        let rows = maint_rows(&cfg, &app_state);
+                        ui.set_maint_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+                        ui.set_maint_busy(false);
+                        match res {
+                            Ok(name) => {
+                                show_cfg_popup(
+                                    &ui_handle,
+                                    true,
+                                    format!("Резервная копия создана:\n{name}"),
+                                );
+                            }
+                            Err(text) => {
+                                show_cfg_popup(&ui_handle, false, text.to_string());
+                            }
+                        }
+                    }
+                    MAINT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                });
+            });
+        }
+    });
+    ui.on_maint_print_test({
+        let ui_handle = ui_handle.clone();
+        move || {
+            // Подтверждение печатается оператором; диалог не открываем,
+            // пока уже идёт проверка принтера (PRN_BUSY — общий BUSY).
+            if PRN_BUSY.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_maint_confirm_open(true);
+            }
+        }
+    });
+    ui.on_maint_confirm_close({
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_maint_confirm_open(false);
+            }
+        }
+    });
+    ui.on_maint_print_apply({
+        let cfg = cfg.clone();
+        let app_state = app_state.clone();
+        let ui_handle = ui_handle.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_maint_confirm_open(false);
+            }
+            // Один и тот же BUSY, что и у тестовой печати в настройках.
+            if PRN_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                log::info!("обслуживание: проверка принтера уже выполняется");
+                return;
+            }
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_maint_busy(true);
+            }
+            let ui_handle = ui_handle.clone();
+            let app_state = app_state.clone();
+            let cfg = cfg.clone();
+            std::thread::spawn(move || {
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    print::print_test_label(&cfg)
+                }));
+                PRN_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                // Результат Test — «задание отправлено»: подтверждение
+                // физической печати оператор проверяет по этикетке.
+                let msg = match r {
+                    Ok(Ok(())) => Ok("Задание отправлено принтеру.\nПроверьте печать этикетки.".to_string()),
+                    Ok(Err(e)) => {
+                        log::warn!("обслуживание: проверка принтера: {e}");
+                        Err(format!("Проверка не удалась:\n{e}"))
+                    }
+                    Err(_) => {
+                        log::error!("обслуживание: проверка принтера: поток прерван");
+                        Err("Проверка не удалась. Попробуйте ещё раз.".to_string())
+                    }
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle.upgrade() {
+                        let rows = maint_rows(&cfg, &app_state);
+                        ui.set_maint_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+                        ui.set_maint_busy(false);
+                        match msg {
+                            Ok(text) => show_cfg_popup(&ui_handle, true, text),
+                            Err(text) => show_cfg_popup(&ui_handle, false, text),
+                        }
+                    }
+                });
+            });
         }
     });
     ui.on_net_mode({
@@ -2236,6 +2380,144 @@ fn show_reprint_popup(ui_handle: &slint::Weak<MainWindow>, confirm: bool, ok: bo
         ui.set_reprint_popup_open(true);
     }
 }
+// ===== Обслуживание (экран 27) =====
+
+/// BUSY сервисных операций обслуживания: обновление диагностики и
+/// создание резервной копии не выполняются одновременно.
+static MAINT_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn maint_row(label: &str, value_state: (String, i32)) -> crate::MaintRow {
+    crate::MaintRow { label: label.into(), value: value_state.0.into(), state: value_state.1 }
+}
+
+/// Статусы обслуживания. Каждая проверка независима: ошибка одной
+/// не должна скрывать остальные строки.
+fn maint_rows(
+    cfg: &crate::config::Config,
+    app_state: &std::sync::Arc<crate::weight::WeightSource>,
+) -> Vec<crate::MaintRow> {
+    let db = match datastore::open(&cfg.db_path) {
+        Ok(conn) => {
+            let n: i64 = conn
+                .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+                .unwrap_or(0);
+            match crate::backup::integrity_check(&cfg.db_path) {
+                Ok(_) => (format!("доступна · товаров {n}"), 0),
+                Err(e) => {
+                    log::warn!("обслуживание: проверка базы: {e}");
+                    ("ошибка проверки".to_string(), 2)
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!("обслуживание: база недоступна: {e}");
+            ("недоступна".to_string(), 2)
+        }
+    };
+    // «Успешная» копия в каталоге появляется только атомарным rename
+    // после проверки снимка — сам факт файла и есть признак успеха.
+    let backup = {
+        let dir = crate::backup::default_backup_dir(&cfg.db_path);
+        let mut best: Option<(std::time::SystemTime, i64)> = None;
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for p in rd.flatten() {
+                let n = p.file_name().to_string_lossy().to_string();
+                if n.starts_with("openscale-") && n.ends_with(".db") {
+                    if let Ok(m) = p.metadata().and_then(|m| m.modified()) {
+                        let secs = m
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0);
+                        if best.as_ref().map(|(t, _)| t < &m).unwrap_or(true) {
+                            best = Some((m, secs));
+                        }
+                    }
+                }
+            }
+        }
+        match best {
+            Some((_, secs)) => {
+                let (d, t) = crate::print::stamp_for(secs);
+                (format!("копия от {d} {t}"), 0)
+            }
+            None => ("резервных копий нет".to_string(), 1),
+        }
+    };
+    let snap = app_state.snapshot();
+    let scales = if snap.port_up {
+        (
+            format!("подключены · {}", if snap.stable { "вес готов" } else { "вес нестабилен" }),
+            if snap.stable { 0 } else { 1 },
+        )
+    } else {
+        ("отключены".to_string(), 2)
+    };
+    // «Готов» показываем только когда демон уже получал ответ принтера.
+    let ph = print::health();
+    let printer = if ph.fault {
+        ("ошибка".to_string(), 2)
+    } else if !ph.seen {
+        ("нет данных".to_string(), 0)
+    } else if ph.label_waiting {
+        ("занят: этикетка в лотке".to_string(), 1)
+    } else if ph.paper_end {
+        ("кончилась бумага".to_string(), 2)
+    } else {
+        ("готов".to_string(), 0)
+    };
+    vec![
+        maint_row("База данных", db),
+        maint_row("Резервная копия", backup),
+        maint_row("Весы", scales),
+        maint_row("Принтер", printer),
+        // Приложение не хранит состояние последней синхронизации —
+        // не показываем выдуманного.
+        maint_row("Синхронизация", ("нет данных".to_string(), 0)),
+    ]
+}
+
+fn spawn_maint_refresh(
+    cfg: &crate::config::Config,
+    app_state: &std::sync::Arc<crate::weight::WeightSource>,
+    ui_handle: &slint::Weak<MainWindow>,
+) {
+    if MAINT_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let cfg = cfg.clone();
+    let app_state = app_state.clone();
+    let ui_handle = ui_handle.clone();
+    let ui_busy = ui_handle.clone();
+    let ui_panic = ui_handle.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(ui) = ui_busy.upgrade() {
+            ui.set_maint_busy(true);
+        }
+    });
+    std::thread::spawn(move || {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let rows = maint_rows(&cfg, &app_state);
+            let ui_handle = ui_handle.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_handle.upgrade() {
+                    ui.set_maint_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+                    ui.set_maint_busy(false);
+                }
+                MAINT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+            });
+        }));
+        if r.is_err() {
+            log::error!("обслуживание: сборка статусов: поток прерван");
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_panic.upgrade() {
+                    ui.set_maint_busy(false);
+                }
+                MAINT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+            });
+        }
+    });
+}
+
 fn status_rows(
     cfg: &crate::config::Config,
     app_state: &std::sync::Arc<crate::weight::WeightSource>,

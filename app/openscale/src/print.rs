@@ -516,6 +516,9 @@ pub struct PrinterHealth {
     pub paper_near_end: bool,
     pub label_waiting: bool,
     pub power_cycle_hint: bool,
+    /// Демон хоть раз получил ответ принтера: без этого «готов» показать
+    /// нельзя — данных о принтере ещё нет.
+    pub seen: bool,
 }
 pub enum PrinterRequest {
     Print {
@@ -679,6 +682,7 @@ struct Monitor {
 }
 impl Monitor {
     fn feed(&mut self, sample: Option<u8>) {
+        self.health.seen = true;
         match sample {
             Some(b) => {
                 self.silent_streak = 0;
@@ -1138,11 +1142,11 @@ fn with_port<T>(
             .timeout(Duration::from_millis(1500))
             .open()
             .map_err(|e| {
-                set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
+                set_health(PrinterHealth { fault: true, seen: health().seen, ..PrinterHealth::default() });
                 Fail::Io(format!("{}: {e}", cfg.printer.port))
             })?;
         if port.write_all(&[escpos::ESC, 0x40]).and_then(|_| port.flush()).is_err() {
-            set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
+            set_health(PrinterHealth { fault: true, seen: health().seen, ..PrinterHealth::default() });
             return Err(Fail::Io(format!("{}: ESC @ после открытия не прошёл", cfg.printer.port)));
         }
         *prn = Some(escpos::EscPosPrinter::new(port));
@@ -1154,7 +1158,7 @@ fn with_port<T>(
     if matches!(&res, Err(Fail::Io(_))) {
         // Ошибка канала — порт недостоверен, печатать через него дальше нельзя.
         *prn = None;
-        set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
+        set_health(PrinterHealth { fault: true, seen: health().seen, ..PrinterHealth::default() });
     }
     res
 }

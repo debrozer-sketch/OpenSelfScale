@@ -619,6 +619,86 @@ fn ui_scenarios() {
             assert_eq!(k.phase, 2, "S12: покупка подтверждена после восстановления");
         }
 
+        // S18. Обслуживание: статусы из реальных данных, BUSY, копия,
+        // подтверждение тестовой печати.
+        reset_to_root(&app).await;
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.role = 1;
+            k.admin_open = true;
+            k.admin_stage = 2;
+            k.admin_idle = Some(Instant::now());
+        }
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_menu_tap("maint".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 27, "S18: экран обслуживания открыт");
+        app.set_weight(1.000, true, true);
+        wait_until("S18: статусы собраны", || ui.get_maint_rows().row_count() == 5).await;
+        let row = |i: usize| {
+            ui.get_maint_rows()
+                .row_data(i)
+                .unwrap_or_else(|| panic!("S18: строка {i} отсутствует"))
+        };
+        assert!(row(0).value.contains("доступна"), "S18: база доступна: {}", row(0).value);
+        assert_eq!(row(1).state, 1, "S18: копий нет — внимание");
+        assert!(row(1).value.contains("нет"), "S18: сообщение об отсутствии копий");
+        assert!(row(2).value.contains("подключены"), "S18: весы подключены");
+        assert_eq!(row(4).state, 0, "S18: синхронизация — нейтральная строка");
+
+        // Весы отключились: строка меняется, остальные статусы на месте.
+        app.set_weight(1.000, true, false);
+        ui.invoke_maint_refresh();
+        wait_until("S18: весы отражены как отключённые", || {
+            row(2).value.contains("отключены") && row(2).state == 2
+        })
+        .await;
+        wait_until("S18: обновление завершено", || !ui.get_maint_busy()).await;
+        assert_eq!(ui.get_maint_rows().row_count(), 5, "S18: остальные статусы не скрыты");
+        assert!(row(0).value.contains("доступна"), "S18: статус базы не пострадал");
+        app.set_weight(1.000, true, true);
+
+        // Резервная копия: запуск, BUSY-повтор, результат, обновление даты.
+        ui.invoke_maint_backup();
+        ui.invoke_maint_backup(); // занято — второй запуск игнорируется
+        wait_until("S18: копия создана", || ui.get_imp_popup_open()).await;
+        assert!(
+            ui.get_imp_popup_text().contains("создана"),
+            "S18: сообщение о копии: {}", ui.get_imp_popup_text()
+        );
+        ui.invoke_imp_popup_close();
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_maint_refresh();
+        wait_until("S18: дата копии появилась", || {
+            row(1).value.contains("копия от") && row(1).state == 0
+        })
+        .await;
+        wait_until("S18: обновление даты завершено", || !ui.get_maint_busy()).await;
+        let bdir = app.dir.join("backups");
+        let copies = std::fs::read_dir(&bdir).unwrap().count();
+        assert_eq!(copies, 1, "S18: BUSY-повтор не создал вторую копию");
+
+        // Проверка принтера: подтверждение обязательно, отмена не печатает,
+        // применение даёт результат (демон не запущен — понятная ошибка).
+        ui.invoke_maint_print_test();
+        advance(TICK.as_millis() as u64).await;
+        assert!(ui.get_maint_confirm_open(), "S18: подтверждение показано");
+        ui.invoke_maint_confirm_close();
+        advance(TICK.as_millis() as u64).await;
+        assert!(!ui.get_maint_confirm_open(), "S18: отмена закрыла диалог");
+        ui.invoke_maint_print_test();
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_maint_print_apply();
+        advance(TICK.as_millis() as u64).await;
+        wait_until("S18: результат проверки принтера", || ui.get_imp_popup_open()).await;
+        assert!(
+            ui.get_imp_popup_text().contains("не удалась"),
+            "S18: ошибка без демона сообщена оператору: {}", ui.get_imp_popup_text()
+        );
+        ui.invoke_imp_popup_close();
+        advance(TICK.as_millis() as u64).await;
+
+
         // BENCH. Бенчмарк каталога на синтетике 2000 товаров (OPSCALE_BENCH=1):
         // замер реального отклика UI-потока на слабом железе стенда.
         if std::env::var("OPSCALE_BENCH").map(|v| v == "1").unwrap_or(false) {
