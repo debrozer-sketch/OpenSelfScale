@@ -48,6 +48,14 @@ pub enum PrintError {
     PrinterDisabled,
     #[error("{0}")]
     Printer(String),
+    /// Результат не подтверждён: этикетка могла выйти из принтера.
+    #[error("{0}")]
+    Uncertain(String),
+}
+impl PrintError {
+    pub fn is_uncertain(&self) -> bool {
+        matches!(self, PrintError::Uncertain(_))
+    }
 }
 use thiserror::Error;
 pub fn build_label(
@@ -512,7 +520,7 @@ pub struct PrinterHealth {
 pub enum PrinterRequest {
     Print {
         bytes: Vec<u8>,
-        ack: mpsc::Sender<Result<(), String>>,
+        ack: mpsc::Sender<Result<(), PrintFail>>,
         queued_at: std::time::Instant,
         meta: Option<PrintMeta>,
         /// rowid записи попытки в журнале печатей: после задания
@@ -569,12 +577,25 @@ fn set_health(h: PrinterHealth) {
         .unwrap_or_else(|e| e.into_inner()) = h;
 }
 fn request(build: impl FnOnce(mpsc::Sender<Result<(), String>>) -> PrinterRequest) -> Result<(), String> {
-    let tx = PRINTER_TX.get().ok_or_else(|| "демон принтера не запущен".to_string())?;
+    let tx = PRINTER_TX.get().ok_or_else(|| "принтер не запущен".to_string())?;
     let (ack_tx, ack_rx) = mpsc::channel();
-    tx.send(build(ack_tx)).map_err(|_| "демон принтера остановлен".to_string())?;
+    tx.send(build(ack_tx)).map_err(|_| "поток принтера не запущен".to_string())?;
     ack_rx
         .recv_timeout(Duration::from_secs(90))
-        .unwrap_or_else(|_| Err("демон принтера не ответил".into()))
+        .unwrap_or_else(|_| Err("принтер не отвечает".into()))
+}
+fn request_print(build: impl FnOnce(mpsc::Sender<Result<(), PrintFail>>) -> PrinterRequest) -> Result<(), PrintFail> {
+    let tx = PRINTER_TX
+        .get()
+        .ok_or_else(|| PrintFail { text: "принтер не запущен".into(), unknown: false })?;
+    let (ack_tx, ack_rx) = mpsc::channel();
+    tx.send(build(ack_tx))
+        .map_err(|_| PrintFail { text: "поток принтера не запущен".into(), unknown: false })?;
+    ack_rx.recv_timeout(Duration::from_secs(90)).unwrap_or_else(|_| {
+        // Нет ответа демона: задание вставало в очередь — достоверно
+        // сказать, отправлялось ли оно в порт, нельзя.
+        Err(PrintFail { text: "принтер не отвечает".into(), unknown: true })
+    })
 }
 pub fn spawn_daemon(cfg: &crate::config::Config) {
     let (tx, rx) = mpsc::channel();
@@ -622,6 +643,11 @@ const SCAN_STEP_UNITS: u8 = 7;
 enum Fail {
     Io(String),
     Printer(String),
+    /// Задание начало выполняться, но подтвердить или опровергнуть выдачу
+    /// этикетки невозможно (ошибка записи в порт, нет ответа датчика лотка).
+    /// Физический принтер не даёт транзакционной гарантии: считать такой
+    /// отказ достоверной ошибкой нельзя.
+    Uncertain(String),
 }
 impl Fail {
     fn io(e: impl std::fmt::Display) -> Self {
@@ -629,9 +655,18 @@ impl Fail {
     }
     fn text(self) -> String {
         match self {
-            Fail::Io(s) | Fail::Printer(s) => s,
+            Fail::Io(s) | Fail::Printer(s) | Fail::Uncertain(s) => s,
         }
     }
+    fn is_uncertain(&self) -> bool {
+        matches!(self, Fail::Uncertain(_))
+    }
+}
+/// Итог печати для киоска: ошибка с признаком «результат не подтверждён».
+#[derive(Debug, Clone)]
+pub struct PrintFail {
+    pub text: String,
+    pub unknown: bool,
 }
 #[derive(Default)]
 struct Monitor {
@@ -825,8 +860,12 @@ fn print_job(
 ) -> Result<(), Fail> {
     ensure_ready(port)?;
     drain_port_rx(port);
-    port.write_all(bytes).map_err(Fail::io)?;
-    port.flush().map_err(Fail::io)?;
+    // С этой точки байты задания могут уйти в принтер: любая ошибка записи
+    // не позволяет достоверно сказать, напечаталась ли этикетка.
+    port.write_all(bytes)
+        .map_err(|e| Fail::Uncertain(format!("запись в порт не удалась: {e}")))?;
+    port.flush()
+        .map_err(|e| Fail::Uncertain(format!("завершение передачи не удалось: {e}")))?;
     let t0 = std::time::Instant::now();
     let mut trace = String::new();
     let mut fault_hits = 0u8;
@@ -862,8 +901,11 @@ fn print_job(
     if presented {
         Ok(())
     } else {
-        Err(Fail::Printer(
-            "этикетка не выдана: проверьте ленту и крышку принтера".into(),
+        // Датчик лотка не подтвердил выдачу за отведённое время; явного
+        // отказа принтер не сообщил. Этикетка могла выйти незаметно —
+        // результат неизвестен, а не достоверно отрицателен.
+        Err(Fail::Uncertain(
+            "выдача этикетки не подтверждена датчиком лотка".into(),
         ))
     }
 }
@@ -889,7 +931,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
         match rx.recv_timeout(mon.next_probe()) {
             Ok(PrinterRequest::Print { bytes, ack, queued_at, meta, log_rowid, cancel }) => {
                 if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                    finish(ack, Err("задание печати отменено".into()), "отмена");
+                    finish_print(ack, Err(PrintFail { text: "задание печати отменено".into(), unknown: false }), "отмена");
                     continue;
                 }
                 if queued_at.elapsed() > STALE_JOB {
@@ -897,7 +939,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                         "принтер: задание устарело ({} с в очереди) — пропущено",
                         queued_at.elapsed().as_secs()
                     );
-                    finish(ack, Err("задание печати устарело".into()), "печать");
+                    finish_print(ack, Err(PrintFail { text: "задание печати устарело".into(), unknown: false }), "печать");
                     continue;
                 }
                 let wait = Duration::from_secs(cfg.printer.present_wait_secs.max(1) as u64)
@@ -908,12 +950,27 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 if res.is_err() {
                     mon.note_failure();
                 }
+                // ok=NULL в журнале означает «результат неизвестен»: только
+                // Uncertain остаётся без маркировки. Достоверная ошибка — ok=0,
+                // успех — ok=1. Задним числом неизвестную запись не правим.
+                let uncertain = res.as_ref().is_err_and(Fail::is_uncertain);
                 let print_ok = res.is_ok();
-                finish(ack, res, "печать");
+                finish_print(
+                    ack,
+                    res.map_err(|e| {
+                        let unknown = e.is_uncertain();
+                        PrintFail { text: e.text(), unknown }
+                    }),
+                    "печать",
+                );
                 if log_rowid.is_some() || meta.is_some() {
                     if let Ok(conn) = datastore::open(&cfg.db_path) {
                         if let Some(rowid) = log_rowid {
-                            datastore::print_log_mark(&conn, rowid, print_ok);
+                            if uncertain {
+                                log::warn!("печать: результат не подтверждён, запись #{rowid} остаётся в журнале как неизвестная");
+                            } else {
+                                datastore::print_log_mark(&conn, rowid, print_ok);
+                            }
                         } else if let Some(m) = meta {
                             // Легаси-путь без журнала попытки: пишем как раньше.
                             let _ = datastore::print_log_add(
@@ -928,7 +985,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                                     name: Some(m.name),
                                     weight_g: Some(m.weight_g as i64),
                                     sum_kop: Some(m.sum_kop),
-                                    ok: Some(print_ok),
+                                    ok: if uncertain { None } else { Some(print_ok) },
                                     itemcode: None,
                                     namesecond: None,
                                     price: None,
@@ -956,7 +1013,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 if res.is_err() {
                     mon.note_failure();
                 }
-                finish(ack, res, "подача");
+                finish(ack, res.map_err(Fail::text), "подача");
             }
             Ok(PrinterRequest::Test { bytes, ack }) => {
                 let res = with_port(cfg, &mut prn, |p| {
@@ -981,7 +1038,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 if res.is_err() {
                     mon.note_failure();
                 }
-                finish(ack, res, "тестовая печать");
+                finish(ack, res.map_err(Fail::text), "тестовая печать");
             }
             Ok(PrinterRequest::Diagnostics { ack }) => {
                 let mut d = PrinterDiagnostics::default();
@@ -1032,7 +1089,7 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 if res.is_err() {
                     mon.note_failure();
                 }
-                finish(ack, res, "сброс аварии");
+                finish(ack, res.map_err(Fail::text), "сброс аварии");
             }
             Ok(PrinterRequest::Calibrate { ack }) => {
                 let res = with_port(cfg, &mut prn, |p| {
@@ -1047,9 +1104,8 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                         let _ = ack.send(Ok(mm));
                     }
                     Err(e) => {
-                        log::warn!("принтер: калибровка: {e}");
                         mon.note_failure();
-                        let _ = ack.send(Err(e.to_string()));
+                        let _ = ack.send(Err(e.text()));
                     }
                 }
             }
@@ -1064,18 +1120,18 @@ fn with_port<T>(
     cfg: &crate::config::Config,
     prn: &mut Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>>,
     f: impl FnOnce(&mut escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>) -> Result<T, Fail>,
-) -> Result<T, String> {
+) -> Result<T, Fail> {
     if prn.is_none() {
         let mut port = serialport::new(&cfg.printer.port, cfg.printer.baud)
             .timeout(Duration::from_millis(1500))
             .open()
             .map_err(|e| {
                 set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
-                format!("{}: {e}", cfg.printer.port)
+                Fail::Io(format!("{}: {e}", cfg.printer.port))
             })?;
         if port.write_all(&[escpos::ESC, 0x40]).and_then(|_| port.flush()).is_err() {
             set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
-            return Err(format!("{}: ESC @ после открытия не прошёл", cfg.printer.port));
+            return Err(Fail::Io(format!("{}: ESC @ после открытия не прошёл", cfg.printer.port)));
         }
         *prn = Some(escpos::EscPosPrinter::new(port));
     }
@@ -1083,20 +1139,28 @@ fn with_port<T>(
         Some(p) => f(p),
         None => Err(Fail::Io("порт принтера не открыт".into())),
     };
-    match res {
-        Ok(v) => Ok(v),
-        Err(Fail::Io(e)) => {
-            *prn = None;
-            set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
-            Err(e)
-        }
-        Err(f @ Fail::Printer(_)) => Err(f.text()),
+    if matches!(&res, Err(Fail::Io(_))) {
+        // Ошибка канала — порт недостоверен, печатать через него дальше нельзя.
+        *prn = None;
+        set_health(PrinterHealth { fault: true, ..PrinterHealth::default() });
     }
+    res
 }
 fn finish(ack: mpsc::Sender<Result<(), String>>, res: Result<(), String>, what: &str) {
     let out = res.map_err(|e| {
         log::warn!("принтер: {what}: {e}");
         e
+    });
+    let _ = ack.send(out);
+}
+fn finish_print(ack: mpsc::Sender<Result<(), PrintFail>>, res: Result<(), PrintFail>, what: &str) {
+    let out = res.map_err(|f| {
+        if f.unknown {
+            log::warn!("принтер: {what}: результат не подтверждён: {}", f.text);
+        } else {
+            log::warn!("принтер: {what}: {}", f.text);
+        }
+        f
     });
     let _ = ack.send(out);
 }
@@ -1240,7 +1304,7 @@ fn probe(
         Ok(())
     });
     if let Err(e) = res {
-        log::warn!("опрос статуса принтера: {e}");
+        log::warn!("опрос статуса принтера: {}", e.text());
         mon.note_failure();
     }
 }
@@ -1653,7 +1717,7 @@ pub fn print_reprint_with_cancel(
             return Err(PrintError::Store(e));
         }
     };
-    request(|ack| {
+    request_print(|ack| {
         PrinterRequest::Print {
             bytes,
             ack,
@@ -1668,7 +1732,13 @@ pub fn print_reprint_with_cancel(
             cancel,
         }
     })
-    .map_err(std::io::Error::other)?;
+    .map_err(|f| {
+        if f.unknown {
+            PrintError::Uncertain(f.text)
+        } else {
+            PrintError::Printer(f.text)
+        }
+    })?;
     Ok(log_rowid)
 }
 pub fn print_for_item_with_cancel(
@@ -1731,7 +1801,7 @@ pub fn print_for_item_with_cancel(
             return Err(PrintError::Store(e));
         }
     };
-    request(|ack| {
+    request_print(|ack| {
         PrinterRequest::Print {
             bytes,
             ack,
@@ -1746,7 +1816,13 @@ pub fn print_for_item_with_cancel(
             cancel,
         }
     })
-    .map_err(std::io::Error::other)?;
+    .map_err(|f| {
+        if f.unknown {
+            PrintError::Uncertain(f.text)
+        } else {
+            PrintError::Printer(f.text)
+        }
+    })?;
     Ok(())
 }
 #[cfg(test)]
@@ -1852,6 +1928,64 @@ mod tests {
         row.id = 0;
         row
     }
+    // Неизвестный исход: прерванная печать остаётся ok=NULL после
+    // «перезапуска» (повторного открытия БД), задним числом не правится.
+    #[test]
+    fn interrupted_print_stays_unknown_after_reopen() {
+        let path = tmp_db();
+        {
+            let conn = datastore::open(&path).unwrap();
+            let mut row = snapshot_row();
+            row.ok = None;
+            datastore::print_log_add(&conn, &row).unwrap();
+        }
+        let conn = datastore::open(&path).unwrap();
+        let rows = datastore::print_log_filtered(&conn, None, None, 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].ok.is_none(), "запись остаётся неизвестной");
+    }
+
+    // Учёт продаж: только достоверные продажи (ok=1 без повтора).
+    // Неизвестная запись и повтор продаже не добавляют.
+    #[test]
+    fn sales_count_ignores_unknown_and_reprints() {
+        let path = tmp_db();
+        let conn = datastore::open(&path).unwrap();
+        let mut row = snapshot_row();
+        let sale = datastore::print_log_add(&conn, &row).unwrap();
+        row.ok = None;
+        datastore::print_log_add(&conn, &row).unwrap();
+        row.ok = Some(true);
+        row.origin_id = Some(sale);
+        datastore::print_log_add(&conn, &row).unwrap();
+        let since = 0;
+        assert_eq!(
+            datastore::print_log_count_since(&conn, since).unwrap(),
+            1,
+            "продажа одна: неизвестная и повтор не считаются"
+        );
+    }
+
+    // Достоверная ошибка маркируется ok=0; неизвестная — остаётся NULL
+    // (daemon не вызывает mark для Uncertain — семантика mark: 0/1).
+    #[test]
+    fn mark_sets_verified_outcomes_only() {
+        let path = tmp_db();
+        let conn = datastore::open(&path).unwrap();
+        let mut row = snapshot_row();
+        row.ok = None;
+        let a = datastore::print_log_add(&conn, &row).unwrap();
+        let b = datastore::print_log_add(&conn, &row).unwrap();
+        datastore::print_log_mark(&conn, a, false);
+        let rows = datastore::print_log_filtered(&conn, None, None, 10).unwrap();
+        let by_id = |id: i64| rows.iter().find(|r| r.id == id).unwrap();
+        assert_eq!(by_id(a).ok, Some(false), "достоверная ошибка: ok=0");
+        assert!(by_id(b).ok.is_none(), "без mark: ok остаётся NULL");
+        // Фильтр «проблемные» покрывает и ошибки, и неизвестные.
+        let bad = datastore::print_log_filtered(&conn, None, Some(false), 10).unwrap();
+        assert_eq!(bad.len(), 2, "ok=0 и ok=NULL попадают в проблемные");
+    }
+
     #[test]
     fn reprint_disabled_printer_leaves_log_untouched() {
         let mut cfg = crate::config::Config::default();
@@ -2125,3 +2259,5 @@ mod tests {
         assert!(pick_layout(&conn, Some(10)).is_none());
     }
 }
+
+

@@ -13,7 +13,7 @@ pub fn start(
     refresh_data: Rc<dyn Fn()>,
     sync_rx: Option<Receiver<String>>,
 ) -> slint::Timer {
-    let (print_tx, print_rx) = std::sync::mpsc::channel::<(u64, Result<u32, String>)>();
+    let (print_tx, print_rx) = std::sync::mpsc::channel::<(u64, Result<u32, print::PrintFail>)>();
     let lock_db: RefCell<Option<rusqlite::Connection>> = RefCell::new(None);
     type TickCache = (String, i32, bool, bool, i32, bool, bool);
     let tick_cache: Rc<RefCell<TickCache>> =
@@ -159,9 +159,12 @@ pub fn start(
                                 go_root();
                             }
                         }
-                        Err(e) => {
-                            log::error!("печать не удалась: {e}");
-                            k.phase = 4;
+                        Err(f) => {
+                            log::error!("печать: {}", f.text);
+                            // Неизвестный результат — отдельное состояние
+                            // (фаза 5): этикетка могла выйти, оператора
+                            // предупреждаем о возможном дубликате.
+                            k.phase = if f.unknown { 5 } else { 4 };
                             k.error_at = Some(Instant::now());
                         }
                     }
@@ -187,31 +190,41 @@ pub fn start(
                     log::info!("печать: PLU {plu}, {weight_g} г (операция #{op})");
                     std::thread::spawn(move || {
                         let res = match item {
-                            Some(item) => print::print_for_item_with_cancel(&cfg, &item, weight_g, cancel)
-                                .map_err(|e| format!("{e}")),
-                            None => Err("позиция не выбрана".into()),
-                        };
-                        let _ = tx.send((op, res.map(|_| weight_g)));
+                            Some(item) => {
+                                print::print_for_item_with_cancel(&cfg, &item, weight_g, cancel)
+                            }
+                            None => Err(print::PrintError::Printer("позиция не выбрана".into())),
+                        }
+                        .map(|_| weight_g)
+                        .map_err(|e| print::PrintFail {
+                            text: e.to_string(),
+                            unknown: e.is_uncertain(),
+                        });
+                        let _ = tx.send((op, res));
                     });
                 }
                 const PRINT_TIMEOUT: Duration = Duration::from_secs(30);
                 if k.phase == 2 && k.print_weight_g.is_some()
                     && k.print_at.is_some_and(|t| t.elapsed() > PRINT_TIMEOUT)
                 {
-                    log::warn!("печать не завершилась за {PRINT_TIMEOUT:?} — отмена и ошибка");
+                    log::warn!("печать не завершилась за {PRINT_TIMEOUT:?} — отмена, результат неизвестен");
                     if let Some(c) = k.cancel_print.take() {
                         c.store(true, std::sync::atomic::Ordering::Relaxed);
                     }
                     k.print_at = None;
                     k.print_op += 1;
-                    k.phase = 4;
+                    // Отменённое задание уже могло печататься: это
+                    // неизвестный результат, а не достоверная ошибка.
+                    k.phase = 5;
                     k.error_at = Some(Instant::now());
                 }
                 if k.phase == 3 && k.done_at.is_some_and(|t| t.elapsed() > DONE_TIMEOUT) {
                     k.phase = 0;
                     k.selected = None;
                 }
-                if k.phase == 4 && k.error_at.is_some_and(|t| t.elapsed() > ERROR_TIMEOUT) {
+                if (k.phase == 4 || k.phase == 5)
+                    && k.error_at.is_some_and(|t| t.elapsed() > ERROR_TIMEOUT)
+                {
                     k.phase = 0;
                     k.selected = None;
                 }
@@ -446,7 +459,14 @@ pub fn start(
                         None => (String::new(), 0),
                     },
                     3 => ("Заберите этикетку".into(), 0),
-                    4 => ("Ошибка печати. Позовите сотрудника".into(), 2),
+                    4 => ("Не удалось напечатать этикетку. Повторите попытку".into(), 2),
+                    // Неизвестный результат: без радостного сообщения и без
+                    // приглашения к немедленному повтору — только честное
+                    // предупреждение о возможном дубликате.
+                    5 => (
+                        "Не удалось проверить печать: этикетка могла выйти. Проверьте принтер перед повтором".into(),
+                        1,
+                    ),
                     _ => match ws {
                         1 => ("Вес нестабилен…".into(), 1),
                         _ => (String::new(), 0),

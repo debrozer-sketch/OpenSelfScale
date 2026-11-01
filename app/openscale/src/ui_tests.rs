@@ -296,7 +296,7 @@ fn ui_scenarios() {
             println!("S8 diag: op={} phase={} print_at={:?} weight={:?}", k.print_op, k.phase, k.print_at, k.print_weight_g);
         }
         assert!(
-            ui.get_status_text().contains("Ошибка печати"),
+            ui.get_status_text().contains("Не удалось напечатать"),
             "S8: статус ошибки: {:?}", ui.get_status_text()
         );
         {
@@ -398,13 +398,90 @@ fn ui_scenarios() {
         ui.invoke_plu_confirm();
         advance(TICK.as_millis() as u64).await;
         assert_eq!(app.kiosk.borrow().print_op, ops, "S15: повторный вызов игнорирован");
-        wait_until("S15: печать вернула ошибку", || app.kiosk.borrow().phase == 4).await;
+        wait_until("S15: печать вернула ошибку", || {
+            let k = app.kiosk.borrow();
+            if k.phase != 2 {
+                println!("S15 diag: phase={} op={} at={:?}", k.phase, k.print_op, k.print_at);
+                true
+            } else {
+                false
+            }
+        }).await;
         {
             let mut k = app.kiosk.borrow_mut();
             k.error_at = Some(Instant::now() - std::time::Duration::from_secs(9));
         }
         advance(TICK.as_millis() as u64).await;
         assert_eq!(app.kiosk.borrow().phase, 0, "S15: возврат в каталог-состояние");
+
+        // S16. Неизвестный результат печати (фаза 5): честное предупреждение,
+        // без сообщения об успехе, возврат в каталог по таймауту.
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.phase = 5;
+            k.error_at = Some(Instant::now());
+        }
+        advance(TICK.as_millis() as u64).await;
+        assert!(
+            ui.get_status_text().contains("Не удалось проверить"),
+            "S16: статус неизвестного результата: {:?}", ui.get_status_text()
+        );
+        assert!(
+            ui.get_status_text().contains("могла выйти"),
+            "S16: предупреждение о дубликате: {:?}", ui.get_status_text()
+        );
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.error_at = Some(Instant::now() - std::time::Duration::from_secs(9));
+        }
+        advance(TICK.as_millis() as u64).await;
+        {
+            let k = app.kiosk.borrow();
+            assert_eq!(k.phase, 0, "S16: возврат в каталог после таймаута");
+            assert!(k.selected.is_none(), "S16: выбор очищен");
+        }
+
+        // S17. Повторная печать неизвестной записи: явное действие с
+        // предупреждением о возможном дубликате.
+        {
+            let db_path = app.dir.join("ui.db");
+            let conn = datastore::open(&db_path).unwrap();
+            let mut row = datastore::PrintLogRow {
+                id: 0,
+                ts: 1_760_000_000,
+                plu: Some("101".into()),
+                name: Some("СЫР ГАУДА".into()),
+                weight_g: Some(1350),
+                sum_kop: Some(26999),
+                ok: None,
+                itemcode: Some("02136".into()),
+                namesecond: Some(String::new()),
+                price: Some(19999),
+                shelflife: Some(String::new()),
+                origin_id: None,
+            };            row.ok = None;
+            let unknown_id = datastore::print_log_add(&conn, &row).unwrap();
+            row.ok = Some(false);
+            let failed_id = datastore::print_log_add(&conn, &row).unwrap();
+            drop(conn);
+            ui.invoke_reprint_ask(unknown_id as i32);
+            advance(TICK.as_millis() as u64).await;
+            assert!(ui.get_reprint_popup_open(), "S17: диалог повтора открыт");
+            let t = ui.get_reprint_popup_text().to_string();
+            assert!(t.contains("неизвестен"), "S17: предупреждение о дубликате: {t}");
+            assert!(t.contains("могла выйти"), "S17: причина: {t}");
+            ui.invoke_reprint_popup_close();
+            advance(TICK.as_millis() as u64).await;
+            ui.invoke_reprint_ask(failed_id as i32);
+            advance(TICK.as_millis() as u64).await;
+            let t = ui.get_reprint_popup_text().to_string();
+            assert!(
+                !t.contains("неизвестен"),
+                "S17: для достоверной ошибки предупреждения нет: {t}"
+            );
+            ui.invoke_reprint_popup_close();
+            advance(TICK.as_millis() as u64).await;
+        }
 
 
         // Быстрые повторные переходы и двойные нажатия.

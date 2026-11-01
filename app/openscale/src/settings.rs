@@ -1851,11 +1851,18 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 .map(|w| format_w_g(w as u32))
                 .unwrap_or_else(|| "—".into());
             reprint_pending.set(i64::from(rowid));
+            // Неизвестный исход исходной печати: повтор может дать дубликат —
+            // оператор подтверждает его явно, с предупреждением.
+            let warning = if row.ok.is_none() {
+                "\n\nРезультат исходной печати неизвестен: этикетка могла выйти. Повтор может напечатать дубликат."
+            } else {
+                ""
+            };
             if let Some(ui) = ui_handle.upgrade() {
                 ui.set_reprint_confirm(true);
                 ui.set_reprint_popup_ok(true);
                 ui.set_reprint_popup_text(
-                    format!("Повторить печать этикетки?\n\n{name}\n{weight} — {sum}").into(),
+                    format!("Повторить печать этикетки?\n\n{name}\n{weight} — {sum}{warning}").into(),
                 );
                 ui.set_reprint_popup_open(true);
             }
