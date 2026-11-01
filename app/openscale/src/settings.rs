@@ -1,24 +1,19 @@
-
+use crate::MainWindow;
+use crate::admin;
+use crate::calib;
+use crate::cfgio;
+use crate::config::Config;
+use crate::context::AppContext;
+use crate::diag;
+use crate::net::{self, net_rows_set};
+use crate::print;
+use crate::setup;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
-use crate::admin;
-use crate::cfgio;
-use crate::context::AppContext;
-use crate::calib;
-use crate::config::Config;
-use crate::net::{self, net_rows_set};
-use crate::diag;
-use crate::print;
-use crate::setup;
-use crate::MainWindow;
 static PRN_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static NET_APPLYING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-fn show_cfg_popup(
-    ui_handle: &slint::Weak<MainWindow>,
-    ok: bool,
-    text: String,
-) {
+fn show_cfg_popup(ui_handle: &slint::Weak<MainWindow>, ok: bool, text: String) {
     let ui_handle = ui_handle.clone();
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(ui) = ui_handle.upgrade() {
@@ -37,17 +32,50 @@ fn refresh_setting_labels(
     if let Some(ui) = ui_handle.upgrade() {
         ui.set_goods_cols(format!("{}", trade.cols.get().max(1)).into());
         ui.set_goods_sort(
-            if trade.sort_alpha.get() { "по алфавиту" } else { "вручную" }.into(),
+            if trade.sort_alpha.get() {
+                "по алфавиту"
+            } else {
+                "вручную"
+            }
+            .into(),
         );
-        ui.set_goods_deptview(if trade.dept_cell.get() { "ячейки" } else { "колонки" }.into());
+        ui.set_goods_deptview(
+            if trade.dept_cell.get() {
+                "ячейки"
+            } else {
+                "колонки"
+            }
+            .into(),
+        );
         ui.set_dept_cell(trade.dept_cell.get());
         ui.set_goods_idle(format!("{} с", idle_secs.get()).into());
-        ui.set_goods_cardname(if trade.card_show_name.get() { "ВКЛ" } else { "ВЫКЛ" }.into());
+        ui.set_goods_cardname(
+            if trade.card_show_name.get() {
+                "ВКЛ"
+            } else {
+                "ВЫКЛ"
+            }
+            .into(),
+        );
         ui.set_card_show_name(trade.card_show_name.get());
-        ui.set_goods_backbtn(if trade.catalog_back.get() { "ВКЛ" } else { "ВЫКЛ" }.into());
+        ui.set_goods_backbtn(
+            if trade.catalog_back.get() {
+                "ВКЛ"
+            } else {
+                "ВЫКЛ"
+            }
+            .into(),
+        );
         ui.set_catalog_back_btn(trade.catalog_back.get());
         ui.set_goods_itemscols(format!("{} столбцов", trade.item_cols.get()).into());
-        ui.set_goods_itemsort(if trade.item_sort_pop.get() { "популярные" } else { "по алфавиту" }.into());
+        ui.set_goods_itemsort(
+            if trade.item_sort_pop.get() {
+                "популярные"
+            } else {
+                "по алфавиту"
+            }
+            .into(),
+        );
         ui.set_trade_rounding(
             match trade.rounding.get() {
                 1 => "до 10 коп",
@@ -93,7 +121,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     let trade = ctx.trade.clone();
     NTP_ON.store(cfg.time.ntp, std::sync::atomic::Ordering::Relaxed);
     if cfg.time.ntp && !cfg.time.server.is_empty() {
-        spawn_settime(&cfg, &["ntp-server", cfg.time.server.as_str()], ui_handle.clone(), "NTP-сервер применён");
+        spawn_settime(
+            &cfg,
+            &["ntp-server", cfg.time.server.as_str()],
+            ui_handle.clone(),
+            "NTP-сервер применён",
+        );
     }
     let admin_reload: Rc<dyn Fn()> = Rc::new({
         let ui_handle = ui_handle.clone();
@@ -207,7 +240,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let kiosk = kiosk.clone();
         let cfg = cfg.clone();
         move || {
-            let Ok(conn) = datastore::open(&cfg.db_path) else { return };
+            let Ok(conn) = datastore::open(&cfg.db_path) else {
+                return;
+            };
             let stage = setup::stage(&conn);
             let (mode, note, action, action_enabled, skip_visible, skip_label, next_visible) =
                 if !setup::wizard_done(&conn) {
@@ -244,9 +279,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             }
         }
     };
-    SETUP_RC.with(|c| {
-        *c.borrow_mut() = Some(std::rc::Rc::new(setup_render) as std::rc::Rc<dyn Fn()>)
-    });
+    SETUP_RC
+        .with(|c| *c.borrow_mut() = Some(std::rc::Rc::new(setup_render) as std::rc::Rc<dyn Fn()>));
     let setup_render = SETUP_RC.with(|c| c.borrow().as_ref().map(|f| f.clone()).unwrap());
     ui.on_pin_try({
         let ui_handle = ui_handle.clone();
@@ -272,9 +306,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             let stage = k.admin_stage;
             if stage == 1 {
                 let no_users = match datastore::open(&cfg.db_path) {
-                    Ok(conn) => {
-                        !datastore::auth::user_exists(&conn).unwrap_or(false)
-                    }
+                    Ok(conn) => !datastore::auth::user_exists(&conn).unwrap_or(false),
                     Err(_) => false,
                 };
                 if no_users {
@@ -290,8 +322,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     drop(k);
                     spawn_pin_task(move || {
                         let t = std::time::Instant::now();
-                        let res =
-                            datastore::open(&db_path).map(|conn| datastore::auth::verify(&conn, &pin));
+                        let res = datastore::open(&db_path)
+                            .map(|conn| datastore::auth::verify(&conn, &pin));
                         log::info!("вход: проверка PBKDF2 заняла {:?}", t.elapsed());
                         let _ = slint::invoke_from_event_loop(move || {
                             KIOSK_RC.with(|c| {
@@ -311,8 +343,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                         k.pin_forced = false;
                                         k.admin_stage = 2;
                                         k.pending = None;
-                                        k.role =
-                                            if role == datastore::auth::Role::Admin { 1 } else { 0 };
+                                        k.role = if role == datastore::auth::Role::Admin {
+                                            1
+                                        } else {
+                                            0
+                                        };
                                         if let Some(ui) = ui_handle2.upgrade() {
                                             ui.set_role(i32::from(k.role));
                                             ui.set_pin_forced(false);
@@ -353,7 +388,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     Ok(datastore::auth::Auth::Granted(role)) => {
                         log::info!(
                             "вход: пароль принят, роль {}",
-                            if role == datastore::auth::Role::Admin { "admin" } else { "staff" }
+                            if role == datastore::auth::Role::Admin {
+                                "admin"
+                            } else {
+                                "staff"
+                            }
                         );
                         k.pin_forced = false;
                         if k.setup_active {
@@ -385,8 +424,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             if (30..=34).contains(&stage) {
                 match stage {
                     30 | 32 => {
-                        let ok =
-                            pin.len() >= 4 && pin.len() <= 8 && pin.bytes().all(|b| b.is_ascii_digit());
+                        let ok = pin.len() >= 4
+                            && pin.len() <= 8
+                            && pin.bytes().all(|b| b.is_ascii_digit());
                         if !ok {
                             set_err(&ui_handle, "PIN: 4–8 цифр");
                             return;
@@ -395,8 +435,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         k.admin_stage = stage + 1;
                     }
                     31 | 33 => {
-                        let (uid, role_name) =
-                            if stage == 31 { (1, "admin") } else { (2, "staff") };
+                        let (uid, role_name) = if stage == 31 {
+                            (1, "admin")
+                        } else {
+                            (2, "staff")
+                        };
                         if pin != k.pin_new {
                             k.pin_new.clear();
                             k.admin_stage = stage - 1;
@@ -404,9 +447,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             return;
                         }
                         let res = match datastore::open(&cfg.db_path) {
-                            Ok(conn) => {
-                                datastore::auth::create_user(&conn, uid, role_name, &pin)
-                            }
+                            Ok(conn) => datastore::auth::create_user(&conn, uid, role_name, &pin),
                             Err(e) => {
                                 log::error!("настройка: PIN: база: {e}");
                                 return;
@@ -418,11 +459,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                 log::info!("настройка: PIN {role_name} создан");
                                 k.setup_pin_stage = 0;
                                 if k.setup_active {
-                                    let Ok(conn) = datastore::open(&cfg.db_path) else { return };
-                                    let next = setup::advance(
-                                        setup::stage(&conn),
-                                        setup::Action::Next,
-                                    );
+                                    let Ok(conn) = datastore::open(&cfg.db_path) else {
+                                        return;
+                                    };
+                                    let next =
+                                        setup::advance(setup::stage(&conn), setup::Action::Next);
                                     setup::set_stage(&conn, next);
                                     k.admin_stage = 20;
                                     drop(k);
@@ -449,11 +490,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         let (hh, mi) = rest.split_at(2);
                         let arg = format!("{dd}.{mm}.{yy} {hh}:{mi}");
                         drop(k);
-                        spawn_settime_then_advance(
-                            &cfg,
-                            &[arg.as_str()],
-                            ui_handle.clone(),
-                        );
+                        spawn_settime_then_advance(&cfg, &[arg.as_str()], ui_handle.clone());
                     }
                 }
                 return;
@@ -472,7 +509,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     let t = std::time::Instant::now();
                     let res = datastore::open(&db_path)
                         .map(|conn| datastore::auth::pin_is(&conn, uid, &pin));
-                    log::info!("смена пароля: проверка старого PIN заняла {:?}", t.elapsed());
+                    log::info!(
+                        "смена пароля: проверка старого PIN заняла {:?}",
+                        t.elapsed()
+                    );
                     let _ = slint::invoke_from_event_loop(move || {
                         KIOSK_RC.with(|c| {
                             let Some(krc) = &*c.borrow() else { return };
@@ -493,7 +533,8 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 return;
             }
             if stage == 8 {
-                let ok = pin.len() >= 4 && pin.len() <= 8 && pin.bytes().all(|b| b.is_ascii_digit());
+                let ok =
+                    pin.len() >= 4 && pin.len() <= 8 && pin.bytes().all(|b| b.is_ascii_digit());
                 if !ok {
                     set_err(&ui_handle, "Новый пароль: 4–8 цифр");
                     return;
@@ -517,18 +558,22 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             drop(k);
             spawn_pin_task(move || {
                 let t = std::time::Instant::now();
-                let res = datastore::open(&db_path)
-                    .map(|conn| {
-                        let r = datastore::auth::change_pin(&conn, uid, &old, &pin);
-                        if matches!(&r, Ok(Ok(()))) {
-                            log_action(
-                                &db_path,
-                                "PIN изменён",
-                                if uid == 1 { "администратор" } else { "кассир" }.into(),
-                            );
-                        }
-                        r
-                    });
+                let res = datastore::open(&db_path).map(|conn| {
+                    let r = datastore::auth::change_pin(&conn, uid, &old, &pin);
+                    if matches!(&r, Ok(Ok(()))) {
+                        log_action(
+                            &db_path,
+                            "PIN изменён",
+                            if uid == 1 {
+                                "администратор"
+                            } else {
+                                "кассир"
+                            }
+                            .into(),
+                        );
+                    }
+                    r
+                });
                 log::info!("смена пароля: выполнена за {:?}", t.elapsed());
                 let _ = slint::invoke_from_event_loop(move || {
                     KIOSK_RC.with(|c| {
@@ -579,11 +624,15 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let app_state = app_state.clone();
         move |act: slint::SharedString| {
             let mut k = kiosk.borrow_mut();
-            let Ok(conn) = datastore::open(&cfg.db_path) else { return };
+            let Ok(conn) = datastore::open(&cfg.db_path) else {
+                return;
+            };
             if setup::wizard_done(&conn) {
                 if act == "action" {
-                    let mask =
-                        ui_handle.upgrade().map(|ui| ui.get_setup_mask() as u32).unwrap_or(0);
+                    let mask = ui_handle
+                        .upgrade()
+                        .map(|ui| ui.get_setup_mask() as u32)
+                        .unwrap_or(0);
                     if !setup::all_green(mask) {
                         return;
                     }
@@ -639,7 +688,16 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         let on = !NTP_ON.load(std::sync::atomic::Ordering::Relaxed);
                         NTP_ON.store(on, std::sync::atomic::Ordering::Relaxed);
                         let arg = if on { "ntp-on" } else { "ntp-off" };
-                        spawn_settime(&cfg, &[arg], ui_handle.clone(), if on { "NTP включён" } else { "NTP выключен" });
+                        spawn_settime(
+                            &cfg,
+                            &[arg],
+                            ui_handle.clone(),
+                            if on {
+                                "NTP включён"
+                            } else {
+                                "NTP выключен"
+                            },
+                        );
                         setup_render();
                     }
                     3 => {
@@ -736,41 +794,43 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                 }
                             },
                             move || {
-                            let (text, saved) = calibrate_label_text(&cfg2);
-                            if saved.is_some() {
-                                let Ok(conn) = datastore::open(&cfg2.db_path) else { return };
-                                if setup::stage(&conn) != 5 {
-                                    return;
+                                let (text, saved) = calibrate_label_text(&cfg2);
+                                if saved.is_some() {
+                                    let Ok(conn) = datastore::open(&cfg2.db_path) else {
+                                        return;
+                                    };
+                                    if setup::stage(&conn) != 5 {
+                                        return;
+                                    }
+                                    let next =
+                                        setup::advance(setup::stage(&conn), setup::Action::Next);
+                                    setup::set_stage(&conn, next);
+                                    let (mode, action, enabled, skip, skip_label, next_vis) = {
+                                        let (m, _note, a, e, s, sl, nv) =
+                                            wizard_step_ui(next, 0, false);
+                                        (m, a, e, s, sl, nv)
+                                    };
+                                    slint::invoke_from_event_loop(move || {
+                                        if let Some(ui) = ui_handle2.upgrade() {
+                                            ui.set_setup_mode(mode);
+                                            ui.set_setup_stage(i32::from(next));
+                                            ui.set_setup_note(text.into());
+                                            ui.set_setup_action_label(action.into());
+                                            ui.set_setup_action_enabled(enabled);
+                                            ui.set_setup_skip_visible(skip);
+                                            ui.set_setup_skip_label(skip_label.into());
+                                            ui.set_setup_next_visible(next_vis);
+                                        }
+                                    })
+                                    .ok();
+                                } else {
+                                    slint::invoke_from_event_loop(move || {
+                                        if let Some(ui) = ui_handle2.upgrade() {
+                                            ui.set_setup_note(text.into());
+                                        }
+                                    })
+                                    .ok();
                                 }
-                                let next =
-                                    setup::advance(setup::stage(&conn), setup::Action::Next);
-                                setup::set_stage(&conn, next);
-                                let (mode, action, enabled, skip, skip_label, next_vis) = {
-                                    let (m, _note, a, e, s, sl, nv) =
-                                        wizard_step_ui(next, 0, false);
-                                    (m, a, e, s, sl, nv)
-                                };
-                                slint::invoke_from_event_loop(move || {
-                                    if let Some(ui) = ui_handle2.upgrade() {
-                                        ui.set_setup_mode(mode);
-                                        ui.set_setup_stage(i32::from(next));
-                                        ui.set_setup_note(text.into());
-                                        ui.set_setup_action_label(action.into());
-                                        ui.set_setup_action_enabled(enabled);
-                                        ui.set_setup_skip_visible(skip);
-                                        ui.set_setup_skip_label(skip_label.into());
-                                        ui.set_setup_next_visible(next_vis);
-                                    }
-                                })
-                                .ok();
-                            } else {
-                                slint::invoke_from_event_loop(move || {
-                                    if let Some(ui) = ui_handle2.upgrade() {
-                                        ui.set_setup_note(text.into());
-                                    }
-                                })
-                                .ok();
-                            }
                             },
                         );
                     }
@@ -793,7 +853,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 _ => {}
             }
         }
-    });    
+    });
     let relayout = flow.relayout.clone();
     ui.on_admin_up({
         let cfg = cfg.clone();
@@ -1506,9 +1566,23 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         Err("Не удалось создать резервную копию.\nПопробуйте ещё раз.")
                     }
                 };
-                let _ = slint::invoke_from_event_loop(move || {
+                // Сборка статусов — в этом же рабочем потоке: открытие БД и
+                // integrity_check не выполняются в UI-потоке. Паника сбора
+                // не оставляет BUSY навсегда.
+                let rows = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    maint_rows(&cfg, &app_state)
+                })) {
+                    Ok(rows) => rows,
+                    Err(_) => {
+                        log::error!("обслуживание: сбор статусов после копии прерван паникой");
+                        vec![maint_row(
+                            "Обслуживание",
+                            ("статус не собран после копии".to_string(), 2),
+                        )]
+                    }
+                };
+                let sent = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_handle.upgrade() {
-                        let rows = maint_rows(&cfg, &app_state);
                         ui.set_maint_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
                         ui.set_maint_busy(false);
                         match res {
@@ -1526,6 +1600,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     }
                     MAINT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
                 });
+                if sent.is_err() {
+                    // Событийный цикл недоступен (UI уже уничтожен) — снять
+                    // BUSY здесь, иначе он зависнет навсегда.
+                    MAINT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
             });
         }
     });
@@ -1581,9 +1660,21 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     Ok(ok) => test_print_message(&ok),
                     Err(_) => Err("Проверка не удалась. Попробуйте ещё раз.".to_string()),
                 };
-                let _ = slint::invoke_from_event_loop(move || {
+                // Сборка статусов — в рабочем потоке: integrity_check не в UI.
+                let rows = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    maint_rows(&cfg, &app_state)
+                })) {
+                    Ok(rows) => rows,
+                    Err(_) => {
+                        log::error!("обслуживание: сбор статусов после проверки прерван паникой");
+                        vec![maint_row(
+                            "Обслуживание",
+                            ("статус не собран после проверки".to_string(), 2),
+                        )]
+                    }
+                };
+                let sent = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_handle.upgrade() {
-                        let rows = maint_rows(&cfg, &app_state);
                         ui.set_maint_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
                         ui.set_maint_busy(false);
                         match msg {
@@ -1592,6 +1683,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         }
                     }
                 });
+                let _ = sent;
             });
         }
     });
@@ -1628,7 +1720,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             let focus = k.net_focus;
             let buf = &mut k.net_buf[focus];
             match key.as_str() {
-                "←" => { buf.pop(); }
+                "←" => {
+                    buf.pop();
+                }
                 "C" => buf.clear(),
                 ch if (ch.bytes().all(|b| b.is_ascii_digit()) || ch == ".") && buf.len() < 18 => {
                     buf.push_str(ch);
@@ -1674,45 +1768,52 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     show_panic(false, format!("Не применено: внутренняя ошибка ({msg})"));
                 },
                 move || {
-                let (ok, text) = if dhcp {
-                    match net::apply_dhcp() {
-                        Ok(()) => {
-                            log_action(&cfg_task.db_path, "сеть", "DHCP применён".into());
-                            log::info!("сеть: DHCP применён");
-                            (true, net_popup_text(&net::read_live()))
-                        }
-                        Err(e) => {
-                            log::warn!("сеть: DHCP: {e}");
-                            (false, format!("DHCP не применён: {e}"))
-                        }
-                    }
-                } else {
-                    match net::validate(&buf[0], &buf[1], &buf[2], &buf[3]) {
-                        Ok((ip, pre, gw, dns)) => {
-                            match net::apply(&ip.to_string(), pre, &gw.to_string(), &dns.to_string()) {
-                                Ok(()) => {
-                                    log_action(
-                                        &cfg_task.db_path,
-                                        "сеть",
-                                        format!("статика {ip}/{pre} шлюз {gw} dns {dns}"),
-                                    );
-                                    log::info!("сеть: применено {ip}/{pre} шлюз {gw} dns {dns}");
-                                    (true, net_popup_text(&net::read_live()))
-                                }
-                                Err(e) => {
-                                    log::warn!("сеть: применение: {e}");
-                                    (false, format!("Не применено: {e}"))
-                                }
+                    let (ok, text) = if dhcp {
+                        match net::apply_dhcp() {
+                            Ok(()) => {
+                                log_action(&cfg_task.db_path, "сеть", "DHCP применён".into());
+                                log::info!("сеть: DHCP применён");
+                                (true, net_popup_text(&net::read_live()))
+                            }
+                            Err(e) => {
+                                log::warn!("сеть: DHCP: {e}");
+                                (false, format!("DHCP не применён: {e}"))
                             }
                         }
-                        Err(e) => {
-                            log::warn!("сеть: {e}");
-                            (false, e)
+                    } else {
+                        match net::validate(&buf[0], &buf[1], &buf[2], &buf[3]) {
+                            Ok((ip, pre, gw, dns)) => {
+                                match net::apply(
+                                    &ip.to_string(),
+                                    pre,
+                                    &gw.to_string(),
+                                    &dns.to_string(),
+                                ) {
+                                    Ok(()) => {
+                                        log_action(
+                                            &cfg_task.db_path,
+                                            "сеть",
+                                            format!("статика {ip}/{pre} шлюз {gw} dns {dns}"),
+                                        );
+                                        log::info!(
+                                            "сеть: применено {ip}/{pre} шлюз {gw} dns {dns}"
+                                        );
+                                        (true, net_popup_text(&net::read_live()))
+                                    }
+                                    Err(e) => {
+                                        log::warn!("сеть: применение: {e}");
+                                        (false, format!("Не применено: {e}"))
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("сеть: {e}");
+                                (false, e)
+                            }
                         }
-                    }
-                };
-                NET_APPLYING.store(false, std::sync::atomic::Ordering::SeqCst);
-                show(ok, text);
+                    };
+                    NET_APPLYING.store(false, std::sync::atomic::Ordering::SeqCst);
+                    show(ok, text);
                 },
             );
         }
@@ -1894,7 +1995,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 Ok(Some(r)) => r,
                 _ => return,
             };
-            let Ok(spec) = crate::label::parse(&row.json) else { return };
+            let Ok(spec) = crate::label::parse(&row.json) else {
+                return;
+            };
             show_preview(&cfg, &kiosk, &ui_handle, &spec);
         }
     });
@@ -1916,7 +2019,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             };
             let Some(name) = name else { return };
             kiosk.borrow_mut().labels_pending_del = Some(name.clone());
-            show_labels_popup(&ui_handle, true, true, format!("Удалить раскладку «{name}»?"));
+            show_labels_popup(
+                &ui_handle,
+                true,
+                true,
+                format!("Удалить раскладку «{name}»?"),
+            );
         }
     });
     ui.on_labels_confirm_apply({
@@ -1929,7 +2037,9 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             let Some(name) = name else { return };
             let res = datastore::open(&cfg.db_path)
                 .map_err(|e| format!("база: {e}"))
-                .and_then(|conn| datastore::label_layout_delete(&conn, &name).map_err(|e| format!("база: {e}")))
+                .and_then(|conn| {
+                    datastore::label_layout_delete(&conn, &name).map_err(|e| format!("база: {e}"))
+                })
                 .map(|deleted| {
                     if deleted {
                         format!("Удалено: «{name}»")
@@ -1963,8 +2073,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
     // «ПЕЧАТАТЬ» отправляет задание по сохранённому снимку покупки.
     // Одновременно — одна попытка: REPRINT_BUSY защищает от параллельных
     // копий одного задания (демон печати последовательный).
-    static REPRINT_BUSY: std::sync::atomic::AtomicBool =
-        std::sync::atomic::AtomicBool::new(false);
+    static REPRINT_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let reprint_pending: Rc<Cell<i64>> = Rc::new(Cell::new(0));
     ui.on_reprint_ask({
         let ui_handle = ui_handle.clone();
@@ -2104,14 +2213,24 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 Ok(s) => s,
                 Err(e) => {
                     log::warn!("меню: этикетки: {}: {e}", path.display());
-                    show_labels_popup(&ui_handle, false, false, format!("Раскладка отвергнута:\n{e}"));
+                    show_labels_popup(
+                        &ui_handle,
+                        false,
+                        false,
+                        format!("Раскладка отвергнута:\n{e}"),
+                    );
                     return;
                 }
             };
             kiosk.borrow_mut().labels_pending_import = Some(path.clone());
             if show_preview(&cfg, &kiosk, &ui_handle, &spec) {
                 if let Some(ui) = ui_handle.upgrade() {
-                    ui.set_labels_preview_name(path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default().into());
+                    ui.set_labels_preview_name(
+                        path.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default()
+                            .into(),
+                    );
                     ui.set_labels_preview_importable(true);
                 }
             }
@@ -2139,29 +2258,69 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             let spec = match crate::label::parse(&raw) {
                 Ok(s) => s,
                 Err(e) => {
-                    show_labels_popup(&ui_handle, false, false, format!("Раскладка отвергнута:\n{e}"));
+                    show_labels_popup(
+                        &ui_handle,
+                        false,
+                        false,
+                        format!("Раскладка отвергнута:\n{e}"),
+                    );
                     return;
                 }
             };
             let res = datastore::open(&cfg.db_path)
                 .map_err(|e| format!("база: {e}"))
                 .and_then(|conn| {
-                    let known = datastore::label_layout_get(&conn, &spec.name).ok().flatten().is_some();
-                    if !known && conn.query_row("SELECT COUNT(*) FROM label_layouts", [], |r| r.get::<_, i64>(0)).unwrap_or(0) as usize >= MAX_LABEL_LAYOUTS {
-                        return Err(format!("лимит {MAX_LABEL_LAYOUTS} раскладок: сначала удалите лишнюю"));
+                    let known = datastore::label_layout_get(&conn, &spec.name)
+                        .ok()
+                        .flatten()
+                        .is_some();
+                    if !known
+                        && conn
+                            .query_row("SELECT COUNT(*) FROM label_layouts", [], |r| {
+                                r.get::<_, i64>(0)
+                            })
+                            .unwrap_or(0) as usize
+                            >= MAX_LABEL_LAYOUTS
+                    {
+                        return Err(format!(
+                            "лимит {MAX_LABEL_LAYOUTS} раскладок: сначала удалите лишнюю"
+                        ));
                     }
-                    let json = serde_json::to_string(&serde_json::from_str::<serde_json::Value>(&raw).unwrap_or_default()).unwrap_or_else(|_| raw.clone());
-                    datastore::label_layout_put(&conn, &spec.name, spec.width_mm as i64, spec.height_mm as i64, &json)
-                        .map_err(|e| format!("база: {e}"))
+                    let json = serde_json::to_string(
+                        &serde_json::from_str::<serde_json::Value>(&raw).unwrap_or_default(),
+                    )
+                    .unwrap_or_else(|_| raw.clone());
+                    datastore::label_layout_put(
+                        &conn,
+                        &spec.name,
+                        spec.width_mm as i64,
+                        spec.height_mm as i64,
+                        &json,
+                    )
+                    .map_err(|e| format!("база: {e}"))
                 });
             match res {
                 Ok(()) => {
-                    log::info!("меню: этикетки: импорт «{}»: {}×{} мм, полей {}", spec.name, spec.width_mm, spec.height_mm, spec.fields.len());
+                    log::info!(
+                        "меню: этикетки: импорт «{}»: {}×{} мм, полей {}",
+                        spec.name,
+                        spec.width_mm,
+                        spec.height_mm,
+                        spec.fields.len()
+                    );
                     refresh_labels(&cfg, &kiosk, &ui_handle);
-                    show_labels_popup(&ui_handle, true, false, format!(
-                        "Импортировано: «{}»\n{}×{} мм, полей {}",
-                        spec.name, spec.width_mm, spec.height_mm, spec.fields.len()
-                    ));
+                    show_labels_popup(
+                        &ui_handle,
+                        true,
+                        false,
+                        format!(
+                            "Импортировано: «{}»\n{}×{} мм, полей {}",
+                            spec.name,
+                            spec.width_mm,
+                            spec.height_mm,
+                            spec.fields.len()
+                        ),
+                    );
                 }
                 Err(e) => {
                     log::warn!("меню: этикетки: импорт: {e}");
@@ -2184,26 +2343,28 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 "сетка координат",
                 move |msg| {
                     if let Some(ui) = ui_panic.upgrade() {
-                        ui.set_labels_status(format!("Печать сетки прервана ошибкой: {msg}").into());
+                        ui.set_labels_status(
+                            format!("Печать сетки прервана ошибкой: {msg}").into(),
+                        );
                     }
                 },
                 move || {
-                let res = crate::print::print_ruler_probe(&cfg);
-                let text = match res {
-                    Ok(()) => {
-                        log::info!("меню: этикетки: сетка координат напечатана");
-                        "Сетка координат напечатана".to_string()
-                    }
-                    Err(e) => {
-                        log::warn!("меню: этикетки: линейка: {e}");
-                        format!("Не напечатано:\n{e}")
-                    }
-                };
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_labels_status(text.into());
-                    }
-                });
+                    let res = crate::print::print_ruler_probe(&cfg);
+                    let text = match res {
+                        Ok(()) => {
+                            log::info!("меню: этикетки: сетка координат напечатана");
+                            "Сетка координат напечатана".to_string()
+                        }
+                        Err(e) => {
+                            log::warn!("меню: этикетки: линейка: {e}");
+                            format!("Не напечатано:\n{e}")
+                        }
+                    };
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_handle.upgrade() {
+                            ui.set_labels_status(text.into());
+                        }
+                    });
                 },
             );
         }
@@ -2275,7 +2436,9 @@ fn refresh_labels(
     if let Ok(conn) = datastore::open(&cfg.db_path) {
         if let Ok(list) = datastore::label_layout_list(&conn) {
             for r in list {
-                let n = crate::label::parse(&r.json).map(|s| s.fields.len()).unwrap_or(0);
+                let n = crate::label::parse(&r.json)
+                    .map(|s| s.fields.len())
+                    .unwrap_or(0);
                 rows.push((r.name, r.width_mm, r.height_mm, n));
             }
         }
@@ -2310,13 +2473,17 @@ fn show_preview(
     ui_handle: &slint::Weak<MainWindow>,
     spec: &crate::label::LabelSpec,
 ) -> bool {
-    let Ok(conn) = datastore::open(&cfg.db_path) else { return false };
+    let Ok(conn) = datastore::open(&cfg.db_path) else {
+        return false;
+    };
     let items = match datastore::load_all(&conn) {
         Ok(list) if !list.is_empty() => list,
         _ => return false,
     };
     let entry = &items[0];
-    let Ok(Some(item)) = datastore::get_item(&conn, &entry.plu) else { return false };
+    let Ok(Some(item)) = datastore::get_item(&conn, &entry.plu) else {
+        return false;
+    };
     let (date, time) = crate::print::now_stamp();
     let sum_kop = crate::session::round_sum(crate::session::sum_kopecks(item.price, 1000), 0);
     let preview = crate::print::preview_items(&spec, &item, 1000, sum_kop, &date, &time);
@@ -2331,7 +2498,9 @@ fn show_preview(
         "меню: этикетки: превью «{}»: строк {text_rows}, текст «{sample}»",
         spec.name
     );
-    let Some(ui) = ui_handle.upgrade() else { return false };
+    let Some(ui) = ui_handle.upgrade() else {
+        return false;
+    };
     let rows: Vec<crate::LabelPreviewRow> = preview
         .into_iter()
         .map(|p| crate::LabelPreviewRow {
@@ -2358,12 +2527,7 @@ fn show_preview(
     ui.set_labels_preview_open(true);
     true
 }
-fn show_labels_popup(
-    ui_handle: &slint::Weak<MainWindow>,
-    ok: bool,
-    confirm: bool,
-    text: String,
-) {
+fn show_labels_popup(ui_handle: &slint::Weak<MainWindow>, ok: bool, confirm: bool, text: String) {
     let ui_handle = ui_handle.clone();
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(ui) = ui_handle.upgrade() {
@@ -2389,7 +2553,11 @@ fn show_reprint_popup(ui_handle: &slint::Weak<MainWindow>, confirm: bool, ok: bo
 static MAINT_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn maint_row(label: &str, value_state: (String, i32)) -> crate::MaintRow {
-    crate::MaintRow { label: label.into(), value: value_state.0.into(), state: value_state.1 }
+    crate::MaintRow {
+        label: label.into(),
+        value: value_state.0.into(),
+        state: value_state.1,
+    }
 }
 
 /// Статусы обслуживания. Каждая проверка независима: ошибка одной
@@ -2448,29 +2616,23 @@ fn maint_rows(
     let snap = app_state.snapshot();
     let scales = if snap.port_up {
         (
-            format!("подключены · {}", if snap.stable { "вес готов" } else { "вес нестабилен" }),
+            format!(
+                "подключены · {}",
+                if snap.stable {
+                    "вес готов"
+                } else {
+                    "вес нестабилен"
+                }
+            ),
             if snap.stable { 0 } else { 1 },
         )
     } else {
         ("отключены".to_string(), 2)
     };
-    // «Готов» показываем только когда демон уже получал ответ принтера.
-    // Выключенный в настройках принтер — не «нет данных», а осознанное
-    // состояние: оператор не ищет неисправность там, где её нет.
-    let ph = print::health();
-    let printer = if !cfg.printer.enabled {
-        ("выключен в настройках".to_string(), 1)
-    } else if ph.fault {
-        ("ошибка".to_string(), 2)
-    } else if !ph.seen {
-        ("нет данных".to_string(), 0)
-    } else if ph.label_waiting {
-        ("занят: этикетка в лотке".to_string(), 1)
-    } else if ph.paper_end {
-        ("кончилась бумага".to_string(), 2)
-    } else {
-        ("готов".to_string(), 0)
-    };
+    // Единый статус с экраном «Состояние» (print::status_line): один
+    // источник текста и состояния — расхождения отображения исключены.
+    // «Готов» показывается только при подтверждённом ответе принтера.
+    let printer = print::status_line(cfg.printer.enabled);
     // Статус синхронизации: последнее сохранённое состояние попытки.
     let mut rows = vec![
         maint_row("База данных", db),
@@ -2555,29 +2717,38 @@ fn status_rows(
 ) -> Vec<slint::SharedString> {
     let snap = app_state.snapshot();
     let scales = if snap.port_up {
-        format!("Весы: связь есть · вес {:.3} кг · {}", snap.mass_kg, if snap.stable { "стабильно" } else { "движение" })
+        format!(
+            "Весы: связь есть · вес {:.3} кг · {}",
+            snap.mass_kg,
+            if snap.stable {
+                "стабильно"
+            } else {
+                "движение"
+            }
+        )
     } else {
         "Весы: НЕТ СВЯЗИ".to_string()
     };
-    let ph = crate::print::health();
-    let printer = if ph.fault {
-        "Принтер: АВАРИЯ".to_string()
-    } else {
-        let paper = if ph.paper_end {
-            "лента КОНЧИЛАСЬ"
-        } else if ph.paper_near_end {
-            "лента заканчивается"
-        } else {
-            "лента в порядке"
-        };
-        format!("Принтер: готов · {paper}")
-    };
+    // Единый статус с экраном «Обслуживание» (print::status_line): один
+    // источник текста — «Принтер: <тот же текст, что в обслуживании>».
+    let printer = format!(
+        "Принтер: {}",
+        crate::print::status_line(cfg.printer.enabled).0
+    );
     let net_txt = {
         let n = crate::net::read_cached();
         if n.ip.is_empty() {
             "Сеть: адрес не получен".to_string()
         } else {
-            format!("Сеть: {} ({})", n.ip, if crate::net::read_mode() { "DHCP" } else { "статика" })
+            format!(
+                "Сеть: {} ({})",
+                n.ip,
+                if crate::net::read_mode() {
+                    "DHCP"
+                } else {
+                    "статика"
+                }
+            )
         }
     };
     let (count, size) = match datastore::open(&cfg.db_path) {
@@ -2597,7 +2768,11 @@ fn status_rows(
         scales.into(),
         printer.into(),
         net_txt.into(),
-        format!("База: товаров {count}, размер {:.1} МБ", size as f64 / 1_048_576.0).into(),
+        format!(
+            "База: товаров {count}, размер {:.1} МБ",
+            size as f64 / 1_048_576.0
+        )
+        .into(),
     ]
 }
 fn refresh_action_log(cfg: &crate::config::Config, ui_handle: &slint::Weak<MainWindow>) {
@@ -2614,7 +2789,7 @@ fn refresh_action_log(cfg: &crate::config::Config, ui_handle: &slint::Weak<MainW
         let lines: Vec<slint::SharedString> = rows
             .iter()
             .map(|r| {
-            let (date, time) = crate::print::stamp_for(r.ts);
+                let (date, time) = crate::print::stamp_for(r.ts);
                 let hm = time.get(0..5).unwrap_or(&time).to_string();
                 format!(
                     "{date} {hm}  {}  {} — {}",
@@ -2699,7 +2874,8 @@ fn report_ops(conn: &rusqlite::Connection) -> Vec<crate::ReportOp> {
                 .unwrap_or_else(|| "—".into());
             let sum = r.sum_kop.map(crate::session::sum_str).unwrap_or_default();
             let text = format!("{mark} {hm} {name:<20} {weight:>7}  {sum}");
-            let can = r.weight_g.unwrap_or(0) > 0 && r.price.unwrap_or(0) > 0
+            let can = r.weight_g.unwrap_or(0) > 0
+                && r.price.unwrap_or(0) > 0
                 && r.itemcode.as_deref().is_some_and(|s| !s.is_empty());
             crate::ReportOp {
                 rowid: r.id as i32,
@@ -2726,18 +2902,25 @@ fn refresh_printer_diag(cfg: &crate::config::Config, ui_handle: &slint::Weak<Mai
                 let (len, layout) = label_info(&cfg);
                 print::fmt_diagnostics(&d, len, layout.as_deref())
             }
-            Err(e) => format!("Опрос не удался: {e}\n\nЕсли принтер отключён от сети,\nсначала проверьте питание."),
+            Err(e) => format!(
+                "Опрос не удался: {e}\n\nЕсли принтер отключён от сети,\nсначала проверьте питание."
+            ),
         };
         let checklist = match datastore::open(&cfg.db_path) {
             Ok(conn) => {
                 let goods = datastore::plu_count(&conn).unwrap_or(0);
-                let layout =
-                    datastore::get_setting(&conn, "label_layout_name").ok().flatten();
+                let layout = datastore::get_setting(&conn, "label_layout_name")
+                    .ok()
+                    .flatten();
                 let entered = crate::setup::entered(&conn);
                 format!(
                     "\n\nЧЕК-ЛИСТ (ввод в эксплуатацию{}):\n  товары: {}\n  раскладка: {}\n  принтер: в диагностике выше\n  весы: на главном экране",
                     if entered { " ВЫПОЛНЕН" } else { "" },
-                    if goods > 0 { format!("{goods} шт") } else { "нет".into() },
+                    if goods > 0 {
+                        format!("{goods} шт")
+                    } else {
+                        "нет".into()
+                    },
                     layout.unwrap_or_else(|| "не задана".into()),
                 )
             }
@@ -2757,8 +2940,12 @@ fn label_info(cfg: &crate::config::Config) -> (Option<i64>, Option<String>) {
         Ok(c) => c,
         Err(_) => return (None, None),
     };
-    let len = datastore::get_calibration(&conn, "label_length_mm").ok().flatten();
-    let layout = datastore::get_setting(&conn, "label_layout_name").ok().flatten();
+    let len = datastore::get_calibration(&conn, "label_length_mm")
+        .ok()
+        .flatten();
+    let layout = datastore::get_setting(&conn, "label_layout_name")
+        .ok()
+        .flatten();
     (len, layout)
 }
 fn build_report(cfg: &crate::config::Config, period: usize, kind: usize) -> String {
@@ -2834,7 +3021,11 @@ fn build_report(cfg: &crate::config::Config, period: usize, kind: usize) -> Stri
                 ));
             }
             _ => {
-                text.push_str(&format!("{tag} {}  {:<22} — ошибка\n", print::local_hms(r.ts), name));
+                text.push_str(&format!(
+                    "{tag} {}  {:<22} — ошибка\n",
+                    print::local_hms(r.ts),
+                    name
+                ));
             }
         }
     }
@@ -2853,7 +3044,11 @@ fn wizard_step_ui(
     scales_seen: bool,
 ) -> (i32, String, String, bool, bool, String, bool) {
     let ntp = NTP_ON.load(std::sync::atomic::Ordering::Relaxed);
-    let ntp_label = if ntp { "NTP: ВКЛ".to_string() } else { "NTP: ВЫКЛ".to_string() };
+    let ntp_label = if ntp {
+        "NTP: ВКЛ".to_string()
+    } else {
+        "NTP: ВЫКЛ".to_string()
+    };
     match stage {
         1 => (
             1,
@@ -2988,7 +3183,9 @@ pub fn startup_setup_render(
     kiosk: &std::rc::Rc<std::cell::RefCell<crate::session::Kiosk>>,
     cfg: &Config,
 ) {
-    let Ok(conn) = datastore::open(&cfg.db_path) else { return };
+    let Ok(conn) = datastore::open(&cfg.db_path) else {
+        return;
+    };
     let stage = setup::stage(&conn);
     let done = setup::wizard_done(&conn);
     let (mode, note, action, action_enabled, skip_visible, skip_label, next_visible) = if !done {
@@ -3027,11 +3224,15 @@ pub fn startup_setup_render(
 fn adjust_feed(conn: &rusqlite::Connection, delta: i64) {
     match calib::FeedCalibration::load(conn) {
         Ok(mut c) => {
-            c.backward_space = (i64::from(c.backward_space) + delta).clamp(0, u16::MAX as i64) as u16;
+            c.backward_space =
+                (i64::from(c.backward_space) + delta).clamp(0, u16::MAX as i64) as u16;
             if let Err(e) = c.save(conn) {
                 log::error!("настройка: калибровка печати: запись: {e}");
             } else {
-                log::info!("настройка: калибровка печати: backward_space = {}", c.backward_space);
+                log::info!(
+                    "настройка: калибровка печати: backward_space = {}",
+                    c.backward_space
+                );
             }
         }
         Err(e) => log::error!("настройка: калибровка печати: чтение: {e}"),
@@ -3064,13 +3265,18 @@ fn calibrate_label_text(cfg: &Config) -> (String, Option<i64>) {
             log::info!("настройка: калибровка: длина этикетки {mm} мм");
             match datastore::open(&cfg.db_path) {
                 Ok(conn) => {
-                    if let Err(e) = datastore::set_calibration(&conn, "label_length_mm", i64::from(mm)) {
+                    if let Err(e) =
+                        datastore::set_calibration(&conn, "label_length_mm", i64::from(mm))
+                    {
                         log::warn!("настройка: калибровка: запись в базу: {e}");
                     }
                 }
                 Err(e) => log::warn!("настройка: калибровка: база: {e}"),
             }
-            (format!("Длина этикетки: {mm} мм. Значение сохранено."), Some(i64::from(mm)))
+            (
+                format!("Длина этикетки: {mm} мм. Значение сохранено."),
+                Some(i64::from(mm)),
+            )
         }
         Err(e) => {
             log::warn!("настройка: калибровка: {e}");
@@ -3199,7 +3405,9 @@ pub fn reset_admin_pin_by_usb_key(db_path: &std::path::Path) -> Result<bool, Str
             };
             for mount in mounts.flatten() {
                 let key = mount.path().join("openscale-reset.key");
-                let Ok(content) = std::fs::read_to_string(&key) else { continue };
+                let Ok(content) = std::fs::read_to_string(&key) else {
+                    continue;
+                };
                 if content.trim().eq_ignore_ascii_case(&expected) {
                     found = true;
                 }
@@ -3261,78 +3469,85 @@ where
         }
     });
 }
-fn spawn_settime_then_advance(
-    cfg: &Config,
-    args: &[&str],
-    ui_handle: slint::Weak<MainWindow>,
-) {
+fn spawn_settime_then_advance(cfg: &Config, args: &[&str], ui_handle: slint::Weak<MainWindow>) {
     let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     let cfg = cfg.clone();
-    std::thread::spawn(move || {
-        match run_settime(&args) {
-            Ok(()) => {
-                let rendered = (|| -> Option<(i32, i32, String, String, bool, bool, String, bool)> {
-                    let conn = datastore::open(&cfg.db_path).ok()?;
-                    let next = crate::setup::advance(crate::setup::stage(&conn), crate::setup::Action::Next);
-                    crate::setup::set_stage(&conn, next);
-                    let (mode, note, action, enabled, skip, skip_label, next_vis) =
-                        wizard_step_ui(next, 0, false);
-                    Some((i32::from(next), mode, note, action, enabled, skip, skip_label, next_vis))
-                })();
-                let Some((next, mode, _note, action, enabled, skip, skip_label, next_vis)) = rendered else {
-                    log::error!("настройка: время: база недоступна, мастер не продвинут");
-                    return;
-                };
-                log::info!("настройка: время установлено, мастер на шаге {next}");
-                slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui_handle.upgrade() {
-                        KIOSK_RC.with(|c| {
-                            if let Some(krc) = &*c.borrow() {
-                                let mut k = krc.borrow_mut();
-                                k.setup_pin_stage = 0;
-                                k.admin_stage = 20;
-                            }
-                        });
-                        ui.set_setup_stage(next);
-                        ui.set_setup_note("Дата и время: ок: время установлено".into());
-                        ui.set_setup_mode(mode);
-                        ui.set_setup_action_label(action.into());
-                        ui.set_setup_action_enabled(enabled);
-                        ui.set_setup_skip_visible(skip);
-                        ui.set_setup_skip_label(skip_label.into());
-                        ui.set_setup_next_visible(next_vis);
-                    }
-                })
-                .ok();
-            }
-            Err(e) => {
-                log::warn!("настройка: время не применено: {e} — мастер остаётся на шаге");
-                slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui_handle.upgrade() {
-                        KIOSK_RC.with(|c| {
-                            if let Some(krc) = &*c.borrow() {
-                                let mut k = krc.borrow_mut();
-                                k.setup_pin_stage = 0;
-                                k.admin_stage = 20;
-                            }
-                        });
-                        let (mode, _note, action, enabled, skip, skip_label, next_vis) =
-                            wizard_step_ui(7, 0, false);
-                        ui.set_setup_stage(7);
-                        ui.set_setup_mode(mode);
-                        ui.set_setup_note(
-                            format!("Дата и время: {e} — время не применено, повторите ввод или ПРОПУСТИТЕ")
-                                .into(),
-                        );
-                        ui.set_setup_action_label(action.into());
-                        ui.set_setup_action_enabled(enabled);
-                        ui.set_setup_skip_visible(skip);
-                        ui.set_setup_skip_label(skip_label.into());
-                        ui.set_setup_next_visible(next_vis);
-                    }
-                })
-                .ok();
-            }
+    std::thread::spawn(move || match run_settime(&args) {
+        Ok(()) => {
+            let rendered = (|| -> Option<(i32, i32, String, String, bool, bool, String, bool)> {
+                let conn = datastore::open(&cfg.db_path).ok()?;
+                let next =
+                    crate::setup::advance(crate::setup::stage(&conn), crate::setup::Action::Next);
+                crate::setup::set_stage(&conn, next);
+                let (mode, note, action, enabled, skip, skip_label, next_vis) =
+                    wizard_step_ui(next, 0, false);
+                Some((
+                    i32::from(next),
+                    mode,
+                    note,
+                    action,
+                    enabled,
+                    skip,
+                    skip_label,
+                    next_vis,
+                ))
+            })();
+            let Some((next, mode, _note, action, enabled, skip, skip_label, next_vis)) = rendered
+            else {
+                log::error!("настройка: время: база недоступна, мастер не продвинут");
+                return;
+            };
+            log::info!("настройка: время установлено, мастер на шаге {next}");
+            slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_handle.upgrade() {
+                    KIOSK_RC.with(|c| {
+                        if let Some(krc) = &*c.borrow() {
+                            let mut k = krc.borrow_mut();
+                            k.setup_pin_stage = 0;
+                            k.admin_stage = 20;
+                        }
+                    });
+                    ui.set_setup_stage(next);
+                    ui.set_setup_note("Дата и время: ок: время установлено".into());
+                    ui.set_setup_mode(mode);
+                    ui.set_setup_action_label(action.into());
+                    ui.set_setup_action_enabled(enabled);
+                    ui.set_setup_skip_visible(skip);
+                    ui.set_setup_skip_label(skip_label.into());
+                    ui.set_setup_next_visible(next_vis);
+                }
+            })
+            .ok();
+        }
+        Err(e) => {
+            log::warn!("настройка: время не применено: {e} — мастер остаётся на шаге");
+            slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_handle.upgrade() {
+                    KIOSK_RC.with(|c| {
+                        if let Some(krc) = &*c.borrow() {
+                            let mut k = krc.borrow_mut();
+                            k.setup_pin_stage = 0;
+                            k.admin_stage = 20;
+                        }
+                    });
+                    let (mode, _note, action, enabled, skip, skip_label, next_vis) =
+                        wizard_step_ui(7, 0, false);
+                    ui.set_setup_stage(7);
+                    ui.set_setup_mode(mode);
+                    ui.set_setup_note(
+                        format!(
+                            "Дата и время: {e} — время не применено, повторите ввод или ПРОПУСТИТЕ"
+                        )
+                        .into(),
+                    );
+                    ui.set_setup_action_label(action.into());
+                    ui.set_setup_action_enabled(enabled);
+                    ui.set_setup_skip_visible(skip);
+                    ui.set_setup_skip_label(skip_label.into());
+                    ui.set_setup_next_visible(next_vis);
+                }
+            })
+            .ok();
         }
     });
 }
@@ -3384,6 +3599,51 @@ mod tests {
             printer.value,
             printer.state
         );
+    }
+
+    #[test]
+    fn printer_status_is_same_on_both_screens() {
+        // Единый источник статуса (print::status_line): текст на экранах
+        // «Обслуживание» и «Состояние» совпадает в одинаковых состояниях.
+        let dir = std::env::temp_dir().join(format!("os-st-printer-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let mut cfg = crate::config::Config {
+            db_path: dir.join("t.db"),
+            ..crate::config::Config::default()
+        };
+        cfg.printer.enabled = false;
+        let src = std::sync::Arc::new(crate::weight::WeightSource::spawn(
+            &drivers_api::ScalesProfile {
+                kind: "shtrih-slim".into(),
+                port: "/nonexistent-port".into(),
+                baud: 115_200,
+            },
+        ));
+        let screen = |cfg: &crate::config::Config,
+                      src: &std::sync::Arc<crate::weight::WeightSource>| {
+            let m = maint_rows(cfg, src)
+                .into_iter()
+                .find(|r| r.label == "Принтер")
+                .unwrap();
+            let s = status_rows(cfg, src)
+                .into_iter()
+                .find(|l| l.starts_with("Принтер"))
+                .unwrap()
+                .to_string();
+            (m.value, m.state, s)
+        };
+        // Выключенный: не готов, одинаковый текст.
+        let (mv, ms, sv) = screen(&cfg, &src);
+        assert_eq!(mv, "выключен в настройках");
+        assert_eq!(ms, 1);
+        assert_eq!(sv, "Принтер: выключен в настройках", "тот же текст");
+        // Включённый до первого ответа: не «готов» на обоих экранах.
+        cfg.printer.enabled = true;
+        let (mv, _ms, sv) = screen(&cfg, &src);
+        assert_eq!(mv, "нет ответа", "без ответа демон не обещает готовность");
+        assert_eq!(sv, "Принтер: нет ответа");
+        assert!(!sv.contains("готов"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

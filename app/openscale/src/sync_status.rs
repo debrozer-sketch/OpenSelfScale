@@ -5,9 +5,12 @@
 // Гарантии:
 // - БД открывается только уже установленной (backup::open_existing):
 //   пустой или потерянной базы запись не создаёт и не «чинит».
-// - finish завершает только свою попытку: идентификатор attempt_id
-//   сверяется с записью; чужая или устаревшая попытка не перезаписывается.
-// - Попытка, не начавшаяся из-за занятой блокировки, статус не пишет.
+// - finish завершает только свою попытку: вызывающая задача сохраняет
+//   токен из begin() и передаёт его в finish(); чужая или устаревшая
+//   попытка не перезаписывается. Токен межпроцессно безопасен: факт
+//   владения хранится в самой записи (id), а не в состоянии процесса.
+// - Попытка, не начавшаяся из-за занятой блокировки (begin не дал токен),
+//   статус не пишет и завершать чужую запись не может.
 // - Сбой записи статуса логируется и не влияет на результат операции.
 
 use rusqlite::Connection;
@@ -16,6 +19,11 @@ const KEY: &str = "sync.last";
 /// Запись «выполняется» старше этого окна означает прерванную попытку:
 /// процесс завершился (в т.ч. по питанию), не успев зафиксировать результат.
 const RUNNING_WINDOW_SECS: i64 = 15 * 60;
+
+/// Владение попыткой: токен из begin() передаётся в finish().
+/// Копируется — завершающая задача может отличаться от начавшей.
+#[derive(Debug, Clone, Copy)]
+pub struct AttemptToken(i64);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Status {
@@ -59,25 +67,10 @@ pub fn read(conn: &Connection) -> Option<Status> {
     })
 }
 
-/// Идентификатор попытки, начатой в этом процессе (begin → finish).
-/// Одна попытка на процесс в момент времени: авто-цикл и CLI начинаются
-/// последовательно в своём потоке. Mutex защищает от параллельных потоков
-/// одного процесса: последняя начатая попытка побеждает, предыдущая
-/// теряет право завершать статус (её id не совпадёт с записью).
-static ATTEMPT: std::sync::Mutex<Option<i64>> = std::sync::Mutex::new(None);
-
-fn take_attempt_id() -> Option<i64> {
-    ATTEMPT.lock().unwrap_or_else(|e| e.into_inner()).take()
-}
-
-fn store_attempt_id(id: i64) {
-    *ATTEMPT.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
-}
-
-/// Фиксация начала приёма. Возвращает идентификатор попытки для finish.
+/// Фиксация начала приёма. Возвращает токен попытки для finish.
 /// None — статус записать не удалось (БД не установлена/недоступна):
-/// попытка продолжает работу, но статуса не имеет.
-pub fn begin(db_path: &std::path::Path) -> Option<i64> {
+/// попытка продолжает работу без статуса, finish для неё не вызывается.
+pub fn begin(db_path: &std::path::Path) -> Option<AttemptToken> {
     let id = now_nanos();
     let conn = match crate::backup::open_existing(db_path) {
         Ok(c) => c,
@@ -96,18 +89,23 @@ pub fn begin(db_path: &std::path::Path) -> Option<i64> {
         log::warn!("статус синхронизации: не записано начало: {e}");
         return None;
     }
-    store_attempt_id(id);
-    Some(id)
+    Some(AttemptToken(id))
 }
 
-/// Фиксация результата своей попытки. Не затирает дату последнего успеха
-/// при ошибке, не перезаписывает статус более новой попытки и не пишет
-/// статус, если попытка не начиналась (begin вернул None или не вызывался).
-pub fn finish(db_path: &std::path::Path, ok: bool, _report: &str, err: Option<&str>) {
-    let Some(my_id) = take_attempt_id() else {
-        // Попытка не начиналась в этом процессе (например, отказ из-за
-        // занятой блокировки) — статус реально выполняющейся операции
-        // не трогаем.
+/// Фиксация результата попытки, владеющей токеном. Не затирает дату
+/// последнего успеха при ошибке, не перезаписывает статус более новой
+/// попытки и не пишет статус без токена (begin вернул None или не
+/// вызывался — например, отказ из-за занятой блокировки).
+pub fn finish(
+    db_path: &std::path::Path,
+    token: Option<AttemptToken>,
+    ok: bool,
+    _report: &str,
+    err: Option<&str>,
+) {
+    let Some(my_id) = token.map(|t| t.0) else {
+        // Попытка не начата (занятая блокировка, недоступная БД) — статус
+        // реально выполняющейся операции не трогаем.
         return;
     };
     let conn = match crate::backup::open_existing(db_path) {
@@ -309,32 +307,36 @@ mod tests {
         // finish по несуществующему пути не паникует и ничего не возвращает:
         // результат операции не зависит от записи статуса.
         let bad = std::path::Path::new("Z:/точно-нет-такого-каталога/x.db");
-        finish(bad, true, "ok", None);
-        finish(bad, false, "", Some("x"));
+        finish(bad, Some(AttemptToken(1)), true, "ok", None);
+        finish(bad, Some(AttemptToken(1)), false, "", Some("x"));
+        finish(bad, None, false, "", Some("x"));
     }
     #[test]
     fn parallel_writes_keep_valid_state() {
+        // Реальные межпоточные попытки: каждый поток begin → finish со своим
+        // токеном; побеждает последняя начатая, чужие finish молчат.
         let dir = std::env::temp_dir().join(format!("os-sync-par-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("t.db");
         let _ = std::fs::remove_file(&path);
         let _ = datastore::open(&path).unwrap();
+        crate::backup::ensure_marker(&path);
         std::thread::scope(|s| {
             for _ in 0..4 {
                 let p = path.clone();
                 let _ = s.spawn(move || {
-                    let c = datastore::open(&p).unwrap();
-                    static N: std::sync::atomic::AtomicI64 =
-                        std::sync::atomic::AtomicI64::new(1000);
-                    let id = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    begin_dummy(&c, now(), 0, id);
-                    finish_conn(&c, id, now(), true, "", None);
+                    if let Some(tok) = begin(&p) {
+                        finish(&p, Some(tok), true, "отчёт", None);
+                    }
                 });
             }
         });
         let c = datastore::open(&path).unwrap();
         let st = peek(&c).expect("после гонки статус валиден");
-        assert!(st.ok && st.attempt > 0);
+        assert!(
+            st.ok && st.attempt > 0,
+            "последняя попытка завершена: {st:?}"
+        );
         let _ = std::fs::remove_file(&path);
     }
     #[test]
@@ -385,7 +387,7 @@ mod tests {
     }
     #[test]
     fn busy_lock_refusal_is_not_recorded_as_error() {
-        // Попытка, не начавшаяся из-за занятой блокировки (begin не вызван),
+        // Попытка, не начавшаяся из-за занятой блокировки (begin токен не дал),
         // не должна перезаписать статус реально выполняющейся синхронизации.
         let dir = std::env::temp_dir().join(format!("os-sync-busy-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
@@ -401,9 +403,9 @@ mod tests {
             let c = datastore::open(&path).unwrap();
             peek(&c)
         };
-        reset_attempt_for_test();
         finish(
             &path,
+            None,
             false,
             "",
             Some("каталог обмена занят другим процессом"),
@@ -415,9 +417,91 @@ mod tests {
         assert_eq!(after, before, "статус выполняющейся попытки не изменён");
         let _ = std::fs::remove_file(&path);
     }
-    #[cfg(test)]
-    fn reset_attempt_for_test() {
-        *ATTEMPT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    // Сценарии волны 20.1: владение попыткой через явный токен.
+    fn token_db(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("os-sync-tok-{tag}-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("t.db");
+        let _ = std::fs::remove_file(&path);
+        let _ = datastore::open(&path).unwrap();
+        crate::backup::ensure_marker(&path);
+        path
+    }
+    /// Сценарии 1–2: две параллельные задачи; A завершает работу после того,
+    /// как B начал новую попытку — результат A не записывается, попытка B
+    /// остаётся выполняющейся.
+    #[test]
+    fn stale_token_finishes_nothing_after_newer_begin() {
+        let path = token_db("stale");
+        let tok_a = begin(&path).expect("begin A");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let tok_b = begin(&path).expect("begin B");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        finish(&path, Some(tok_a), false, "", Some("ошибка A"));
+        let c = datastore::open(&path).unwrap();
+        let st = peek(&c).unwrap();
+        assert!(st.running, "запись B не завершена результатом A");
+        assert_eq!(st.id, tok_b.0, "запись принадлежит попытке B");
+        assert!(!st.ok, "статус ещё run");
+        let _ = std::fs::remove_file(&path);
+    }
+    /// Сценарий 3: B завершает работу своим токеном — результат B записан.
+    #[test]
+    fn own_token_finishes_own_attempt() {
+        let path = token_db("own");
+        let tok_a = begin(&path).expect("begin A");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let tok_b = begin(&path).expect("begin B");
+        finish(&path, Some(tok_b), true, "отчёт B", None);
+        let c = datastore::open(&path).unwrap();
+        let st = peek(&c).unwrap();
+        assert!(st.ok && !st.running, "результат B записан");
+        assert_eq!(st.id, tok_b.0);
+        // Отложенный finish A всё ещё не должен менять завершённую запись.
+        finish(&path, Some(tok_a), false, "", Some("ошибка A"));
+        let st2 = peek(&c).unwrap();
+        assert!(st2.ok, "завершённая запись B не перезаписана");
+        let _ = std::fs::remove_file(&path);
+    }
+    /// Сценарий 5: межпроцессная защита — владение хранится в записи (id),
+    /// поэтому независимые процессы с разными токенами не завершают чужое.
+    /// «Процесс B» имитируется прямой перезаписью записи с чужим id, как это
+    /// делает begin другого процесса.
+    #[test]
+    fn cross_process_foreign_id_cannot_finish() {
+        let path = token_db("xproc");
+        let tok_a = begin(&path).expect("begin A");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        // «Другой процесс» начал свою попытку: запись с новым id.
+        let c = datastore::open(&path).unwrap();
+        begin_dummy(&c, now(), 0, tok_a.0 + 1);
+        drop(c);
+        finish(&path, Some(tok_a), false, "", Some("ошибка A"));
+        let c = datastore::open(&path).unwrap();
+        let st = peek(&c).unwrap();
+        assert!(
+            st.running && st.id == tok_a.0 + 1,
+            "чужой finish не записан"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+    /// Сценарий 4: finish без токена не меняет запись (в т.ч. завершённую).
+    #[test]
+    fn absent_token_does_not_touch_record() {
+        let path = token_db("none");
+        let tok = begin(&path).expect("begin");
+        finish(&path, Some(tok), true, "успех", None);
+        let before = {
+            let c = datastore::open(&path).unwrap();
+            peek(&c)
+        };
+        finish(&path, None, false, "", Some("любая причина"));
+        let after = {
+            let c = datastore::open(&path).unwrap();
+            peek(&c)
+        };
+        assert_eq!(after, before, "finish без токена ничего не меняет");
+        let _ = std::fs::remove_file(&path);
     }
     // Помощники с управляемым временем (без обращения к диску).
     fn begin_dummy(c: &Connection, attempt: i64, success: i64, id: i64) {

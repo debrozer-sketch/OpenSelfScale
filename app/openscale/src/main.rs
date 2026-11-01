@@ -86,6 +86,8 @@ fn main() {
             }
         }
         Mode::Sync => {
+            // Статус попытки завершается внутри run/run_drop по токену
+            // (в т.ч. при отказе из-за занятой блокировки статус не пишется).
             let res = if cfg.center.is_drop() {
                 sync::run_drop(&cfg).map(|o| o.unwrap_or_else(|| "выгрузки нет".into()))
             } else {
@@ -93,17 +95,12 @@ fn main() {
             };
             match res {
                 Ok(report) => {
-                    // Ok(None) (drop) — попытки не было, статус не трогаем.
-                    if report != "выгрузки нет" {
-                        crate::sync_status::finish(&cfg.db_path, true, &report, None);
-                    }
                     println!("{report}");
                     println!(
                         "для показа на весах перезапустите: systemctl restart openscale-kiosk"
                     );
                 }
                 Err(e) => {
-                    crate::sync_status::finish(&cfg.db_path, false, "", Some(&e));
                     eprintln!("синхронизация: {e}");
                     std::process::exit(1);
                 }

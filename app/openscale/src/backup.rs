@@ -702,9 +702,47 @@ fn rollback_to_saved(db_path: &Path, pre: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Изоляция старых sidecar-ов до замены main-файла: переименование рядом
+/// с pre-копией (обратимо). Замена main и открытие новой БД не начинаются,
+/// пока sidecar-ы не изолированы: посторонний -wal мог бы «дописать» чужие
+/// страницы в восстановленную базу. Sidecar-ы исходной базы удаляются только
+/// после того, как её состояние гарантированно сохранено (pre уже создан).
+/// При ошибке уже изолированные sidecar-ы возвращаются на место.
+fn quarantine_sidecars(db_path: &Path, pre: &Path) -> Result<(), String> {
+    let mut done: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{suffix}", db_path.display()));
+        if !sidecar.exists() {
+            continue;
+        }
+        let target = pre.with_extension(format!("db{suffix}.stale"));
+        match std::fs::rename(&sidecar, &target) {
+            Ok(()) => done.push((sidecar, target)),
+            Err(e) => {
+                let err = format!(
+                    "не изолировать старый {}: {e}; восстановление отменено",
+                    sidecar.display()
+                );
+                log::error!("восстановление: {err}");
+                for (src, dst) in &done {
+                    if let Err(be) = std::fs::rename(dst, src) {
+                        log::error!(
+                            "восстановление: изолированный {} не возвращён: {be}",
+                            src.display()
+                        );
+                    }
+                }
+                return Err(err);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Восстановление БД из снимка. Требует остановленного киоска.
 /// Порядок: проверка снимка → сохранение текущего состояния (Backup API /
-/// файловая копия) → атомарная замена → проверка → при ошибке полный откат.
+/// файловая копия) → изоляция старых sidecar-ов → атомарная замена →
+/// проверка → при ошибке полный откат.
 pub fn restore_backup(
     cfg: &crate::config::Config,
     backup: &Path,
@@ -742,10 +780,11 @@ pub fn restore_backup(
         "pre-restore-{}",
         backup.file_name().and_then(|n| n.to_str()).unwrap_or("db")
     ));
-    match save_current_state(&cfg.db_path, &pre) {
-        Ok(_) => {}
-        Err(e) => return Err(e),
-    }
+    save_current_state(&cfg.db_path, &pre)?;
+    // Старые sidecar-ы несовместимы с заменённой базой — изолируются до
+    // замены. Ошибка изоляции прерывает восстановление до любых изменений
+    // main-файла: исходная база остаётся нетронутой.
+    quarantine_sidecars(&cfg.db_path, &pre)?;
 
     // Атомарная замена: снимок → tmp (та же ФС) → rename.
     let tmp = dir.join("restore.tmp.db");
@@ -767,10 +806,8 @@ pub fn restore_backup(
             ],
         );
     }
-    // Старые WAL/SHM несовместимы с заменённой базой — удалить.
-    for suffix in ["-wal", "-shm"] {
-        let _ = std::fs::remove_file(PathBuf::from(format!("{}{suffix}", cfg.db_path.display())));
-    }
+    // Sidecar-ы уже изолированы до замены: новая БД открывается без
+    // посторонних WAL/SHM (миграции не запускаются над чужим WAL).
 
     // Проверка после восстановления: открытие прогоняет миграции.
     match datastore::open(&cfg.db_path).and_then(|c| {
@@ -915,7 +952,7 @@ mod tests {
         let (dir, cfg) = setup("lost-db");
         ensure_marker(&cfg.db_path);
         let _ = crate::sync_status::begin(&cfg.db_path);
-        crate::sync_status::finish(&cfg.db_path, false, "", Some("x"));
+        crate::sync_status::finish(&cfg.db_path, None, false, "", Some("x"));
         assert!(
             !cfg.db_path.exists(),
             "sync_status создал файл базы при потерянной установленной БД"
@@ -1037,6 +1074,136 @@ mod tests {
             before,
             "исходная база изменена при отказе сохранения"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ===== Волна 20.1, A2: sidecar-ы при restore =====
+
+    fn pre_path(bdir: &Path, snapshot: &Path) -> PathBuf {
+        bdir.join(format!(
+            "pre-restore-{}",
+            snapshot
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("db")
+        ))
+    }
+    /// Помеха изоляции: путь изолятора для sidecar-а занят каталогом —
+    /// rename невозможен (fs::rename в существующий каталог всегда ошибка).
+    fn block_quarantine_target(bdir: &Path, snapshot: &Path, suffix: &str) {
+        let pre = pre_path(bdir, snapshot);
+        std::fs::create_dir_all(pre.with_extension(format!("db{suffix}.stale"))).unwrap();
+    }
+    /// Юнит: изоляция -wal упирается в занятый изолятор — ошибка, оба
+    /// sidecar-а возвращены на место.
+    #[test]
+    fn quarantine_wal_blocked_keeps_sidecars() {
+        let (dir, cfg) = setup("q-wal");
+        let pre = dir.join("pre.db");
+        std::fs::write(format!("{}-wal", cfg.db_path.display()), b"w").unwrap();
+        std::fs::write(format!("{}-shm", cfg.db_path.display()), b"s").unwrap();
+        std::fs::create_dir_all(pre.with_extension("db-wal.stale")).unwrap();
+        let err = quarantine_sidecars(&cfg.db_path, &pre).unwrap_err();
+        assert!(err.contains("-wal"), "{err}");
+        assert_eq!(
+            std::fs::read(format!("{}-wal", cfg.db_path.display())).unwrap(),
+            b"w",
+            "-wal возвращён"
+        );
+        assert_eq!(
+            std::fs::read(format!("{}-shm", cfg.db_path.display())).unwrap(),
+            b"s",
+            "-shm не тронут"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Юнит: изоляция -shm упирается в занятый изолятор после успешной
+    /// изоляции -wal — компенсация возвращает -wal, полное исходное
+    /// состояние сохранено.
+    #[test]
+    fn quarantine_shm_blocked_rolls_back_wal() {
+        let (dir, cfg) = setup("q-shm");
+        let pre = dir.join("pre.db");
+        std::fs::write(format!("{}-wal", cfg.db_path.display()), b"w").unwrap();
+        std::fs::write(format!("{}-shm", cfg.db_path.display()), b"s").unwrap();
+        std::fs::create_dir_all(pre.with_extension("db-shm.stale")).unwrap();
+        let err = quarantine_sidecars(&cfg.db_path, &pre).unwrap_err();
+        assert!(err.contains("-shm"), "{err}");
+        assert_eq!(
+            std::fs::read(format!("{}-wal", cfg.db_path.display())).unwrap(),
+            b"w",
+            "-wal возвращён после неудачи -shm"
+        );
+        assert_eq!(
+            std::fs::read(format!("{}-shm", cfg.db_path.display())).unwrap(),
+            b"s"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Юнит: успешная изоляция убирает оба sidecar-а с пути рабочей базы.
+    #[test]
+    fn quarantine_success_removes_sidecars_from_work_path() {
+        let (dir, cfg) = setup("q-ok");
+        let pre = dir.join("pre.db");
+        std::fs::write(format!("{}-wal", cfg.db_path.display()), b"w").unwrap();
+        std::fs::write(format!("{}-shm", cfg.db_path.display()), b"s").unwrap();
+        quarantine_sidecars(&cfg.db_path, &pre).expect("изоляция успешна");
+        assert!(!PathBuf::from(format!("{}-wal", cfg.db_path.display())).exists());
+        assert!(!PathBuf::from(format!("{}-shm", cfg.db_path.display())).exists());
+        assert!(
+            pre.with_extension("db-wal.stale").exists()
+                && pre.with_extension("db-shm.stale").exists(),
+            "изолированные sidecar-ы сохранены рядом с pre-копией"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_fails_when_wal_quarantine_blocked() {
+        // Интеграция: занятый изолятор -wal + sidecar, который существует в
+        // момент изоляции (открытое соединение не даёт sqlite убрать его
+        // при закрытии save_current_state; на Windows он к тому же открыт).
+        // Restore не успешен, исходная база и её данные не тронуты.
+        let (dir, cfg) = setup("sidecar-wal");
+        let bdir = dir.join("backups");
+        std::fs::create_dir_all(&bdir).unwrap();
+        add_item(&cfg, "101");
+        ensure_marker(&cfg.db_path);
+        let good = create_backup(&cfg, Some(&bdir)).unwrap();
+        // Открытое соединение гарантирует существование -wal/-shm: sqlite
+        // не удаляет их, пока соединение живо.
+        let held = datastore::open(&cfg.db_path).unwrap();
+        block_quarantine_target(&bdir, &good, "-wal");
+        let before = plu_count(&cfg.db_path);
+        let err = restore_backup(&cfg, &good, Some(&bdir)).unwrap_err();
+        drop(held);
+        assert!(err.contains("-wal"), "{err}");
+        assert_eq!(plu_count(&cfg.db_path), before, "исходная база не тронута");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rollback_reports_sidecar_removal_error() {
+        // Откат с неустранимой помехой возвращает ошибку, а не успех;
+        // сохранённая копия исходной базы остаётся на месте.
+        let (dir, cfg) = setup("rollback-sidecar");
+        add_item(&cfg, "101");
+        ensure_marker(&cfg.db_path);
+        let pre = dir.join("pre.db");
+        let saved = save_current_state(&cfg.db_path, &pre).unwrap();
+        assert!(saved, "исходное состояние сохранено");
+        // Помеха: на пути восстановления чужой -wal-каталог.
+        std::fs::create_dir_all(PathBuf::from(format!("{}-wal", cfg.db_path.display()))).unwrap();
+        let err = rollback_to_saved(&cfg.db_path, &pre).unwrap_err();
+        assert!(err.contains("откат"), "{err}");
+        assert!(pre.exists(), "сохранённая копия не потеряна");
+        drop(std::fs::remove_dir_all(PathBuf::from(format!(
+            "{}-wal",
+            cfg.db_path.display()
+        ))));
+        assert_eq!(plu_count(&cfg.db_path), 1, "исходная база доступна");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

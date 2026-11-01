@@ -425,8 +425,18 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let _lock = take_lock(dir)?;
     // Приём реально начался: блокировка получена — фиксируем попытку.
-    // finish завершит только эту попытку (идентификатор в записи статуса).
-    crate::sync_status::begin(&cfg.db_path);
+    // Владение — токен этой задачи; попытка завершается здесь же, до
+    // выхода из-под блокировки.
+    let token = crate::sync_status::begin(&cfg.db_path);
+    let res = drop_receive(cfg, dir);
+    if let Some(tok) = token {
+        let report = res.as_ref().ok().and_then(|o| o.as_deref()).unwrap_or("");
+        let err = res.as_ref().err().map(|e| e.as_str());
+        crate::sync_status::finish(&cfg.db_path, Some(tok), res.is_ok(), report, err);
+    }
+    res
+}
+fn drop_receive(cfg: &Config, dir: &std::path::Path) -> Result<Option<String>, String> {
     let ready = dir.join("ready.flg");
     let ready_cap = snapshot_meta(&ready);
     let external = cfg.center.protocol == "external";
@@ -593,7 +603,23 @@ pub fn run(cfg: &Config) -> Result<String, String> {
         .map_err(|e| format!("{}: {e}", cfg.incoming_dir.display()))?;
     let _sync_lock = take_lock(&cfg.incoming_dir)?;
     // Попытка началась: предварительные проверки пройдены, блокировка наша.
-    crate::sync_status::begin(&cfg.db_path);
+    // Токен владеет этой задачей; попытка завершается здесь же, до выхода
+    // из-под блокировки — параллельная попытка не может перехватить запись.
+    let token = crate::sync_status::begin(&cfg.db_path);
+    let res = run_ftp(cfg, c);
+    if let Some(tok) = token {
+        let err = res.as_ref().err().map(|e| e.as_str());
+        crate::sync_status::finish(
+            &cfg.db_path,
+            Some(tok),
+            res.is_ok(),
+            res.as_deref().unwrap_or(""),
+            err,
+        );
+    }
+    res
+}
+fn run_ftp(cfg: &Config, c: &crate::config::CenterProfile) -> Result<String, String> {
     let mut ftp = match c.protocol.as_str() {
         "ftp" => connect(c)?,
         "ftps" => return Err("протокол ftps не реализован: используйте ftp или drop-режим".into()),
@@ -681,30 +707,26 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
         let tx = tx.clone();
         std::thread::spawn(move || {
             loop {
+                // Статус попытки завершается внутри run_drop (по токену).
+                // При панике потока токен теряется вместе с задачей: запись
+                // остаётся run и через RUNNING_WINDOW отображается как
+                // прерванная — это соответствует действительности.
                 let guard =
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         match run_drop(&cfg_sync) {
                             Ok(Some(r)) => {
                                 log::info!("{r}");
-                                crate::sync_status::finish(&cfg_sync.db_path, true, &r, None);
                                 let _ = tx.send(r);
                             }
                             Ok(None) => {}
                             Err(e) => {
                                 log::error!("выгрузка (drop): {e}");
-                                crate::sync_status::finish(&cfg_sync.db_path, false, "", Some(&e));
                                 std::thread::sleep(std::time::Duration::from_secs(60));
                             }
                         }
                     }));
                 if guard.is_err() {
                     log::error!("авто-синхронизация (drop): поток паниковал, перезапуск цикла");
-                    crate::sync_status::finish(
-                        &cfg_sync.db_path,
-                        false,
-                        "",
-                        Some("авто-приём: поток прерван внутренней ошибкой"),
-                    );
                 }
                 std::thread::sleep(std::time::Duration::from_secs(5));
             }
@@ -716,27 +738,22 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
         std::thread::spawn(move || {
             loop {
                 std::thread::sleep(interval);
+                // Статус попытки завершается внутри run (по токену); при
+                // панике поток теряет токен — запись остаётся run и станет
+                // «прерванной» после RUNNING_WINDOW.
                 let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     match run(&cfg_sync) {
                         Ok(r) => {
                             log::info!("авто-синхронизация: {r}");
-                            crate::sync_status::finish(&cfg_sync.db_path, true, &r, None);
                             let _ = tx.send(r);
                         }
                         Err(e) => {
                             log::error!("авто-синхронизация: {e}");
-                            crate::sync_status::finish(&cfg_sync.db_path, false, "", Some(&e));
                         }
                     }
                 }));
                 if guard.is_err() {
                     log::error!("авто-синхронизация: поток паниковал, продолжаем цикл");
-                    crate::sync_status::finish(
-                        &cfg_sync.db_path,
-                        false,
-                        "",
-                        Some("авто-синхронизация: поток прерван внутренней ошибкой"),
-                    );
                 }
             }
         });
