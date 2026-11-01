@@ -1171,8 +1171,16 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     let ui_handle = ui_handle.clone();
                     let cfg_t = cfg.clone();
                     std::thread::spawn(move || {
+                        // -n: пароль не запрашивается никогда. Потоки не
+                        // наследуют tty1: sudo с парольным prompt получает
+                        // SIGTTIN/SIGTTOU и останавливает весь киоск.
                         let mut cmd = std::process::Command::new("sudo");
-                        cmd.arg("/usr/local/sbin/openscale-vnc-toggle").arg(arg);
+                        cmd.arg("-n")
+                            .arg("/usr/local/sbin/openscale-vnc-toggle")
+                            .arg(arg)
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null());
                         let res = match run_cmd_timeout(&mut cmd, std::time::Duration::from_secs(5)) {
                             Ok(true) => {
                                 kiosk_vnc_note(next);
@@ -3098,8 +3106,16 @@ pub(crate) fn run_cmd_timeout(
     }
 }
 fn run_settime(args: &[String]) -> Result<(), String> {
+    // -n и null-потоки: как у всех sudo-вызовов киоска — пароль не
+    // запрашивается, tty1 не наследуется (иначе sudo может остановить
+    // процесс job-control сигналом).
     let mut cmd = std::process::Command::new("sudo");
-    cmd.arg("/usr/local/bin/openscale-settime").args(args);
+    cmd.arg("-n")
+        .arg("/usr/local/bin/openscale-settime")
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
     match run_cmd_timeout(&mut cmd, std::time::Duration::from_secs(5)) {
         Ok(true) => Ok(()),
         Ok(false) => Err("хелпер сообщил об ошибке".into()),

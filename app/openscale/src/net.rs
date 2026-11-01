@@ -173,10 +173,13 @@ pub fn apply_dhcp() -> Result<(), String> {
     apply_helper(&["dhcp"])
 }
 fn apply_helper(args: &[&str]) -> Result<(), String> {
+    // stdin — null: sudo не должен наследовать tty киоска. -n запрещает
+    // парольный prompt: при проблеме sudoers — ошибка, а не остановка.
     let out = Command::new("sudo")
         .arg("-n")
         .arg("/usr/local/sbin/openscale-net-apply")
         .args(args)
+        .stdin(std::process::Stdio::null())
         .output()
         .map_err(|e| format!("sudo: {e}"))?;
     if out.status.success() {

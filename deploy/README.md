@@ -88,8 +88,9 @@ Debian-машине или python-скрипт). Перед переустано
 Киоск задаёт время через единственный root-хелпер. Установка на весах:
 
 `
+sed 's/@KIOSK_USER@/administrator/g' deploy/openscale-settime.sudoers > /tmp/settime.sudoers
 install -m 755 deploy/openscale-settime /usr/local/bin/openscale-settime
-install -m 440 deploy/openscale-settime.sudoers /etc/sudoers.d/openscale-settime
+install -m 440 /tmp/settime.sudoers /etc/sudoers.d/openscale-settime
 `
 
 Режимы: openscale-settime "ДД.ММ.ГГГГ ЧЧ:ММ" (ручная установка),
@@ -103,12 +104,17 @@ openscale-settime ntp-on|ntp-off (вкл/выкл systemd-timesyncd). Аргум
 Киоск переключает VNC через sudo-хелпер с фиксированными аргументами:
 
 `
+sed 's/@KIOSK_USER@/administrator/g' deploy/openscale-vnc-toggle.sudoers > /tmp/vnc.sudoers
 install -m 755 deploy/openscale-vnc-toggle /usr/local/sbin/openscale-vnc-toggle
-install -m 440 deploy/openscale-vnc-toggle.sudoers /etc/sudoers.d/openscale-vnc-toggle
+install -m 440 /tmp/vnc.sudoers /etc/sudoers.d/openscale-vnc-toggle
 `
 
-Пункт «Удалённый доступ (VNC)» в разделе «Доступ и безопасность». Событие пишется
-в журнал действий.
+Плейсхолдер @KIOSK_USER@ обязан быть подставлен: шаблон без подстановки
+делает правило недействительным, sudo запрашивает пароль с tty1 и
+сигналом job-control останавливает киоск (процесс уходит в T). Киоск
+вызывает sudo с `-n`: при сломанном правиле — ошибка в журнале, а не
+остановка. Пункт «Удалённый доступ (VNC)» в разделе «Доступ и безопасность».
+Событие пишется в журнал действий.
 
 ## Восстановление PIN администратора (файл-ключ на USB)
 
