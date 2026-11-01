@@ -201,6 +201,13 @@ fn main() {
                 stat("SELECT COUNT(*) FROM admin_user"),
             );
         }
+        Mode::PrintTest => match print::print_test_label_cli(&cfg) {
+            Ok(()) => println!("тестовая этикетка напечатана"),
+            Err(e) => {
+                eprintln!("print-test: {e}");
+                std::process::exit(1);
+            }
+        },
         Mode::Kiosk => run_kiosk(cfg),
     }
 }

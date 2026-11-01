@@ -435,6 +435,40 @@ fn ui_scenarios() {
             k.db_unavailable = false;
         }
 
+        // S12. Совместный отказ: связь с весами потеряна при открытом popup —
+        // подтверждение отклонено, карточка остаётся для отмены, печать не
+        // формируется; после восстановления весов покупка возможна.
+        reset_to_root(&app).await;
+        app.set_weight(1.35, true, true);
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_dept_tapped("ФРУКТЫ".into());
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_plu_tapped("101".into());
+        advance(TICK.as_millis() as u64).await;
+        assert!(ui.get_popup_open(), "S12: карточка открыта");
+        // Связь с весами потеряна: снапшот устаревает, popup пустеет.
+        app.set_weight(1.35, false, false);
+        advance(TICK.as_millis() as u64).await;
+        advance(TICK.as_millis() as u64).await;
+        assert!(ui.get_popup_empty(), "S12: popup помечен пустым при потере связи");
+        ui.invoke_plu_confirm();
+        advance(TICK.as_millis() as u64).await;
+        {
+            let k = app.kiosk.borrow();
+            assert_eq!(k.phase, 0, "S12: подтверждение при пропавшем весе отклонено");
+            assert!(k.print_weight_g.is_none(), "S12: печать не сформирована");
+        }
+        // Вес вернулся — покупка проходит в той же карточке.
+        app.set_weight(1.35, true, true);
+        advance(TICK.as_millis() as u64).await;
+        assert!(!ui.get_popup_empty(), "S12: popup снова с актуальным весом");
+        ui.invoke_plu_confirm();
+        advance(TICK.as_millis() as u64).await;
+        {
+            let k = app.kiosk.borrow();
+            assert_eq!(k.phase, 2, "S12: покупка подтверждена после восстановления");
+        }
+
         let _ = std::fs::remove_dir_all(&app.dir);
         slint::quit_event_loop().unwrap();
     })

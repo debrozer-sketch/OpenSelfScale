@@ -1453,6 +1453,28 @@ pub fn print_test_label(cfg: &crate::config::Config) -> Result<(), PrintError> {
     request(|ack| PrinterRequest::Test { bytes, ack }).map_err(std::io::Error::other)?;
     Ok(())
 }
+
+/// CLI-печать тестовой этикетки при остановленном киоске: демон недоступен,
+/// порт открывается напрямую. Полный путь print_job: предпроверка, печать,
+/// ожидание выдачи этикетки в лотке (открытие порта не считается успехом).
+pub fn print_test_label_cli(cfg: &crate::config::Config) -> Result<(), PrintError> {
+    use std::io::Write as _;
+    if !cfg.printer.enabled {
+        return Err(PrintError::PrinterDisabled);
+    }
+    let bytes = crate::calib::test_label_bytes();
+    let mut port = serialport::new(&cfg.printer.port, cfg.printer.baud)
+        .timeout(Duration::from_millis(1500))
+        .open()
+        .map_err(|e| PrintError::Io(std::io::Error::other(format!("{}: {e}", cfg.printer.port))))?;
+    port.write_all(&[escpos::ESC, 0x40])
+        .and_then(|_| port.flush())
+        .map_err(|e| PrintError::Io(std::io::Error::other(format!("ESC @: {e}"))))?;
+    let wait = Duration::from_secs(cfg.printer.present_wait_secs.max(1) as u64).min(PRESENT_WAIT_MAX);
+    let mut mon = Monitor::default();
+    print_job(&mut port, &bytes, &mut mon, wait)
+        .map_err(|e| PrintError::Io(std::io::Error::other(e.text())))
+}
 fn grid_probe_bytes(spec: &crate::label::LabelSpec, item: &datastore::PluItem) -> Vec<u8> {
     use crate::label::MM_TO_DOTS;
     const W: usize = 448;
