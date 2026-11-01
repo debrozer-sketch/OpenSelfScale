@@ -1,6 +1,7 @@
 //! OpenScale: библиотечная часть (UI, драйверы, печать, синхронизация).
 //! Бинарник — тонкая обёртка в main.rs; UI-сценарии тестируются здесь же.
 pub mod admin;
+pub mod backup;
 pub mod calib;
 pub mod cfgio;
 pub mod cli;

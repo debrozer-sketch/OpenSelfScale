@@ -149,6 +149,57 @@ fn main() {
         Mode::DeptRemove(name) => depts_cli::remove(&cfg, &name),
         Mode::DeptMove(name, ord) => depts_cli::move_dept(&cfg, &name, ord),
         Mode::GroupAssign(group, dept) => depts_cli::group_assign(&cfg, &group, &dept),
+        Mode::Backup(dir) => match backup::create_backup(&cfg, dir.as_deref()) {
+            Ok(p) => {
+                println!("снимок создан: {}", p.display());
+                log::info!("резерв: снимок {}", p.display());
+            }
+            Err(e) => {
+                log::error!("резерв: {e}");
+                eprintln!("резерв: {e}");
+                std::process::exit(1);
+            }
+        },
+        Mode::Restore(path) => match backup::restore_backup(&cfg, &path, None) {
+            Ok(msg) => {
+                println!("{msg}");
+                println!("проверьте запуск: systemctl start openscale-kiosk");
+            }
+            Err(e) => {
+                eprintln!("восстановление: {e}");
+                std::process::exit(1);
+            }
+        },
+        Mode::DbCheck => {
+            let conn = match datastore::open(&cfg.db_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("база {}: {e}", cfg.db_path.display());
+                    std::process::exit(1);
+                }
+            };
+            drop(conn);
+            match backup::integrity_check(&cfg.db_path) {
+                Ok(r) => println!("integrity_check: {r}"),
+                Err(e) => {
+                    eprintln!("integrity_check: {e}");
+                    std::process::exit(1);
+                }
+            }
+            let conn = datastore::open(&cfg.db_path).unwrap();
+            let stat = |sql: &str| -> String {
+                conn.query_row(sql, [], |r| r.get::<_, i64>(0))
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|_| "?".into())
+            };
+            println!(
+                "товаров: {}, отделов: {}, записей печати: {}, пользователей: {}",
+                stat("SELECT COUNT(*) FROM plucodes"),
+                stat("SELECT COUNT(*) FROM groups"),
+                stat("SELECT COUNT(*) FROM print_log"),
+                stat("SELECT COUNT(*) FROM admin_user"),
+            );
+        }
         Mode::Kiosk => run_kiosk(cfg),
     }
 }
@@ -350,6 +401,8 @@ fn run_kiosk(cfg: openscale::config::Config) {
     print::spawn_daemon(&cfg);
     net::spawn_live_monitor();
     let timer = tick::start(&ctx, flow_handles.go_root, flow_handles.refresh_data, sync_rx);
+    let cfg_plain = Arc::new((*cfg).clone());
+    let _backup_thread = backup::spawn_daily(cfg_plain);
     ui.run().expect("UI loop failed");
     drop(timer);
 }

@@ -14,6 +14,12 @@ pub enum Mode {
     DeptMove(String, Option<i64>),
     GroupAssign(String, String),
     LabelProbe,
+    /// Снимок БД (SQLite Backup API) + ротация; необязательный каталог.
+    Backup(Option<PathBuf>),
+    /// Восстановление БД из снимка; требует остановленного киоска.
+    Restore(PathBuf),
+    /// Проверка рабочей БД: integrity_check и краткая статистика.
+    DbCheck,
 }
 pub struct Cli {
     pub mode: Mode,
@@ -90,6 +96,15 @@ pub fn parse_cli() -> Cli {
                 cli.mode = Mode::GroupAssign(g, d);
             }
             "--label-probe" => cli.mode = Mode::LabelProbe,
+            "--backup" => {
+                let dir = opt_arg(&mut args).map(PathBuf::from);
+                cli.mode = Mode::Backup(dir);
+            }
+            "--restore" => {
+                let p = PathBuf::from(req_arg(&mut args, "--restore"));
+                cli.mode = Mode::Restore(p);
+            }
+            "--db-check" => cli.mode = Mode::DbCheck,
             "--version" => {
                 println!("OpenScale kiosk {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
@@ -114,6 +129,10 @@ pub fn parse_cli() -> Cli {
                 eprintln!("  --dept-move ИМЯ N|alpha    позиция отдела (0 = первый)");
                 eprintln!("  --group-assign ГРУППА ОТДЕЛ  привязать группу к отделу");
                 eprintln!("  --label-probe              измерение длины этикетки (диагностика)");
+                eprintln!("Обслуживание базы (см. --config):");
+                eprintln!("  --db-check                 integrity_check и статистика рабочей БД");
+                eprintln!("  --backup [КАТАЛОГ]         согласованный снимок БД + ротация (10 копий)");
+                eprintln!("  --restore ФАЙЛ             восстановление из снимка (киоск должен быть остановлен)");
                 std::process::exit(2);
             }
         }
