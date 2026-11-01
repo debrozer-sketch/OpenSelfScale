@@ -2455,8 +2455,12 @@ fn maint_rows(
         ("отключены".to_string(), 2)
     };
     // «Готов» показываем только когда демон уже получал ответ принтера.
+    // Выключенный в настройках принтер — не «нет данных», а осознанное
+    // состояние: оператор не ищет неисправность там, где её нет.
     let ph = print::health();
-    let printer = if ph.fault {
+    let printer = if !cfg.printer.enabled {
+        ("выключен в настройках".to_string(), 1)
+    } else if ph.fault {
         ("ошибка".to_string(), 2)
     } else if !ph.seen {
         ("нет данных".to_string(), 0)
@@ -3357,6 +3361,28 @@ mod tests {
         assert!(
             !uncertain.contains("повтор") || !uncertain.to_lowercase().contains("повторю"),
             "без обещания автоповтора: {uncertain}"
+        );
+    }
+
+    #[test]
+    fn maint_printer_disabled_is_distinct_from_no_data() {
+        // Выключенный в настройках принтер — не «нет данных»: оператор не
+        // ищет неисправность там, где её нет.
+        let mut cfg = crate::config::Config::default();
+        cfg.printer.enabled = false;
+        let src = crate::weight::WeightSource::spawn(&drivers_api::ScalesProfile {
+            kind: "shtrih-slim".into(),
+            port: "/nonexistent-port".into(),
+            baud: 115_200,
+        });
+        let src = std::sync::Arc::new(src);
+        let rows = maint_rows(&cfg, &src);
+        let printer = rows.iter().find(|r| r.label == "Принтер").unwrap();
+        assert!(
+            printer.value.contains("выключен в настройках") && printer.state == 1,
+            "printer row: {} state {}",
+            printer.value,
+            printer.state
         );
     }
 

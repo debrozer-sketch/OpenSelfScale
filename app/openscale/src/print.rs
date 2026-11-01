@@ -1282,13 +1282,16 @@ fn probe(
     prn: &mut Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>>,
     mon: &mut Monitor,
 ) {
+    // Лог только на смене состояния: выключенный принтер не должен
+    // заполнять журнал строками опроса каждые 800 мс.
+    let was_fault = mon.health.fault;
     let res = with_port(cfg, prn, |p| {
         let port = p.port_mut();
         if cfg.printer.debug_dump {
             debug_dump(port);
         }
         let s = read_l4(port, 2);
-        if s.is_none() || s.is_some_and(escpos::l4_fault) {
+        if (s.is_none() || s.is_some_and(escpos::l4_fault)) && !mon.health.fault {
             log::info!("принтер: замер L4 = {}", fmt_l4(s));
         }
         if s.is_some_and(escpos::l4_fault) {
@@ -1323,8 +1326,13 @@ fn probe(
         Ok(())
     });
     if let Err(e) = res {
-        log::warn!("опрос статуса принтера: {}", e.text());
+        if !was_fault {
+            log::warn!("опрос статуса принтера: {}", e.text());
+        }
         mon.note_failure();
+    } else if was_fault && !mon.health.fault {
+        // Принтер снова отвечает: диагностика без перезапуска приложения.
+        log::info!("принтер: связь восстановлена");
     }
 }
 fn debug_dump(port: &mut Box<dyn serialport::SerialPort>) {
