@@ -2663,7 +2663,7 @@ fn wizard_step_ui(
         ),
     }
 }
-pub(crate) fn startup_setup_render(
+pub fn startup_setup_render(
     ui_handle: &slint::Weak<MainWindow>,
     kiosk: &std::rc::Rc<std::cell::RefCell<crate::session::Kiosk>>,
     cfg: &Config,

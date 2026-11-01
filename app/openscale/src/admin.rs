@@ -22,7 +22,7 @@ pub fn admin_rows(
         .collect()
 }
 
-pub(crate) const PALETTE_NAMES: [&str; 8] = [
+pub const PALETTE_NAMES: [&str; 8] = [
     "Зелёный",
     "Янтарный",
     "Розовый",

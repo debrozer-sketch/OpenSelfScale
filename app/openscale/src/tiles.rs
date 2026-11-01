@@ -151,7 +151,7 @@ pub(crate) const DEPT_PALETTE: &[(u32, u32, u32)] = &[
     (0xE8E4F5, 0x463B6B, 0xD8D2EC), 
     (0xF5E9E0, 0x6B4433, 0xECDBCE), 
 ];
-pub(crate) fn stock_palette() -> Vec<(u32, u32)> {
+pub fn stock_palette() -> Vec<(u32, u32)> {
     DEPT_PALETTE.iter().map(|p| (p.0, p.1)).collect()
 }
 fn parse_hex(s: &str) -> Option<u32> {

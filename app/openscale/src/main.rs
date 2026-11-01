@@ -1,33 +1,11 @@
 
-mod admin;
-mod calib;
-mod cfgio;
-mod cli;
-mod config;
-mod context;
-mod depts_cli;
-mod diag;
-mod flow;
-mod label;
-mod net;
-mod nav;
-mod print;
-mod session;
-mod settings;
-mod setup;
-mod sync;
-mod tick;
-mod thumbs;
-mod tiles;
-mod watchdog;
-mod weight;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use cli::{Mode, parse_cli};
-use context::AppContext;
-use session::Kiosk;
-slint::include_modules!();
-fn init_logger(cfg: &config::Config) {
+use openscale::*;
+use openscale::cli::{Mode, parse_cli};
+use openscale::context::AppContext;
+use openscale::session::Kiosk;
+fn init_logger(cfg: &openscale::config::Config) {
     use simplelog::*;
     let mut loggers: Vec<Box<dyn SharedLogger>> =
         vec![TermLogger::new(
@@ -47,7 +25,7 @@ fn init_logger(cfg: &config::Config) {
 }
 fn main() {
     let cli = parse_cli();
-    let cfg = match config::Config::load(&cli.config_path) {
+    let cfg = match openscale::config::Config::load(&cli.config_path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("конфиг: {e}");
@@ -174,7 +152,7 @@ fn main() {
         Mode::Kiosk => run_kiosk(cfg),
     }
 }
-fn run_kiosk(cfg: config::Config) {
+fn run_kiosk(cfg: openscale::config::Config) {
     let app_state = Arc::new(weight::WeightSource::spawn(&cfg.scales));
     let cfg = Arc::new(cfg);
     match datastore::open(&cfg.db_path) {

@@ -80,6 +80,19 @@ impl WeightSource {
     pub fn request_zero(&self) {
         self.zero.store(true, Ordering::Relaxed);
     }
+    /// Тестовый источник без потока опроса: снапшотом управляет тест через
+    /// возвращённый мьютекс. В production не используется.
+    #[doc(hidden)]
+    pub fn frozen(snap: Snapshot) -> (Self, Arc<Mutex<Snapshot>>) {
+        let inner = Arc::new(Mutex::new(snap));
+        let src = Self {
+            inner: inner.clone(),
+            stop: Arc::new(AtomicBool::new(false)),
+            zero: Arc::new(AtomicBool::new(false)),
+            handle: None,
+        };
+        (src, inner)
+    }
 }
 impl Drop for WeightSource {
     fn drop(&mut self) {
