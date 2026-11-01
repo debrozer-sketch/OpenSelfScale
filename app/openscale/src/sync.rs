@@ -392,6 +392,8 @@ pub fn run_drop(cfg: &Config) -> Result<Option<String>, String> {
     }
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let _lock = take_lock(dir)?;
+    // Приём реально начался — фиксируем попытку (успех запишется в finish).
+    crate::sync_status::begin(&cfg.db_path);
     let ready = dir.join("ready.flg");
     let ready_cap = snapshot_meta(&ready);
     let external = cfg.center.protocol == "external";
@@ -546,6 +548,8 @@ pub fn run(cfg: &Config) -> Result<String, String> {
     if !c.enabled() {
         return Err("центр не настроен: заполните [center] в config.toml (host, plu_path)".into());
     }
+    // Попытка началась: предварительные проверки пройдены.
+    crate::sync_status::begin(&cfg.db_path);
     let mut ftp = match c.protocol.as_str() {
         "ftp" => connect(c)?,
         "ftps" => {
@@ -635,17 +639,25 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
                 match run_drop(&cfg_sync) {
                     Ok(Some(r)) => {
                         log::info!("{r}");
+                        crate::sync_status::finish(&cfg_sync.db_path, true, &r, None);
                         let _ = tx.send(r);
                     }
                     Ok(None) => {}
                     Err(e) => {
                         log::error!("выгрузка (drop): {e}");
+                        crate::sync_status::finish(&cfg_sync.db_path, false, "", Some(&e));
                         std::thread::sleep(std::time::Duration::from_secs(60));
                     }
                 }
             }));
             if guard.is_err() {
                 log::error!("авто-синхронизация (drop): поток паниковал, перезапуск цикла");
+                crate::sync_status::finish(
+                    &cfg_sync.db_path,
+                    false,
+                    "",
+                    Some("авто-приём: поток прерван внутренней ошибкой"),
+                );
             }
             std::thread::sleep(std::time::Duration::from_secs(5));
         });
@@ -660,13 +672,23 @@ pub fn spawn_auto_sync(cfg: &std::sync::Arc<Config>) -> std::sync::mpsc::Receive
                 match run(&cfg_sync) {
                     Ok(r) => {
                         log::info!("авто-синхронизация: {r}");
+                        crate::sync_status::finish(&cfg_sync.db_path, true, &r, None);
                         let _ = tx.send(r);
                     }
-                    Err(e) => log::error!("авто-синхронизация: {e}"),
+                    Err(e) => {
+                        log::error!("авто-синхронизация: {e}");
+                        crate::sync_status::finish(&cfg_sync.db_path, false, "", Some(&e));
+                    }
                 }
             }));
             if guard.is_err() {
                 log::error!("авто-синхронизация: поток паниковал, продолжаем цикл");
+                crate::sync_status::finish(
+                    &cfg_sync.db_path,
+                    false,
+                    "",
+                    Some("авто-синхронизация: поток прерван внутренней ошибкой"),
+                );
             }
         });
     } else {

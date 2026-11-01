@@ -18,6 +18,7 @@ pub mod session;
 pub mod settings;
 pub mod setup;
 pub mod sync;
+pub mod sync_status;
 pub mod tick;
 pub mod thumbs;
 pub mod tiles;

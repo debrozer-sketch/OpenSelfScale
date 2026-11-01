@@ -99,6 +99,11 @@ pub fn start(
                 }
                 if sync_rx.as_ref().map(|rx| rx.try_recv().is_ok()).unwrap_or(false) {
                     refresh_data();
+                    // Экран обслуживания открыт — показать свежий статус
+                    // синхронизации (BUSY защищает от двойного обновления).
+                    if ui.get_screen() == 27 {
+                        crate::settings::spawn_maint_refresh(&cfg, &app_state, &ui_handle);
+                    }
                 }
                 let mut k = kiosk.borrow_mut();
                 if k.restart_requested {

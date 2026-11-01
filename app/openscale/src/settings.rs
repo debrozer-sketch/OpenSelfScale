@@ -2465,18 +2465,25 @@ fn maint_rows(
     } else {
         ("готов".to_string(), 0)
     };
-    vec![
+    // Статус синхронизации: последнее сохранённое состояние попытки.
+    let mut rows = vec![
         maint_row("База данных", db),
         maint_row("Резервная копия", backup),
         maint_row("Весы", scales),
         maint_row("Принтер", printer),
-        // Приложение не хранит состояние последней синхронизации —
-        // не показываем выдуманного.
-        maint_row("Синхронизация", ("нет данных".to_string(), 0)),
-    ]
+    ];
+    match datastore::open(&cfg.db_path) {
+        Ok(conn) => {
+            for line in crate::sync_status::display(crate::sync_status::read(&conn)) {
+                rows.push(maint_row("Синхронизация", line));
+            }
+        }
+        Err(_) => rows.push(maint_row("Синхронизация", ("нет данных".to_string(), 0))),
+    }
+    rows
 }
 
-fn spawn_maint_refresh(
+pub fn spawn_maint_refresh(
     cfg: &crate::config::Config,
     app_state: &std::sync::Arc<crate::weight::WeightSource>,
     ui_handle: &slint::Weak<MainWindow>,

@@ -644,7 +644,10 @@ fn ui_scenarios() {
         assert_eq!(row(1).state, 1, "S18: копий нет — внимание");
         assert!(row(1).value.contains("нет"), "S18: сообщение об отсутствии копий");
         assert!(row(2).value.contains("подключены"), "S18: весы подключены");
-        assert_eq!(row(4).state, 0, "S18: синхронизация — нейтральная строка");
+        assert!(
+            row(4).value.contains("Ещё не выполнялась"),
+            "S18: синхронизация без записи: {}", row(4).value
+        );
 
         // Весы отключились: строка меняется, остальные статусы на месте.
         app.set_weight(1.000, true, false);
@@ -697,6 +700,69 @@ fn ui_scenarios() {
         );
         ui.invoke_imp_popup_close();
         advance(TICK.as_millis() as u64).await;
+
+        // S19. Обслуживание: статус синхронизации во всех состояниях.
+        // Запись пишется напрямую в ui.db — как это делает sync_status.
+        let set_sync = |json: &str| {
+            let conn = datastore::open(&app.dir.join("ui.db")).unwrap();
+            datastore::set_setting(&conn, "sync.last", json).unwrap();
+        };
+        let sync_rows = |ui: &slint::Weak<crate::MainWindow>| {
+            let m = ui.upgrade().unwrap().get_maint_rows();
+            (0..m.row_count())
+                .filter_map(|i| m.row_data(i))
+                .filter(|r| r.label == "Синхронизация")
+                .map(|r| (r.value.to_string(), r.state))
+                .collect::<Vec<_>>()
+        };
+        // Ошибка с сохранённым прошлым успехом: три строки.
+        set_sync(r#"{"a": 1790000000, "s": "err", "u": 1780000000, "e": "выгрузка на сервере не готова или не дописалась"}"#);
+        ui.invoke_maint_refresh();
+        wait_until("S19: строки синхронизации обновились", || {
+            sync_rows(&app.ui.as_weak()).len() == 3
+        })
+        .await;
+        let sr = sync_rows(&app.ui.as_weak());
+        assert!(sr[0].0.contains("— ошибка") && sr[0].1 == 2, "S19: {sr:?}");
+        assert!(sr[1].0.contains("Причина:") && sr[1].1 == 1, "S19: {sr:?}");
+        assert!(sr[2].0.contains("Последний успех") && sr[2].1 == 0, "S19: {sr:?}");
+        assert!(!sr[1].0.contains("plu.xml") && !sr[1].0.contains('/'), "S19: без путей: {}", sr[1].0);
+        // Успех: одна строка.
+        set_sync(r#"{"a": 1790000000, "s": "ok", "u": 1790000000, "e": ""}"#);
+        ui.invoke_maint_refresh();
+        wait_until("S19: успех отображён", || sync_rows(&app.ui.as_weak()).len() == 1).await;
+        let sr = sync_rows(&app.ui.as_weak());
+        assert!(sr[0].0.contains("— успешно") && sr[0].1 == 0, "S19: {sr:?}");
+        // Выполняется (свежая running-запись).
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        set_sync(&format!(r#"{{"a": {now}, "s": "run", "u": 0, "e": ""}}"#));
+        ui.invoke_maint_refresh();
+        wait_until("S19: выполняется отображено", || {
+            sync_rows(&app.ui.as_weak())[0].0.contains("Выполняется")
+        })
+        .await;
+        // Прерванная (running давно).
+        set_sync(r#"{"a": 1790000000, "s": "run", "u": 1780000000, "e": ""}"#);
+        ui.invoke_maint_refresh();
+        wait_until("S19: прерванная отображена", || {
+            sync_rows(&app.ui.as_weak())[0].0.contains("прервана")
+        })
+        .await;
+        let sr = sync_rows(&app.ui.as_weak());
+        assert!(sr[0].1 == 2 && sr[1].0.contains("во время приёма"), "S19: {sr:?}");
+        // Записи нет — «Ещё не выполнялась».
+        {
+            let conn = datastore::open(&app.dir.join("ui.db")).unwrap();
+            conn.execute("DELETE FROM app_settings WHERE key = 'sync.last'", []).unwrap();
+        }
+        ui.invoke_maint_refresh();
+        wait_until("S19: ещё не выполнялась", || {
+            sync_rows(&app.ui.as_weak())[0].0.contains("Ещё не")
+        })
+        .await;
 
 
         // BENCH. Бенчмарк каталога на синтетике 2000 товаров (OPSCALE_BENCH=1):

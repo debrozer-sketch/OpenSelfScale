@@ -89,10 +89,15 @@ fn main() {
             };
             match res {
                 Ok(report) => {
+                    // Ok(None) (drop) — попытки не было, статус не трогаем.
+                    if report != "выгрузки нет" {
+                        crate::sync_status::finish(&cfg.db_path, true, &report, None);
+                    }
                     println!("{report}");
                     println!("для показа на весах перезапустите: systemctl restart openscale-kiosk");
                 }
                 Err(e) => {
+                    crate::sync_status::finish(&cfg.db_path, false, "", Some(&e));
                     eprintln!("синхронизация: {e}");
                     std::process::exit(1);
                 }
