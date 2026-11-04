@@ -358,13 +358,7 @@ pub fn start(
                                         }
                                         db.as_ref().and_then(|conn| {
                                             let goods = datastore::plu_count(conn).unwrap_or(0);
-                                            let layout = datastore::get_setting(
-                                                conn,
-                                                "label_layout_name",
-                                            )
-                                            .ok()
-                                            .flatten()
-                                            .is_some();
+                                            let layout = layout_ready(conn);
                                             Some((goods, layout))
                                         })
                                     };
@@ -502,8 +496,23 @@ fn logo_entry_screen(screen: i32) -> bool {
     matches!(screen, 0 | 2 | 3)
 }
 
+/// Чек-лист «Раскладка этикетки»: выбранная раскладка существует в базе,
+/// а не только имя в настройке (false на заводской БД без шаблонов).
+fn layout_ready(conn: &rusqlite::Connection) -> bool {
+    datastore::get_setting(conn, "label_layout_name")
+        .ok()
+        .flatten()
+        .is_some_and(|name| {
+            datastore::label_layout_get(conn, &name)
+                .ok()
+                .flatten()
+                .is_some()
+        })
+}
+
 #[cfg(test)]
 mod tests {
+    use super::layout_ready;
     use super::logo_entry_screen;
 
     #[test]
@@ -516,8 +525,29 @@ mod tests {
     #[test]
     fn logo_entry_denied_elsewhere() {
         assert!(!logo_entry_screen(1), "резервный экран");
-        assert!(!logo_entry_screen(4), "настройки отделов");
-        assert!(!logo_entry_screen(12), "меню администратора");
-        assert!(!logo_entry_screen(-1), "мусорное значение");
+        assert!(!logo_entry_screen(4), "экран обслуживания");
+        assert!(!logo_entry_screen(12), "нет такого экрана");
+        assert!(!logo_entry_screen(-1), "некорректное значение");
+    }
+
+    #[test]
+    fn layout_ready_requires_existing_layout() {
+        let dir = std::env::temp_dir().join(format!("os-layout-ready-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("kiosk.db");
+        let conn = datastore::open(&db).unwrap();
+        // Заводская БД: настройки нет — раскладки нет.
+        assert!(!layout_ready(&conn), "пустая БД — раскладки нет");
+        // Ложный след: имя записано, шаблона нет — раскладки нет.
+        datastore::set_setting(&conn, "label_layout_name", "market-56x38").unwrap();
+        assert!(
+            !layout_ready(&conn),
+            "имя без шаблона не делает раскладку готовой"
+        );
+        // Шаблон загружен и выбран — готово.
+        datastore::label_layout_put(&conn, "market-56x38", 56, 38, "{}").unwrap();
+        assert!(layout_ready(&conn), "шаблон существует и выбран");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
