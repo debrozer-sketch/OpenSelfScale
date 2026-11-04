@@ -817,12 +817,12 @@ impl Monitor {
                     self.recover_attempts = 0;
                     self.health.power_cycle_hint = false;
                 }
-                // Бумага — из битов L4 того же протокола, что декодирует
-                // decode_l4: бит 0x40 — «бумаги нет», бит 0x08 — near-end
-                // (бит 0x04 — авария и проверяется отдельно). При аварии
-                // статус бумаги недостоверен.
-                self.health.paper_end = !escpos::l4_fault(b) && b & 0x40 != 0;
-                self.health.paper_near_end = !escpos::l4_fault(b) && b & 0x08 != 0;
+                // Бумага: на PT-561 биты 0x60 L4 — датчик этикетки под
+                // головкой/лоток (0x7E в покое при полной ленте, 0x1E с
+                // этикеткой в лотке), а биты 0x0C неизменны. Достоверного
+                // статуса рулона в L4 нет, поэтому бумажные состояния не
+                // выводятся из этих битов: реальный конец ленты проявляется
+                // аварией (0x04 = 0) или отказом печати по таймауту.
                 let in_tray = escpos::label_in_tray(b);
                 if in_tray && !self.health.label_waiting {
                     self.label_since = Some(std::time::Instant::now());
@@ -2093,10 +2093,12 @@ mod tests {
         assert!(matches!(err, PrintError::PrinterDisabled));
     }
 
-    // L4-байты принтера: 0x36 — норма без этикетки в лотке, 0x16 — норма
-    // с этикеткой в лотке, 0x12 — валидный, но с битом ошибки.
-    const L4_OK: u8 = 0x36;
-    const L4_IN_TRAY: u8 = 0x16;
+    // L4-байты принтера PT-561 (эмпирика): 0x1E — этикетка в лотке
+    // (норма после печати), 0x7E — лоток пуст при полной ленте (норма
+    // покоя), 0x12 — валидный с битом аварии (0x04 = 0). Статус рулона
+    // в L4 недостоверен и бумажные состояния из него не выводятся.
+    const L4_OK: u8 = 0x1E;
+    const L4_IDLE: u8 = 0x7E;
     const L4_FAULT: u8 = 0x12;
 
     // ===== Волна 20, часть C: достоверность статусов =====
@@ -2118,25 +2120,29 @@ mod tests {
     }
 
     #[test]
-    fn paper_states_come_from_l4_bits() {
+    fn paper_status_not_derived_from_tray_bits() {
+        // Эмпирика PT-561: в покое (лоток пуст, лента есть) L4 = 0x7E,
+        // с этикеткой в лотке — 0x1E. Биты 0x60 кодируют датчик этикетки
+        // под головкой/лоток, а не рулон: из них нельзя выводить «лента
+        // закончилась» (ложное сообщение при рабочем принтере).
         let mut mon = Monitor::default();
-        // near-end: бит 0x08 (без fault-бита).
-        mon.feed(Some(0x3E)); // 0x36 | 0x08: норма + near-end
-        assert!(mon.health.paper_near_end, "near-end из L4");
-        assert!(!mon.health.paper_end);
-        // бумага закончилась: бит 0x40.
-        mon.feed(Some(0x76)); // 0x36 | 0x40
-        assert!(mon.health.paper_end, "paper_end из L4");
+        mon.feed(Some(0x7E));
+        assert!(!mon.health.paper_end, "0x7E — норма покоя, не конец ленты");
         assert!(!mon.health.paper_near_end);
-        // Валидный статус без признаков — бумага в порядке.
-        mon.feed(Some(L4_OK));
+        mon.feed(Some(0x1E));
         assert!(!mon.health.paper_end && !mon.health.paper_near_end);
+        // Аварийный бит 0x04 = 0 остаётся единственным источником fault
+        // (после FAULT_CONFIRM подтверждений, как и раньше).
+        mon.feed(Some(0x12));
+        mon.feed(Some(0x12));
+        assert!(mon.health.fault, "авария распознаётся как раньше");
+        assert!(!mon.health.paper_end);
     }
 
     #[test]
     fn silence_is_link_error_and_clears_paper_status() {
         let mut mon = Monitor::default();
-        mon.feed(Some(0x76)); // paper_end
+        mon.feed(Some(L4_IDLE)); // лоток пуст — штатный покой
         for _ in 0..SILENT_CONFIRM {
             mon.feed(None);
         }
@@ -2229,7 +2235,7 @@ mod tests {
     #[test]
     fn monitor_silence_is_fault_and_stops_label_wait() {
         let mut mon = Monitor::default();
-        mon.feed(Some(L4_IN_TRAY));
+        mon.feed(Some(L4_OK));
         assert!(mon.health.label_waiting);
         for _ in 0..SILENT_CONFIRM {
             mon.feed(None);
@@ -2252,9 +2258,9 @@ mod tests {
     #[test]
     fn monitor_label_watch_resets_when_label_removed() {
         let mut mon = Monitor::default();
-        mon.feed(Some(L4_IN_TRAY));
-        assert!(mon.health.label_waiting);
         mon.feed(Some(L4_OK));
+        assert!(mon.health.label_waiting);
+        mon.feed(Some(L4_IDLE));
         assert!(!mon.health.label_waiting, "этикетку забрали");
     }
     fn tmp_db() -> std::path::PathBuf {

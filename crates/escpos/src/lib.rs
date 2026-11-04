@@ -1,4 +1,3 @@
-
 use std::io::{Read, Write};
 use thiserror::Error;
 pub const ESC: u8 = 0x1B;
@@ -43,21 +42,21 @@ pub fn to_cp866(text: &str) -> Result<Vec<u8>, EscPosError> {
             if code < 0x80 {
                 Ok(code as u8)
             } else if (0x410..=0x42F).contains(&code) {
-                Ok((code - 0x410 + 0x80) as u8) 
+                Ok((code - 0x410 + 0x80) as u8)
             } else if (0x430..=0x43F).contains(&code) {
-                Ok((code - 0x430 + 0xA0) as u8) 
+                Ok((code - 0x430 + 0xA0) as u8)
             } else if (0x440..=0x44F).contains(&code) {
-                Ok((code - 0x440 + 0xE0) as u8) 
+                Ok((code - 0x440 + 0xE0) as u8)
             } else if code == 0x401 {
-                Ok(0xF0) 
+                Ok(0xF0)
             } else if code == 0x451 {
-                Ok(0xF1) 
+                Ok(0xF1)
             } else if (0x2591..=0x2593).contains(&code) {
-                Ok((code - 0x2591 + 0xB0) as u8) 
+                Ok((code - 0x2591 + 0xB0) as u8)
             } else if code == 0x2580 {
-                Ok(0xDE) 
+                Ok(0xDE)
             } else if code == 0x2584 {
-                Ok(0xDF) 
+                Ok(0xDF)
             } else if code == 0x2116 {
                 Ok(0xFC) // №
             } else if code == 0x00B0 {
@@ -79,18 +78,18 @@ pub struct LabelJob {
 impl LabelJob {
     pub fn begin(area: (u16, u16)) -> Self {
         let mut b = Vec::with_capacity(64);
-        b.extend_from_slice(&[ESC, b't', 0x11]); 
+        b.extend_from_slice(&[ESC, b't', 0x11]);
         b.extend_from_slice(&[ESC, b'c', b'0', 0x01]);
-        b.extend_from_slice(&[ESC, b'{', 0x01]); 
-        b.extend_from_slice(&[ESC, b'L']); 
-        b.extend_from_slice(&[ESC, b'T', 0x02]); 
+        b.extend_from_slice(&[ESC, b'{', 0x01]);
+        b.extend_from_slice(&[ESC, b'L']);
+        b.extend_from_slice(&[ESC, b'T', 0x02]);
         let (dx, dy) = area;
         b.extend_from_slice(&[ESC, b'W', 0, 0, 0, 0]);
         b.extend_from_slice(&le16(dx));
         b.extend_from_slice(&le16(dy));
-        b.push(CAN); 
-        b.extend_from_slice(&[ESC, b'3', 0x00]); 
-        b.extend_from_slice(&[ESC, b' ', 0x00]); 
+        b.push(CAN);
+        b.extend_from_slice(&[ESC, b'3', 0x00]);
+        b.extend_from_slice(&[ESC, b' ', 0x00]);
         Self { buf: b }
     }
     pub fn field(
@@ -128,7 +127,7 @@ impl LabelJob {
         self.buf.extend_from_slice(&[GS, b'$', yl, yh]);
         self.buf.extend_from_slice(&[GS, b'w', module_dots]);
         self.buf.extend_from_slice(&[GS, b'h', height_dots]);
-        self.buf.extend_from_slice(&[GS, b'H', 0x02]); 
+        self.buf.extend_from_slice(&[GS, b'H', 0x02]);
         self.buf.extend_from_slice(&[GS, b'k', 0x02]);
         self.buf.extend_from_slice(digits.as_bytes());
         self.buf.push(0x00);
@@ -195,27 +194,63 @@ pub fn build_printer_info(n: u8) -> [u8; 3] {
     [GS, b'I', n]
 }
 pub fn decode_l1(byte: u8) -> String {
-    if byte & 0x08 != 0 { "offline".into() } else { "онлайн".into() }
+    if byte & 0x08 != 0 {
+        "offline".into()
+    } else {
+        "онлайн".into()
+    }
 }
 pub fn decode_l2(byte: u8) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if byte & 0x04 != 0 { parts.push("крышка открыта".into()); }
-    if byte & 0x20 != 0 { parts.push("стоп по концу бумаги".into()); }
-    if byte & 0x40 != 0 { parts.push("ошибка".into()); }
-    if parts.is_empty() { "норма".into() } else { parts.join(", ") }
+    if byte & 0x04 != 0 {
+        parts.push("крышка открыта".into());
+    }
+    if byte & 0x20 != 0 {
+        parts.push("стоп по концу бумаги".into());
+    }
+    if byte & 0x40 != 0 {
+        parts.push("ошибка".into());
+    }
+    if parts.is_empty() {
+        "норма".into()
+    } else {
+        parts.join(", ")
+    }
 }
 pub fn decode_l3(byte: u8) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if byte & 0x08 != 0 { parts.push("каттер".into()); }
-    if byte & 0x20 != 0 { parts.push("питание".into()); }
-    if byte & 0x40 != 0 { parts.push("перегрев головки".into()); }
-    if parts.is_empty() { "норма".into() } else { parts.join(", ") }
+    if byte & 0x08 != 0 {
+        parts.push("каттер".into());
+    }
+    if byte & 0x20 != 0 {
+        parts.push("питание".into());
+    }
+    if byte & 0x40 != 0 {
+        parts.push("перегрев головки".into());
+    }
+    if parts.is_empty() {
+        "норма".into()
+    } else {
+        parts.join(", ")
+    }
 }
+/// Эмпирика PT-561: 0x1E — этикетка в лотке (норма после печати), 0x7E —
+/// лоток пуст при полной ленте (норма покоя). Биты 0x60 — датчик этикетки
+/// под головкой/лоток, биты 0x0C на этой прошивке неизменны: статус рулона
+/// по L4 недостоверен и здесь не декодируется.
 pub fn decode_l4(byte: u8) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if byte & 0x0C != 0 { parts.push("рулон near-end".into()); }
-    if byte & 0x60 != 0 { parts.push("бумаги нет".into()); }
-    parts.push(if label_in_tray(byte) { "этикетка в лотке" } else { "лоток пуст" }.into());
+    if byte & 0x04 == 0 {
+        parts.push("авария".into());
+    }
+    parts.push(
+        if label_in_tray(byte) {
+            "этикетка в лотке"
+        } else {
+            "лоток пуст"
+        }
+        .into(),
+    );
     parts.join(", ")
 }
 pub fn build_init() -> [u8; 2] {
@@ -240,7 +275,7 @@ impl<P: Read + Write> EscPosPrinter<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-        #[test]
+    #[test]
     fn to_cp866_prints_no_and_degree() {
         let bytes = to_cp866("5 кг\u{b0} №12").unwrap();
         assert!(bytes.contains(&0xF8), "degree missing: {bytes:?}");
@@ -256,7 +291,7 @@ mod tests {
         let ok = vec![0u8; band * 8];
         assert!(job.raster(0, 0, 1, &ok).is_ok());
     }
-#[test]
+    #[test]
     fn field_dbl_uses_double_wide_and_double_high() {
         let mut job = LabelJob::begin((448, 232));
         job.field(10, 20, FieldStyle::Dbl, "СУММА").unwrap();
@@ -281,12 +316,12 @@ mod tests {
     fn init_sequence_matches_live_dump() {
         let job = LabelJob::begin((448, 232));
         let out = job.finish();
-        let head = &out[..out.len() - 3]; 
+        let head = &out[..out.len() - 3];
         assert_eq!(
             &head[..28],
             &[
-                ESC, b't', 0x11, ESC, b'c', b'0', 0x01, ESC, b'{', 0x01, ESC, b'L', ESC, b'T', 0x02,
-                ESC, b'W', 0, 0, 0, 0, 0xC0, 0x01, 0xE8, 0x00, CAN, ESC, b'3'
+                ESC, b't', 0x11, ESC, b'c', b'0', 0x01, ESC, b'{', 0x01, ESC, b'L', ESC, b'T',
+                0x02, ESC, b'W', 0, 0, 0, 0, 0xC0, 0x01, 0xE8, 0x00, CAN, ESC, b'3'
             ][..]
         );
     }
@@ -305,15 +340,18 @@ mod tests {
         let out = job.finish();
         let probe = window(
             &out,
-            &[GS, b'w', 0x02, GS, b'h', 0x30, GS, b'H', 0x02, GS, b'k', 0x02, b'2', b'1', b'0', b'2', b'1', b'3', b'6', b'0', b'1', b'3', b'5', b'0', 0x00],
+            &[
+                GS, b'w', 0x02, GS, b'h', 0x30, GS, b'H', 0x02, GS, b'k', 0x02, b'2', b'1', b'0',
+                b'2', b'1', b'3', b'6', b'0', b'1', b'3', b'5', b'0', 0x00,
+            ],
         );
         assert!(probe.is_some());
     }
     #[test]
     fn barcode_rejects_bad_input() {
         let mut job = LabelJob::begin((448, 232));
-    assert!(job.barcode_ean13(0, 0, "123", 2, 0x30).is_err());
-    assert!(job.barcode_ean13(0, 0, "21021360135a", 2, 0x30).is_err());
+        assert!(job.barcode_ean13(0, 0, "123", 2, 0x30).is_err());
+        assert!(job.barcode_ean13(0, 0, "21021360135a", 2, 0x30).is_err());
     }
     #[test]
     fn cp866_unknown_char_becomes_question() {
@@ -351,7 +389,7 @@ mod tests {
         assert!(l4_fault(0x72));
     }
     #[test]
-    fn decode_matches_hprt_manual() {
+    fn decode_l1_l2_l3_match_hprt_manual() {
         assert_eq!(decode_l1(0x00), "онлайн");
         assert_eq!(decode_l1(0x08), "offline");
         assert_eq!(decode_l2(0x12), "норма");
@@ -359,12 +397,19 @@ mod tests {
         assert_eq!(decode_l3(0x12), "норма");
         assert_eq!(decode_l3(0x52), "перегрев головки");
         assert_eq!(decode_l3(0x1A), "каттер");
+    }
+    #[test]
+    fn decode_l4_reports_tray_not_roll() {
+        // Эмпирика PT-561: 0x7E — покой (лоток пуст, лента есть), 0x1E —
+        // этикетка в лотке. Статус рулона из L4 не декодируется: биты
+        // 0x0C/0x60 на этой прошивке не говорят о бумаге.
         let d = decode_l4(0x1E);
-        assert!(d.contains("рулон near-end"), "{d}");
         assert!(d.contains("этикетка в лотке"), "{d}");
+        assert!(!d.contains("бумаги нет"), "{d}");
         let d = decode_l4(0x7E);
-        assert!(d.contains("бумаги нет"), "{d}");
         assert!(d.contains("лоток пуст"), "{d}");
+        assert!(!d.contains("бумаги нет"), "{d}");
+        assert!(decode_l4(0x12).contains("авария"), "{d}");
     }
     #[test]
     fn printer_info_frame_is_gs_i() {
