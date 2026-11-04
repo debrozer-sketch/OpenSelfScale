@@ -792,6 +792,49 @@ fn compose_with_compensation(base: String, compensation: Result<(), String>) -> 
     }
 }
 
+/// Проверка восстановленной базы: открытие прогоняет миграции, load_all
+/// подтверждает читаемость. Выделена для инъекции в тестах.
+fn verify_restored(db_path: &Path) -> Result<(), String> {
+    datastore::open(db_path)
+        .and_then(|c| {
+            datastore::load_all(&c)?;
+            Ok(())
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// Тип операции восстановления: путь-в-путь, ошибка — строкой.
+type RestoreOp = Box<dyn Fn(&Path, &Path) -> Result<(), String>>;
+/// Тип операции сохранения состояния: возвращает признак наличия БД.
+type SaveOp = Box<dyn Fn(&Path, &Path) -> Result<bool, String>>;
+/// Тип проверки восстановленной базы.
+type VerifyOp = Box<dyn Fn(&Path) -> Result<(), String>>;
+
+/// Файловые операции восстановления. Точка инъекции для тестов отказов:
+/// production-набор использует реальные операции, тесты подставляют
+/// отказы, не имитируя файловую систему целиком.
+struct RestoreOps {
+    /// Снимок текущего состояния (save_current_state).
+    save: SaveOp,
+    /// Копирование снимка во временный файл (copy_fsync).
+    copy: RestoreOp,
+    /// Замена main-файла восстановленным (rename tmp -> db).
+    rename_main: RestoreOp,
+    /// Проверка восстановленной базы (verify_restored).
+    verify: VerifyOp,
+}
+
+impl RestoreOps {
+    fn production() -> Self {
+        Self {
+            save: Box::new(save_current_state),
+            copy: Box::new(copy_fsync),
+            rename_main: Box::new(|from, to| std::fs::rename(from, to).map_err(|e| e.to_string())),
+            verify: Box::new(verify_restored),
+        }
+    }
+}
+
 /// Восстановление БД из снимка. Требует остановленного киоска.
 ///
 /// От сохранения текущего состояния до проверки восстановленной базы — одна
@@ -810,6 +853,20 @@ pub fn restore_backup(
     cfg: &crate::config::Config,
     backup: &Path,
     dir: Option<&Path>,
+) -> Result<String, String> {
+    restore_core(cfg, backup, dir, &RestoreOps::production())
+}
+
+/// Ядро восстановления: от снимка текущего состояния до проверки
+/// восстановленной базы — одна логическая транзакция с компенсациями.
+/// После успешной изоляции sidecar-ов не осталось ни одного раннего
+/// выхода без компенсации: ошибка до замены main возвращает изолированные
+/// sidecar-ы, ошибка после замены — полный откат из pre.
+fn restore_core(
+    cfg: &crate::config::Config,
+    backup: &Path,
+    dir: Option<&Path>,
+    ops: &RestoreOps,
 ) -> Result<String, String> {
     // Эксклюзивная блокировка обслуживания ДО любых проверок и изменений:
     // ни работающий киоск (держит shared), ни второй --restore не пройдут.
@@ -843,7 +900,7 @@ pub fn restore_backup(
         "pre-restore-{}",
         backup.file_name().and_then(|n| n.to_str()).unwrap_or("db")
     ));
-    save_current_state(&cfg.db_path, &pre)?;
+    (ops.save)(&cfg.db_path, &pre)?;
     // 2. Старые sidecar-ы несовместимы с заменённой базой — изолируются до
     // замены. Ошибка изоляции прерывает восстановление до изменений
     // main-файла (компенсация внутри quarantine_sidecars).
@@ -863,7 +920,7 @@ pub fn restore_backup(
             std::fs::remove_file(&tmp_wal)
                 .map_err(|e| format!("не убрать старый {}: {e}", tmp_wal.display()))?;
         }
-        copy_fsync(backup, &tmp)?;
+        (ops.copy)(backup, &tmp)?;
         Ok(())
     })();
     if let Err(e) = prepare {
@@ -877,7 +934,7 @@ pub fn restore_backup(
 
     // 4. Атомарная замена main. rename атомарен: ошибка означает, что
     // замены не было — исходная база на месте, возвращаем её sidecar-ы.
-    if let Err(e) = std::fs::rename(&tmp, &cfg.db_path) {
+    if let Err(e) = (ops.rename_main)(&tmp, &cfg.db_path) {
         let msg = format!(
             "замена {}: {e} — восстановление отменено",
             cfg.db_path.display()
@@ -902,10 +959,7 @@ pub fn restore_backup(
     // WAL/SHM (миграции не запускаются над чужим WAL).
 
     // 5. Проверка после восстановления: открытие прогоняет миграции.
-    match datastore::open(&cfg.db_path).and_then(|c| {
-        datastore::load_all(&c)?;
-        Ok(())
-    }) {
+    match (ops.verify)(&cfg.db_path) {
         Ok(()) => Ok(format!(
             "восстановлено из {}, текущая база сохранена как {}",
             backup.display(),
@@ -1414,17 +1468,235 @@ mod tests {
     }
 
     #[test]
-    fn rollback_missing_pre_keeps_work_sidecars() {
+    fn rollback_missing_pre_keeps_files_byte_for_byte() {
         // Отсутствие pre обнаруживается до удаления рабочих sidecar-ов:
-        // без копии исходного состояния текущие файлы не трогаются.
+        // main, -wal и -shm остаются побайтно неизменными.
         let (dir, cfg) = setup("no-pre");
         add_item(&cfg, "101");
         ensure_marker(&cfg.db_path);
         let wal = PathBuf::from(format!("{}-wal", cfg.db_path.display()));
-        std::fs::write(&wal, b"work-wal").unwrap();
+        let shm = PathBuf::from(format!("{}-shm", cfg.db_path.display()));
+        std::fs::write(&wal, b"work-wal-bytes").unwrap();
+        std::fs::write(&shm, b"work-shm-bytes").unwrap();
+        let main_before = std::fs::read(&cfg.db_path).unwrap();
         let err = rollback_to_saved(&cfg.db_path, &dir.join("pre.db")).unwrap_err();
         assert!(err.contains("отсутствует"), "{err}");
-        assert_eq!(std::fs::read(&wal).unwrap(), b"work-wal", "-wal не удалён");
+        assert_eq!(
+            std::fs::read(&cfg.db_path).unwrap(),
+            main_before,
+            "main изменён при отсутствующем pre"
+        );
+        assert_eq!(
+            std::fs::read(&wal).unwrap(),
+            b"work-wal-bytes",
+            "-wal изменён"
+        );
+        assert_eq!(
+            std::fs::read(&shm).unwrap(),
+            b"work-shm-bytes",
+            "-shm изменён"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ===== Волна 20.3: инъекция файловых операций =====
+
+    /// Подменённый снимок состояния: копия main в pre, sidecar-ы не
+    /// тронуты. Позволяет тесту доставить sidecar-файлы до изоляции.
+    fn fake_save(db: &Path, pre: &Path) -> Result<bool, String> {
+        std::fs::write(pre, std::fs::read(db).unwrap()).unwrap();
+        Ok(true)
+    }
+
+    /// Готовит БД с товаром, снимком и sidecar-файлами с известным
+    /// содержимым; возвращает main-байты для побайтных проверок.
+    fn setup_with_sidecars(tag: &str) -> (PathBuf, crate::config::Config, PathBuf, Vec<u8>) {
+        let (dir, cfg) = setup(tag);
+        let bdir = dir.join("backups");
+        std::fs::create_dir_all(&bdir).unwrap();
+        add_item(&cfg, "101");
+        ensure_marker(&cfg.db_path);
+        let good = create_backup(&cfg, Some(&bdir)).unwrap();
+        let main_before = std::fs::read(&cfg.db_path).unwrap();
+        std::fs::write(format!("{}-wal", cfg.db_path.display()), b"WAL-ORIG").unwrap();
+        std::fs::write(format!("{}-shm", cfg.db_path.display()), b"SHM-ORIG").unwrap();
+        (dir, cfg, good, main_before)
+    }
+
+    #[test]
+    fn restore_copy_failure_returns_sidecars_byte_for_byte() {
+        // Сценарий 1: отказ копирования снимка после изоляции — исходные
+        // WAL/SHM возвращены побайтно, main и pre не тронуты.
+        let (dir, cfg, good, main_before) = setup_with_sidecars("inj-copy");
+        let pre = dir.join("backups").join(format!(
+            "pre-restore-{}",
+            good.file_name().and_then(|n| n.to_str()).unwrap_or("db")
+        ));
+        let ops = RestoreOps {
+            save: Box::new(fake_save),
+            copy: Box::new(|_, _| Err("копирование снимка не удалось".into())),
+            ..RestoreOps::production()
+        };
+        let err = restore_core(&cfg, &good, Some(&dir.join("backups")), &ops).unwrap_err();
+        assert!(err.contains("копирование снимка не удалось"), "{err}");
+        assert_eq!(
+            std::fs::read(format!("{}-wal", cfg.db_path.display())).unwrap(),
+            b"WAL-ORIG",
+            "-wal не возвращён"
+        );
+        assert_eq!(
+            std::fs::read(format!("{}-shm", cfg.db_path.display())).unwrap(),
+            b"SHM-ORIG",
+            "-shm не возвращён"
+        );
+        assert_eq!(
+            std::fs::read(&cfg.db_path).unwrap(),
+            main_before,
+            "main изменён"
+        );
+        assert!(pre.exists(), "pre потерян при неудаче");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_rename_failure_returns_sidecars_byte_for_byte() {
+        // Сценарий 2: отказ замены main после изоляции — исходные WAL/SHM
+        // возвращены побайтно, main не заменён.
+        let (dir, cfg, good, main_before) = setup_with_sidecars("inj-rename");
+        let ops = RestoreOps {
+            save: Box::new(fake_save),
+            rename_main: Box::new(|_, _| Err("target busy".into())),
+            ..RestoreOps::production()
+        };
+        let err = restore_core(&cfg, &good, Some(&dir.join("backups")), &ops).unwrap_err();
+        assert!(
+            err.contains("замена") && err.contains("target busy"),
+            "{err}"
+        );
+        assert_eq!(
+            std::fs::read(format!("{}-wal", cfg.db_path.display())).unwrap(),
+            b"WAL-ORIG",
+            "-wal не возвращён"
+        );
+        assert_eq!(
+            std::fs::read(format!("{}-shm", cfg.db_path.display())).unwrap(),
+            b"SHM-ORIG",
+            "-shm не возвращён"
+        );
+        assert_eq!(
+            std::fs::read(&cfg.db_path).unwrap(),
+            main_before,
+            "main заменён несмотря на отказ rename"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_verify_failure_rolls_back_full_state() {
+        // Сценарий 3: ошибка проверки после установки снимка — полный
+        // откат: main побайтно исходный, изолированные sidecar-ы
+        // сохранены в изоляторе, pre не удалён.
+        let (dir, cfg, good, main_before) = setup_with_sidecars("inj-verify");
+        let pre = dir.join("backups").join(format!(
+            "pre-restore-{}",
+            good.file_name().and_then(|n| n.to_str()).unwrap_or("db")
+        ));
+        let ops = RestoreOps {
+            save: Box::new(fake_save),
+            verify: Box::new(|_| Err("проверка провалена".into())),
+            ..RestoreOps::production()
+        };
+        let err = restore_core(&cfg, &good, Some(&dir.join("backups")), &ops).unwrap_err();
+        assert!(
+            err.contains("не прошла проверку") && err.contains("исходная база возвращена"),
+            "{err}"
+        );
+        assert_eq!(
+            std::fs::read(&cfg.db_path).unwrap(),
+            main_before,
+            "main не откатился"
+        );
+        // Успешный откат переименовывает pre в main: отдельного файла pre
+        // больше нет — исходное состояние живёт в db_path.
+        assert_eq!(
+            std::fs::read(pre.with_extension("db-wal.stale")).unwrap(),
+            b"WAL-ORIG",
+            "исходный -wal потерян"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_compensation_failure_reports_both_causes_and_paths() {
+        // Сценарий 4: отказ копирования + отказ возврата sidecar-ов —
+        // составная ошибка содержит обе причины и оба пути; изолированный
+        // sidecar остался в изоляторе побайтно.
+        let (dir, cfg, good, main_before) = setup_with_sidecars("inj-comp");
+        let stale = dir
+            .join("backups")
+            .join(format!(
+                "pre-restore-{}",
+                good.file_name().and_then(|n| n.to_str()).unwrap_or("db")
+            ))
+            .with_extension("db-wal.stale");
+        let wal = PathBuf::from(format!("{}-wal", cfg.db_path.display()));
+        let ops = RestoreOps {
+            save: Box::new(fake_save),
+            copy: Box::new(move |_, _| {
+                // Помеха после изоляции: рабочее место -wal занято каталогом.
+                std::fs::create_dir_all(&wal).unwrap();
+                Err("копирование снимка не удалось".into())
+            }),
+            ..RestoreOps::production()
+        };
+        let err = restore_core(&cfg, &good, Some(&dir.join("backups")), &ops).unwrap_err();
+        assert!(err.contains("копирование снимка не удалось"), "{err}");
+        assert!(err.contains("компенсация не удалась"), "{err}");
+        assert!(err.contains("не вернуть изолированный"), "{err}");
+        assert!(err.contains("db-wal.stale"), "путь изолятора: {err}");
+        assert!(err.contains("kiosk.db-wal"), "рабочий путь: {err}");
+        assert_eq!(
+            std::fs::read(&stale).unwrap(),
+            b"WAL-ORIG",
+            "изолированный -wal потерян"
+        );
+        assert_eq!(
+            std::fs::read(&cfg.db_path).unwrap(),
+            main_before,
+            "main изменён"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_success_ignores_stale_sidecars() {
+        // Сценарий 6: успешный restore — посторонние sidecar-ы не
+        // применяются к новой базе и не теряются (лежат в изоляторе).
+        let (dir, cfg, good, _) = setup_with_sidecars("inj-ok");
+        let pre = dir.join("backups").join(format!(
+            "pre-restore-{}",
+            good.file_name().and_then(|n| n.to_str()).unwrap_or("db")
+        ));
+        let ops = RestoreOps {
+            save: Box::new(fake_save),
+            ..RestoreOps::production()
+        };
+        let msg = restore_core(&cfg, &good, Some(&dir.join("backups")), &ops).unwrap();
+        assert!(msg.contains("восстановлено"), "{msg}");
+        assert!(
+            !PathBuf::from(format!("{}-wal", cfg.db_path.display())).exists(),
+            "старый -wal применён к новой базе"
+        );
+        assert!(
+            !PathBuf::from(format!("{}-shm", cfg.db_path.display())).exists(),
+            "старый -shm применён к новой базе"
+        );
+        assert_eq!(
+            std::fs::read(pre.with_extension("db-wal.stale")).unwrap(),
+            b"WAL-ORIG",
+            "исходный -wal потерян"
+        );
+        assert_eq!(plu_count(&cfg.db_path), 1, "снимок не применён");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
