@@ -1,4 +1,3 @@
-
 use std::path::PathBuf;
 pub enum Mode {
     Kiosk,
@@ -41,8 +40,10 @@ fn opt_arg<I: Iterator<Item = String>>(args: &mut std::iter::Peekable<I>) -> Opt
     }
 }
 pub fn parse_cli() -> Cli {
-    let mut cli =
-        Cli { mode: Mode::Kiosk, config_path: PathBuf::from("/etc/openscale/config.toml") };
+    let mut cli = Cli {
+        mode: Mode::Kiosk,
+        config_path: PathBuf::from("/etc/openscale/config.toml"),
+    };
     let mut args = std::env::args().skip(1).peekable();
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -126,7 +127,9 @@ pub fn parse_cli() -> Cli {
                 eprintln!("  --import     импорт plu.xml старого ПО в базу");
                 eprintln!("Управление отделами главного экрана (БД из --config):");
                 eprintln!("  --dept-list                список отделов и привязок групп");
-                eprintln!("  --dept-add ИМЯ [ФАЙЛ] [ФОН] [ТЕКСТ]  добавить (hex RGB, напр. E4F0DC)");
+                eprintln!(
+                    "  --dept-add ИМЯ [ФАЙЛ] [ФОН] [ТЕКСТ]  добавить (hex RGB, напр. E4F0DC)"
+                );
                 eprintln!("  --dept-style ИМЯ [ФАЙЛ|-|none] [ФОН|..] [ТЕКСТ|..]  стиль отдела");
                 eprintln!("  --dept-remove ИМЯ          убрать отдел");
                 eprintln!("  --dept-move ИМЯ N|alpha    позиция отдела (0 = первый)");
@@ -134,9 +137,13 @@ pub fn parse_cli() -> Cli {
                 eprintln!("  --label-probe              измерение длины этикетки (диагностика)");
                 eprintln!("Обслуживание базы (см. --config):");
                 eprintln!("  --db-check                 integrity_check и статистика рабочей БД");
-                eprintln!("  --backup [КАТАЛОГ]         согласованный снимок БД + ротация (10 копий)");
+                eprintln!(
+                    "  --backup [КАТАЛОГ]         согласованный снимок БД + ротация (10 копий)"
+                );
                 eprintln!("  --restore ФАЙЛ             восстановление из снимка (киоск должен быть остановлен)");
-                eprintln!("  --print-test               тестовая этикетка (киоск должен быть остановлен)");
+                eprintln!(
+                    "  --print-test               тестовая этикетка (киоск должен быть остановлен)"
+                );
                 std::process::exit(2);
             }
         }

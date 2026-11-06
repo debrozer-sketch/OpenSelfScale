@@ -1,4 +1,3 @@
-
 use std::io::{Read, Write};
 use std::time::Duration;
 use thiserror::Error;
@@ -27,7 +26,10 @@ impl ScaleReply {
         self.status & 0x01 == 1
     }
     pub fn as_sample(&self) -> drivers_api::WeightSample {
-        drivers_api::WeightSample { mass_g: self.mass_g, stable: self.is_stable() }
+        drivers_api::WeightSample {
+            mass_g: self.mass_g,
+            stable: self.is_stable(),
+        }
     }
 }
 pub fn lrc(bytes: &[u8]) -> u8 {
@@ -59,11 +61,17 @@ pub fn parse_reply(frame: &[u8]) -> Result<ScaleReply, ShtrihError> {
     }
     let expected = lrc(&frame[1..frame.len() - 1]);
     if expected != frame[frame.len() - 1] {
-        return Err(ShtrihError::LrcMismatch { expected, got: frame[frame.len() - 1] });
+        return Err(ShtrihError::LrcMismatch {
+            expected,
+            got: frame[frame.len() - 1],
+        });
     }
     let status = frame[4];
     let raw = i32::from_le_bytes([frame[6], frame[7], frame[8], frame[9]]);
-    Ok(ScaleReply { status, mass_g: raw })
+    Ok(ScaleReply {
+        status,
+        mass_g: raw,
+    })
 }
 pub trait PortPoll: Read + Write {
     fn read_timeout(&mut self, buf: &mut [u8], timeout: Duration) -> std::io::Result<usize>;
@@ -114,7 +122,10 @@ pub struct ShtrihScales<P: PortPoll> {
 }
 impl<P: PortPoll> ShtrihScales<P> {
     pub fn new(port: P) -> Self {
-        Self { port, buf: Vec::with_capacity(64) }
+        Self {
+            port,
+            buf: Vec::with_capacity(64),
+        }
     }
     pub fn poll_once(&mut self, timeout: Duration) -> Result<ScaleReply, ShtrihError> {
         self.buf.clear();
@@ -148,7 +159,9 @@ impl<P: PortPoll> ShtrihScales<P> {
             if std::time::Instant::now() >= deadline {
                 return Err(ShtrihError::Timeout);
             }
-            let n = self.port.read_timeout(&mut scratch, deadline - std::time::Instant::now())?;
+            let n = self
+                .port
+                .read_timeout(&mut scratch, deadline - std::time::Instant::now())?;
             if n == 0 {
                 return Err(ShtrihError::Timeout);
             }
@@ -176,9 +189,7 @@ impl<P: PortPoll> ShtrihScales<P> {
                     if self.buf.len() >= start + need {
                         let reply: Vec<u8> = self.buf[start..start + need].to_vec();
                         if reply.len() < 4 || reply[2] != cmd {
-                            return Err(ShtrihError::Protocol(
-                                reply.get(2).copied().unwrap_or(0),
-                            ));
+                            return Err(ShtrihError::Protocol(reply.get(2).copied().unwrap_or(0)));
                         }
                         let expected = lrc(&reply[1..reply.len() - 1]);
                         if expected != reply[reply.len() - 1] {
@@ -203,7 +214,9 @@ impl<P: PortPoll> ShtrihScales<P> {
             if std::time::Instant::now() >= deadline {
                 return Err(ShtrihError::Timeout);
             }
-            let n = self.port.read_timeout(&mut scratch, deadline - std::time::Instant::now())?;
+            let n = self
+                .port
+                .read_timeout(&mut scratch, deadline - std::time::Instant::now())?;
             if n == 0 {
                 return Err(ShtrihError::Timeout);
             }
@@ -215,7 +228,10 @@ impl<P> drivers_api::ScalesDriver for ShtrihScales<P>
 where
     P: PortPoll,
 {
-    fn poll_once(&mut self, timeout: Duration) -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
+    fn poll_once(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
         ShtrihScales::poll_once(self, timeout)
             .map(|r| r.as_sample())
             .map_err(|e| match e {
@@ -270,7 +286,7 @@ mod tests {
     #[test]
     fn lrc_mismatch_is_reported() {
         let mut frame = *b"\x02\x0b:\x00\x15\x00\x46\x05\x00\x00\x00\x00\x00g";
-        frame[7] ^= 0xFF; 
+        frame[7] ^= 0xFF;
         assert!(matches!(
             parse_reply(&frame),
             Err(ShtrihError::LrcMismatch { .. })
@@ -282,7 +298,10 @@ mod tests {
     }
     impl SplitReplyPort {
         fn new(chunks: Vec<Vec<u8>>) -> Self {
-            Self { chunks, written: Vec::new() }
+            Self {
+                chunks,
+                written: Vec::new(),
+            }
         }
     }
     impl Read for SplitReplyPort {
@@ -313,11 +332,8 @@ mod tests {
     }
     #[test]
     fn zero_drains_split_ack_and_frame() {
-        let mut port = SplitReplyPort::new(vec![
-            vec![0x06],
-            vec![0x02, 0x02, 0x30, 0x00],
-            vec![0x32],
-        ]);
+        let mut port =
+            SplitReplyPort::new(vec![vec![0x06], vec![0x02, 0x02, 0x30, 0x00], vec![0x32]]);
         ShtrihScales::zero(&mut ShtrihScales::new(&mut port), Duration::from_millis(50))
             .expect("zero should succeed on split reply");
         assert!(port.written.last() == Some(&0x06));
@@ -328,12 +344,16 @@ mod tests {
             for b in buf.iter_mut() {
                 *b = 0xAA;
             }
-    #[cfg(unix)]
-    impl PortPoll for GarbageStream {
-        fn read_timeout(&mut self, buf: &mut [u8], _timeout: Duration) -> std::io::Result<usize> {
-            Read::read(self, buf)
-        }
-    }
+            #[cfg(unix)]
+            impl PortPoll for GarbageStream {
+                fn read_timeout(
+                    &mut self,
+                    buf: &mut [u8],
+                    _timeout: Duration,
+                ) -> std::io::Result<usize> {
+                    Read::read(self, buf)
+                }
+            }
             Ok(buf.len())
         }
     }
@@ -361,10 +381,15 @@ mod tests {
     }
     #[test]
     fn ack_sent_only_after_lrc_ok() {
-        let mut bad = vec![0x02u8, 0x0b, b':', 0x00, 0x15, 0x00, 0x46, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, b'g'];
+        let mut bad = vec![
+            0x02u8, 0x0b, b':', 0x00, 0x15, 0x00, 0x46, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, b'g',
+        ];
         bad[13] ^= 0xFF;
         let mut port = SplitReplyPort::new(vec![bad]);
-        let res = ShtrihScales::poll_once(&mut ShtrihScales::new(&mut port), Duration::from_millis(300));
+        let res = ShtrihScales::poll_once(
+            &mut ShtrihScales::new(&mut port),
+            Duration::from_millis(300),
+        );
         assert!(
             matches!(res, Err(ShtrihError::Timeout)),
             "битый кадр выбрасывается, опрос завершается по дедлайну"
@@ -373,11 +398,19 @@ mod tests {
             !port.written.contains(&ACK),
             "ACK не должен уходить до проверки LRC"
         );
-        let good = vec![0x02u8, 0x0b, b':', 0x00, 0x15, 0x00, 0x46, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, b'g'];
+        let good = vec![
+            0x02u8, 0x0b, b':', 0x00, 0x15, 0x00, 0x46, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, b'g',
+        ];
         let mut port = SplitReplyPort::new(vec![good]);
-        let res = ShtrihScales::poll_once(&mut ShtrihScales::new(&mut port), Duration::from_millis(300));
+        let res = ShtrihScales::poll_once(
+            &mut ShtrihScales::new(&mut port),
+            Duration::from_millis(300),
+        );
         assert!(res.is_ok());
-        assert!(port.written.contains(&ACK), "валидный кадр подтверждается ACK");
+        assert!(
+            port.written.contains(&ACK),
+            "валидный кадр подтверждается ACK"
+        );
     }
     #[test]
     fn zero_reports_device_error() {
@@ -386,7 +419,13 @@ mod tests {
         let mut port = SplitReplyPort::new(vec![vec![0x06], frame]);
         let err = ShtrihScales::zero(&mut ShtrihScales::new(&mut port), Duration::from_millis(50))
             .expect_err("nonzero error byte must fail");
-        assert!(matches!(err, ShtrihError::Device { cmd: 0x30, code: 0x05 }));
+        assert!(matches!(
+            err,
+            ShtrihError::Device {
+                cmd: 0x30,
+                code: 0x05
+            }
+        ));
     }
     #[test]
     fn zero_tolerates_ack_before_frame_in_single_read() {

@@ -1,8 +1,7 @@
-
+use drivers_api::{ScalesDriver, ScalesProfile};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use drivers_api::{ScalesDriver, ScalesProfile};
 pub const SNAPSHOT_STALE_MS: u64 = 1500;
 static EPOCH: OnceLock<std::time::Instant> = OnceLock::new();
 pub fn now_ms() -> u64 {
@@ -46,31 +45,34 @@ impl WeightSource {
         let stop_t2 = stop.clone();
         let handle = std::thread::Builder::new()
             .name("weight-poll".into())
-            .spawn(move || {
-                loop {
-                    let inner_c = inner_t.clone();
-                    let stop_c = stop_t.clone();
-                    let zero_c = zero_t.clone();
-                    let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        poll_loop(&profile, inner_c, stop_c, zero_c)
-                    }));
-                    if guard.is_err() {
-                        log::error!("весы: перезапуск опроса после паники");
-                        if let Ok(mut s) = inner_g.lock() {
-                            s.port_up = false;
-                            s.stable = false;
-                        }
-                        if stop_t2.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        sleep_interruptible(&stop_t2, Duration::from_secs(2));
-                    } else {
+            .spawn(move || loop {
+                let inner_c = inner_t.clone();
+                let stop_c = stop_t.clone();
+                let zero_c = zero_t.clone();
+                let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    poll_loop(&profile, inner_c, stop_c, zero_c)
+                }));
+                if guard.is_err() {
+                    log::error!("весы: перезапуск опроса после паники");
+                    if let Ok(mut s) = inner_g.lock() {
+                        s.port_up = false;
+                        s.stable = false;
+                    }
+                    if stop_t2.load(Ordering::Relaxed) {
                         break;
                     }
+                    sleep_interruptible(&stop_t2, Duration::from_secs(2));
+                } else {
+                    break;
                 }
             })
             .expect("spawn weight thread");
-        Self { inner, stop, zero, handle: Some(handle) }
+        Self {
+            inner,
+            stop,
+            zero,
+            handle: Some(handle),
+        }
     }
     pub fn snapshot(&self) -> Snapshot {
         let mut s = *self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -120,7 +122,9 @@ fn open_driver(profile: &ScalesProfile) -> Result<Box<dyn ScalesDriver>, String>
                 .map_err(|e| format!("{}: {e}", profile.port))?;
             Ok(Box::new(shtrih_m::ShtrihScales::new(file)))
         }
-        other => Err(format!("неизвестный драйвер весов: {other} (доступен: shtrih-slim)")),
+        other => Err(format!(
+            "неизвестный драйвер весов: {other} (доступен: shtrih-slim)"
+        )),
     }
 }
 #[cfg(not(unix))]
@@ -133,7 +137,9 @@ fn open_driver(profile: &ScalesProfile) -> Result<Box<dyn ScalesDriver>, String>
                 .map_err(|e| format!("{}: {e}", profile.port))?;
             Ok(Box::new(shtrih_m::ShtrihScales::new(port)))
         }
-        other => Err(format!("неизвестный драйвер весов: {other} (доступен: shtrih-slim)")),
+        other => Err(format!(
+            "неизвестный драйвер весов: {other} (доступен: shtrih-slim)"
+        )),
     }
 }
 #[cfg(unix)]
@@ -183,7 +189,7 @@ fn open_tty_raw(path: &str, baud: u32) -> Result<std::fs::File, String> {
         c_ospeed: speed,
     };
     term.c_cc[libc::VMIN as usize] = 0;
-    term.c_cc[libc::VTIME as usize] = 5; 
+    term.c_cc[libc::VTIME as usize] = 5;
     let rc = unsafe { libc::tcsetattr(fd, libc::TCSANOW, &term) };
     if rc != 0 {
         let e = std::io::Error::last_os_error();
@@ -393,7 +399,9 @@ mod tests {
             if self.zero_ok {
                 Ok(())
             } else {
-                Err(drivers_api::DriverError::Protocol("zero не поддержан".into()))
+                Err(drivers_api::DriverError::Protocol(
+                    "zero не поддержан".into(),
+                ))
             }
         }
     }
@@ -409,14 +417,19 @@ mod tests {
             Arc::new(AtomicBool::new(false)),
         )
     }
-    fn ok_sample(g: i32, stable: bool) -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
+    fn ok_sample(
+        g: i32,
+        stable: bool,
+    ) -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
         Ok(drivers_api::WeightSample { mass_g: g, stable })
     }
     fn timeout() -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
         Err(drivers_api::DriverError::Timeout)
     }
     fn port_error() -> Result<drivers_api::WeightSample, drivers_api::DriverError> {
-        Err(drivers_api::DriverError::Io(std::io::Error::other("usb выдернут")))
+        Err(drivers_api::DriverError::Io(std::io::Error::other(
+            "usb выдернут",
+        )))
     }
 
     #[test]
@@ -547,7 +560,14 @@ mod tests {
         };
         zero.store(true, Ordering::Relaxed);
         poll_session(&mut fake, &out, &stop, &zero);
-        assert_eq!(zero_calls.load(Ordering::SeqCst), 1, "обнуление дошло до драйвера");
-        assert!(!out.lock().unwrap().stable, "нестабильный вес не помечен стабильным");
+        assert_eq!(
+            zero_calls.load(Ordering::SeqCst),
+            1,
+            "обнуление дошло до драйвера"
+        );
+        assert!(
+            !out.lock().unwrap().stable,
+            "нестабильный вес не помечен стабильным"
+        );
     }
 }

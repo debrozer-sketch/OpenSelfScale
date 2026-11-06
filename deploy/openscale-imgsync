@@ -1,6 +1,6 @@
 #!/bin/bash
 set -u
-CONF=/etc/openscale/imgsync.conf
+CONF=/var/lib/openscale/imgsync.conf
 LOCK=/run/openscale-imgsync.lock
 [ -r "$CONF" ] || { echo "imgsync: нет $CONF" >&2; exit 1; }
 . "$CONF"

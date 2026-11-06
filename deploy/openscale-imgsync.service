@@ -1,0 +1,8 @@
+[Unit]
+Description=ScaleFW image mirror from center FTP
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/scale-imgsync
+TimeoutStartSec=900
+

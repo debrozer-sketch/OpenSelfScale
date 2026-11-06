@@ -1,8 +1,7 @@
-
+use crate::session::price_str;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use crate::session::price_str;
 thread_local! {
     static IMG_CACHE: RefCell<HashMap<PathBuf, Option<slint::Image>>> =
         RefCell::new(HashMap::new());
@@ -22,10 +21,16 @@ fn load_img_cached(path: &Path) -> Option<slint::Image> {
         loaded
     })
 }
-pub fn sort_items(items: &mut [crate::PluTile], counts: Option<&std::collections::HashMap<String, u32>>) {
+pub fn sort_items(
+    items: &mut [crate::PluTile],
+    counts: Option<&std::collections::HashMap<String, u32>>,
+) {
     match counts {
         Some(c) => items.sort_by(|a, b| {
-            let (ca, cb) = (c.get(a.id.as_str()).copied().unwrap_or(0), c.get(b.id.as_str()).copied().unwrap_or(0));
+            let (ca, cb) = (
+                c.get(a.id.as_str()).copied().unwrap_or(0),
+                c.get(b.id.as_str()).copied().unwrap_or(0),
+            );
             cb.cmp(&ca).then_with(|| a.name.cmp(&b.name))
         }),
         None => items.sort_by(|a, b| a.name.cmp(&b.name)),
@@ -77,6 +82,18 @@ pub fn dept_pager_y(tile_h: i32, cell: bool) -> i32 {
         160 + tile_h + 16
     }
 }
+
+/// Колонки главного экрана под фактическое число категорий.
+/// Настройка действует, только если категорий не меньше пяти; при меньшем
+/// числе сетка сжимается под них (колонки растягиваются равномерно).
+pub fn adaptive_dept_cols(n: usize, configured: usize) -> usize {
+    let configured = configured.max(1);
+    if n >= 5 {
+        configured
+    } else {
+        n.max(1)
+    }
+}
 fn load_plu_image(plu: &str, img_dir: &Path) -> Option<slint::Image> {
     let dir = img_dir.join("plu");
     let thumbs = crate::thumbs::thumb_dir(&dir);
@@ -103,7 +120,10 @@ pub fn tile_light(p: &datastore::PluEntry) -> crate::PluTile {
         id: p.plu.clone().into(),
         name: p.name.clone().into(),
         price: price_str(p.price).into(),
-        card_price: p.card_price.map(|v| price_str(v).into()).unwrap_or_default(),
+        card_price: p
+            .card_price
+            .map(|v| price_str(v).into())
+            .unwrap_or_default(),
         has_img: false,
         img: slint::Image::default(),
         hl_before: Default::default(),
@@ -142,27 +162,30 @@ pub fn hl_parts(name: &str, q: &str) -> (String, String, String) {
     (before, matched, after)
 }
 pub(crate) const DEPT_PALETTE: &[(u32, u32, u32)] = &[
-    (0xE4F0DC, 0x33512C, 0xD3E5C8), 
-    (0xFDEFD8, 0x6B4A1B, 0xF7E4C4), 
-    (0xF9E3EC, 0x6B2E47, 0xF2D0DE), 
-    (0xDCEBF7, 0x274B66, 0xC9DEF0), 
-    (0xDFF2EA, 0x2A5D4E, 0xC8E7DB), 
-    (0xF3EBDD, 0x5C4A2E, 0xE9DDC8), 
-    (0xE8E4F5, 0x463B6B, 0xD8D2EC), 
-    (0xF5E9E0, 0x6B4433, 0xECDBCE), 
+    (0xE4F0DC, 0x33512C, 0xD3E5C8),
+    (0xFDEFD8, 0x6B4A1B, 0xF7E4C4),
+    (0xF9E3EC, 0x6B2E47, 0xF2D0DE),
+    (0xDCEBF7, 0x274B66, 0xC9DEF0),
+    (0xDFF2EA, 0x2A5D4E, 0xC8E7DB),
+    (0xF3EBDD, 0x5C4A2E, 0xE9DDC8),
+    (0xE8E4F5, 0x463B6B, 0xD8D2EC),
+    (0xF5E9E0, 0x6B4433, 0xECDBCE),
 ];
 pub fn stock_palette() -> Vec<(u32, u32)> {
     DEPT_PALETTE.iter().map(|p| (p.0, p.1)).collect()
 }
 fn parse_hex(s: &str) -> Option<u32> {
-    u32::from_str_radix(s.trim_start_matches('#'), 16).ok().filter(|&v| v <= 0xFF_FFFF)
+    u32::from_str_radix(s.trim_start_matches('#'), 16)
+        .ok()
+        .filter(|&v| v <= 0xFF_FFFF)
 }
 pub fn dept_tiles(
     depts: &[datastore::DeptRow],
     img_dir: &Path,
     palette: &[(u32, u32)],
 ) -> Vec<crate::DeptDef> {
-    depts.iter()
+    depts
+        .iter()
         .enumerate()
         .map(|(i, d)| {
             let auto = palette[i % palette.len()];
@@ -172,7 +195,10 @@ pub fn dept_tiles(
                 let (r, g, b) = (c >> 16 & 0xFF, c >> 8 & 0xFF, c & 0xFF);
                 ((r * 92 / 100) << 16) | ((g * 92 / 100) << 8) | (b * 92 / 100)
             };
-            let img = d.img.as_ref().and_then(|f| load_img_cached(&img_dir.join(f)));
+            let img = d
+                .img
+                .as_ref()
+                .and_then(|f| load_img_cached(&img_dir.join(f)));
             log::info!(
                 "картинка отдела {}: {}",
                 d.name,
@@ -199,17 +225,43 @@ pub fn dept_tiles(
 mod tests {
     use super::*;
     fn tile(id: &str, name: &str) -> crate::PluTile {
-        crate::PluTile { id: id.into(), name: name.into(), ..Default::default() }
+        crate::PluTile {
+            id: id.into(),
+            name: name.into(),
+            ..Default::default()
+        }
     }
     #[test]
+    fn adaptive_cols_follow_categories() {
+        // Настройка учитывается, только если категорий не меньше пяти.
+        assert_eq!(adaptive_dept_cols(0, 5), 1, "нет категорий — одна колонка");
+        assert_eq!(adaptive_dept_cols(1, 5), 1);
+        assert_eq!(adaptive_dept_cols(3, 5), 3, "3 категории — 3 колонки");
+        assert_eq!(adaptive_dept_cols(4, 5), 4);
+        assert_eq!(adaptive_dept_cols(5, 5), 5, "настройка действует от пяти");
+        assert_eq!(adaptive_dept_cols(7, 4), 4);
+        assert_eq!(adaptive_dept_cols(9, 8), 8);
+        assert_eq!(adaptive_dept_cols(5, 0), 1, "нулевая настройка защищена");
+    }
+
+    #[test]
     fn popular_first_then_alphabet() {
-        let mut v = vec![tile("1", "Б"), tile("2", "А"), tile("3", "В"), tile("4", "Г")];
+        let mut v = vec![
+            tile("1", "Б"),
+            tile("2", "А"),
+            tile("3", "В"),
+            tile("4", "Г"),
+        ];
         let mut c = std::collections::HashMap::new();
         c.insert("3".to_string(), 9u32);
         c.insert("1".to_string(), 2u32);
         sort_items(&mut v, Some(&c));
         let ids: Vec<&str> = v.iter().map(|t| t.id.as_str()).collect();
-        assert_eq!(ids, ["3", "1", "2", "4"], "популярные сверху, остальные по алфавиту");
+        assert_eq!(
+            ids,
+            ["3", "1", "2", "4"],
+            "популярные сверху, остальные по алфавиту"
+        );
         sort_items(&mut v, None);
         let ids: Vec<&str> = v.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["2", "1", "3", "4"]);
@@ -262,11 +314,20 @@ mod tests {
     #[test]
     fn hl_parts_cuts_by_chars_not_bytes() {
         let (b, m, a) = hl_parts("ВИНОГРАД КИШМИШ ЧЕРНЫЙ КГ", "КИШ");
-        assert_eq!((b.as_str(), m.as_str(), a.as_str()), ("ВИНОГРАД ", "КИШ", "МИШ ЧЕРНЫЙ КГ"));
+        assert_eq!(
+            (b.as_str(), m.as_str(), a.as_str()),
+            ("ВИНОГРАД ", "КИШ", "МИШ ЧЕРНЫЙ КГ")
+        );
         assert_eq!(hl_parts("ЯБЛОКО", "ГРУША").0, "ЯБЛОКО");
         assert_eq!(hl_parts("ЯБЛОКО", "ГРУША").1, "");
-        assert_eq!(hl_parts("АНАНАС", "АНА"), ("".to_string(), "АНА".to_string(), "НАС".to_string()));
-        assert_eq!(hl_parts("АНАНАС", "АНАНАС"), ("".to_string(), "АНАНАС".to_string(), "".to_string()));
+        assert_eq!(
+            hl_parts("АНАНАС", "АНА"),
+            ("".to_string(), "АНА".to_string(), "НАС".to_string())
+        );
+        assert_eq!(
+            hl_parts("АНАНАС", "АНАНАС"),
+            ("".to_string(), "АНАНАС".to_string(), "".to_string())
+        );
     }
     #[test]
     fn dept_tiles_shows_all_depts_and_palette_rotation() {
@@ -286,8 +347,7 @@ mod tests {
                 fg: None,
             },
         ];
-        let tiles =
-            dept_tiles(&depts, Path::new("/nonexistent"), &stock_palette());
+        let tiles = dept_tiles(&depts, Path::new("/nonexistent"), &stock_palette());
         assert_eq!(tiles.len(), 2, "пустые отделы тоже показываются");
         assert_eq!(tiles[0].id, "ФРУКТЫ");
         assert_eq!(tiles[1].id, "ПУСТОЙ");

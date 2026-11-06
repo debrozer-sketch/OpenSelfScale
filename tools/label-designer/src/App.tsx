@@ -22,6 +22,8 @@ const PRESETS = [{ name: "Длинная", w: 58, h: 40 }, { name: "Средня
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const snap = (n: number) => Math.round(n * 2) / 2;
+const SCALE_PORT = 8080;
+const SCALE_IP_KEY = "openscale.labeldesigner.scaleip";
 const makeField = (kind: Kind, x = 2, y = 2): LabelField => ({ id: uid(), kind, x, y, font: kind === "name" ? "B" : "A", size: 1, ...(kind === "text" ? { text: "ТЕКСТ" } : {}) });
 const initialLayout = (): Layout => ({
   format: 1, name: "58x40", width_mm: 58, height_mm: 40,
@@ -123,6 +125,11 @@ export default function App() {
   const [zoom, setZoom] = useState<"auto" | 4 | 6 | 8>("auto");
   const [status, setStatus] = useState("Черновик сохранен");
   const [mobilePanel, setMobilePanel] = useState<"structure" | "preview" | "properties">("preview");
+  const [scaleIp, setScaleIp] = useState<string>(() => { try { return localStorage.getItem(SCALE_IP_KEY) || ""; } catch { return ""; } });
+  const [scaleMsg, setScaleMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [logoName, setLogoName] = useState<string | null>(null);
+  const logoRef = useRef<HTMLInputElement>(null);
+  const logoDataRef = useRef<ArrayBuffer | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<{ id: string; x: number; y: number; startX: number; startY: number; before: Layout } | null>(null);
 
@@ -166,6 +173,44 @@ export default function App() {
   const importFile = async (file?: File) => { if (!file) return; try { const raw = JSON.parse(await file.text()); if (raw.format !== 1 || !Array.isArray(raw.fields)) throw new Error(); const next: Layout = { ...raw, fields: raw.fields.map((f: LabelField) => ({ ...f, id: uid() })) }; commit(next, "Раскладка загружена"); setSelectedId(next.fields[0]?.id || null); } catch { setStatus("Не удалось открыть JSON"); } };
   const newLayout = () => { const next = initialLayout(); commit(next, "Создана новая раскладка"); setSelectedId(next.fields[0].id); setFileOpen(false); };
 
+  const scaleUrl = (path: string) => `http://${scaleIp.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "")}:${SCALE_PORT}${path}`;
+  const rememberIp = () => { try { localStorage.setItem(SCALE_IP_KEY, scaleIp.trim()); } catch { /* приватный режим */ } };
+  const checkScale = async () => {
+    setScaleMsg({ ok: false, text: "Проверяю связь..." });
+    try {
+      const j = await (await fetch(scaleUrl("/api/health"))).json();
+      setScaleMsg(j.ok ? { ok: true, text: `Весы на связи${j.logo ? " (логотип уже есть)" : ""}` } : { ok: false, text: "Весы ответили нестандартно" });
+      rememberIp();
+    } catch { setScaleMsg({ ok: false, text: "Нет связи: проверьте IP и сеть" }); }
+  };
+  const pushLabel = async () => {
+    if (errors.length) { setScaleMsg({ ok: false, text: `Сначала исправьте ошибки: ${errors.length}` }); return; }
+    const output = { ...layout, fields: layout.fields.map(({ id: _id, ...f }) => f) };
+    setScaleMsg({ ok: false, text: "Загружаю..." });
+    try {
+      const j = await (await fetch(scaleUrl("/api/label"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(output) })).json();
+      setScaleMsg(j.ok ? { ok: true, text: `Загружено: «${j.name}» ${j.width_mm}×${j.height_mm} мм` } : { ok: false, text: `Отклонено весами: ${j.error}` });
+      rememberIp();
+    } catch { setScaleMsg({ ok: false, text: "Нет связи: проверьте IP и сеть" }); }
+  };
+  const importLogo = async (file?: File) => {
+    if (!file) return;
+    if (!/\.png$/i.test(file.name) && file.type !== "image/png") { setScaleMsg({ ok: false, text: "Логотип должен быть в PNG" }); return; }
+    if (file.size > 8 * 1024 * 1024) { setScaleMsg({ ok: false, text: "Файл больше 8 МБ" }); return; }
+    logoDataRef.current = await file.arrayBuffer();
+    setLogoName(file.name);
+    setScaleMsg({ ok: true, text: `Логотип выбран: ${file.name}` });
+  };
+  const pushLogo = async () => {
+    if (!logoDataRef.current) { setScaleMsg({ ok: false, text: "Сначала выберите PNG-файл" }); return; }
+    setScaleMsg({ ok: false, text: "Загружаю..." });
+    try {
+      const j = await (await fetch(scaleUrl("/api/logo"), { method: "POST", body: logoDataRef.current })).json();
+      setScaleMsg(j.ok ? { ok: true, text: `Логотип загружен: ${logoName}` } : { ok: false, text: `Отклонено весами: ${j.error}` });
+      rememberIp();
+    } catch { setScaleMsg({ ok: false, text: "Нет связи: проверьте IP и сеть" }); }
+  };
+
   const canvasScale = zoom === "auto" ? 6 : zoom;
   const pointerDown = (e: React.PointerEvent, f: LabelField) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); setSelectedId(f.id); setMobilePanel("properties"); dragRef.current = { id: f.id, x: f.x, y: f.y, startX: e.clientX, startY: e.clientY, before: layout }; };
   const pointerMove = (e: React.PointerEvent) => { const d = dragRef.current; if (!d) return; const nextX = snap(d.x + (e.clientX - d.startX) / canvasScale); const nextY = snap(d.y + (e.clientY - d.startY) / canvasScale); setLayout(l => ({ ...l, fields: l.fields.map(f => f.id === d.id ? { ...f, x: nextX, y: nextY } : f) })); };
@@ -182,6 +227,7 @@ export default function App() {
       <main className="workspace">
         <aside className={`left-panel ${mobilePanel === "structure" ? "mobile-visible" : ""}`} aria-label="Структура этикетки">
           <section className="panel-section document-section"><div className="section-title"><span>Документ</span><span className="measure">мм</span></div><label className="field-control"><span>Имя раскладки</span><input value={layout.name} onChange={e => commit({ ...layout, name: e.target.value })} /></label><div className="field-grid"><NumberField label="Ширина" value={layout.width_mm} min={20} max={80} onChange={v => commit({ ...layout, width_mm: v })} /><NumberField label="Высота" value={layout.height_mm} min={20} onChange={v => commit({ ...layout, height_mm: v })} /></div><div className="preset-row" aria-label="Стандартные форматы">{PRESETS.map(p => <button key={p.name} className={p.w === layout.width_mm && p.h === layout.height_mm ? "active" : ""} title={`${p.name}: ${p.w} x ${p.h} мм`} onClick={() => commit({ ...layout, width_mm: p.w, height_mm: p.h, name: `${p.w}x${p.h}` })}>{p.w}x{p.h}</button>)}</div></section>
+          <section className="panel-section" aria-label="Загрузка на весы"><div className="section-title"><span>Весы</span><span className="measure">порт {SCALE_PORT}</span></div><label className="field-control"><span>IP-адрес весов</span><input placeholder="192.168.…" value={scaleIp} onChange={e => setScaleIp(e.target.value)} /></label><div className="scale-actions"><button className="button" onClick={checkScale}>Проверить</button><button className="button primary" onClick={pushLabel} disabled={!!errors.length}>Загрузить этикетку</button></div><div className="scale-actions"><button className="button" onClick={() => logoRef.current?.click()}>{logoName ? `Логотип: ${logoName}` : "Выбрать PNG логотипа"}</button><button className="button" onClick={pushLogo} disabled={!logoName}>Загрузить логотип</button></div>{scaleMsg && <p className={`scale-msg ${scaleMsg.ok ? "ok" : "bad"}`}>{scaleMsg.text}</p>}</section>
           <section className="layers-section"><div className="layers-head"><div><h2><Icon name="layers" /> Объекты</h2><p>Порядок печати сверху вниз</p></div><div className="add-wrap"><button className="icon-button" aria-label="Добавить поле" aria-expanded={addOpen} onClick={() => setAddOpen(v => !v)}><Icon name="plus" /></button>{addOpen && <div className="add-menu">{KINDS.map(k => <button key={k} onClick={() => addField(k)}><span>{LABELS[k]}</span>{layout.fields.some(f => f.kind === k) && <small>есть</small>}</button>)}</div>}</div></div>
             {missing.length > 0 && <div className="required-note"><Icon name="warning" /><div><strong>Не хватает обязательных полей</strong><div>{missing.map(k => <button key={k} onClick={() => addField(k)}>+ {LABELS[k]}</button>)}</div></div></div>}
             {issues.length > 0 && <div className="issue-list">{issues.map((it, i) => <button key={i} className={`issue-note ${it.level}`} onClick={() => { if (it.id) { setSelectedId(it.id); setMobilePanel("properties"); } }}><Icon name="warning" /><span>{it.msg}</span></button>)}</div>}
@@ -199,7 +245,7 @@ export default function App() {
             <section className="property-section"><div className="property-title-row"><h3>Рамка поля</h3><button onClick={() => patchSelected({ w: undefined, h: undefined })}>Авто</button></div><div className="field-grid"><NumberField label="Ширина, мм" value={fieldSize(selected).w} onChange={v => patchSelected({ w: v })} /><NumberField label="Высота, мм" value={fieldSize(selected).h} onChange={v => patchSelected({ h: v })} /></div><p className="property-hint">Ручной размер влияет на область обрезки содержимого.</p></section>
             <section className="property-section"><h3>Порядок печати</h3><div className="order-actions"><button disabled={layout.fields[0]?.id === selected.id} onClick={() => reorder(layout.fields.findIndex(f => f.id === selected.id), -1)}>Выше</button><button disabled={layout.fields.at(-1)?.id === selected.id} onClick={() => reorder(layout.fields.findIndex(f => f.id === selected.id), 1)}>Ниже</button></div></section></div> : <div className="inspector-empty"><div className="empty-icon"><Icon name="sliders" size={22} /></div><h3>Выберите объект</h3><p>Нажмите на поле в структуре слева или прямо на макете. Здесь появятся его параметры.</p></div>}
           {selected && <footer className="inspector-actions"><button className="button ghost" onClick={duplicateSelected}><Icon name="copy" /> Копия</button><button className="button danger" onClick={removeSelected}><Icon name="trash" /> Удалить</button></footer>}</aside>
-      </main><input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={e => importFile(e.target.files?.[0])} />
+      </main><input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={e => importFile(e.target.files?.[0])} /><input ref={logoRef} type="file" accept=".png,image/png" hidden onChange={e => importLogo(e.target.files?.[0])} />
     </div>
   );
 }

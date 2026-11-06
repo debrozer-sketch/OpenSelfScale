@@ -1,4 +1,3 @@
-
 use std::time::Duration;
 use thiserror::Error;
 #[derive(Debug, Error)]
@@ -18,7 +17,9 @@ pub struct WeightSample {
 pub trait ScalesDriver {
     fn poll_once(&mut self, timeout: Duration) -> Result<WeightSample, DriverError>;
     fn zero(&mut self) -> Result<(), DriverError> {
-        Err(DriverError::Protocol("zero не поддерживается драйвером".into()))
+        Err(DriverError::Protocol(
+            "zero не поддерживается драйвером".into(),
+        ))
     }
 }
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -30,7 +31,11 @@ pub struct ScalesProfile {
 }
 impl Default for ScalesProfile {
     fn default() -> Self {
-        Self { kind: "shtrih-slim".into(), port: "/dev/scales".into(), baud: 115_200 }
+        Self {
+            kind: "shtrih-slim".into(),
+            port: "/dev/scales".into(),
+            baud: 115_200,
+        }
     }
 }
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -67,7 +72,11 @@ mod tests {
     }
     #[test]
     fn profiles_are_replaceable() {
-        let alt = ScalesProfile { kind: "sometech-x".into(), port: "COM7".into(), baud: 9600 };
+        let alt = ScalesProfile {
+            kind: "sometech-x".into(),
+            port: "COM7".into(),
+            baud: 9600,
+        };
         assert_ne!(alt, ScalesProfile::default());
     }
 }

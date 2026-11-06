@@ -627,9 +627,9 @@ pub struct PrinterDiagnostics {
     pub model: Option<String>,
     pub serial: Option<String>,
 }
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
+use std::sync::Arc;
 static PRINTER_TX: std::sync::OnceLock<mpsc::Sender<PrinterRequest>> = std::sync::OnceLock::new();
 static HEALTH: std::sync::OnceLock<std::sync::Mutex<PrinterHealth>> = std::sync::OnceLock::new();
 pub fn daemon_running(cfg: &crate::config::Config) -> bool {
@@ -725,21 +725,18 @@ pub fn spawn_daemon(cfg: &crate::config::Config) {
     let cfg = cfg.clone();
     std::thread::Builder::new()
         .name("printer".into())
-        .spawn(move || {
-            loop {
-                let guard = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    daemon_loop(&cfg, &rx)
-                }));
-                if guard.is_err() {
-                    log::error!("демон принтера: перезапуск после паники");
-                    set_health(PrinterHealth {
-                        fault: true,
-                        ..health()
-                    });
-                    std::thread::sleep(Duration::from_secs(2));
-                } else {
-                    break;
-                }
+        .spawn(move || loop {
+            let guard =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| daemon_loop(&cfg, &rx)));
+            if guard.is_err() {
+                log::error!("демон принтера: перезапуск после паники");
+                set_health(PrinterHealth {
+                    fault: true,
+                    ..health()
+                });
+                std::thread::sleep(Duration::from_secs(2));
+            } else {
+                break;
             }
         })
         .expect("поток принтера");
@@ -1663,7 +1660,11 @@ fn query_string(port: &mut Box<dyn serialport::SerialPort>, payload: &[u8]) -> O
         .map(|b| b as char)
         .collect();
     let s = s.trim_start_matches('_').trim().to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 pub fn printer_diagnostics(cfg: &crate::config::Config) -> Result<PrinterDiagnostics, PrintError> {
     if !cfg.printer.enabled {
@@ -2620,11 +2621,9 @@ mod tests {
             Some(&spec_58x40()),
         )
         .unwrap();
-        assert!(
-            bytes
-                .windows(6)
-                .any(|w| w == &[escpos::ESC, b'!', 0x20, escpos::GS, b'!', 0x11][..])
-        );
+        assert!(bytes
+            .windows(6)
+            .any(|w| w == &[escpos::ESC, b'!', 0x20, escpos::GS, b'!', 0x11][..]));
     }
     #[test]
     fn spec_label_cardprice_only_when_present() {
@@ -2728,11 +2727,9 @@ mod tests {
         let first = items.iter().find(|i| i.text == "В").unwrap();
         assert_eq!((first.x_mm, first.y_mm), (2.0, 1.0));
         assert_eq!((first.w_mm, first.h_mm), (1.5, 3.0));
-        assert!(
-            items
-                .iter()
-                .any(|i| i.text == ":" && (i.y_mm - 21.0).abs() < 0.01)
-        );
+        assert!(items
+            .iter()
+            .any(|i| i.text == ":" && (i.y_mm - 21.0).abs() < 0.01));
     }
     #[test]
     fn ean13_encoding_matches_spec() {

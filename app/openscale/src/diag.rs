@@ -1,11 +1,32 @@
-
-use std::path::Path;
 use crate::config::Config;
+use std::path::Path;
 pub fn collect(cfg: &Config) -> String {
     report(cfg, None)
 }
 pub fn collect_live(cfg: &Config, scales: &crate::weight::Snapshot) -> String {
     report(cfg, Some(scales))
+}
+/// Диагностика весов для категории «Весы»: только весы и связь.
+/// Принтер и прочее оборудование — на своих экранах, дублировать не нужно.
+pub fn collect_scales(scales: &crate::weight::Snapshot) -> String {
+    let mut r = String::new();
+    r.push_str(&format!(
+        "Весы: {}\n",
+        if scales.port_up {
+            format!(
+                "связь есть, {:.3} кг, {}",
+                scales.mass_kg,
+                if scales.stable {
+                    "вес стабилен"
+                } else {
+                    "вес нестабилен"
+                }
+            )
+        } else {
+            "нет связи с весовым модулем".to_string()
+        }
+    ));
+    r
 }
 fn report(cfg: &Config, live: Option<&crate::weight::Snapshot>) -> String {
     let mut r = String::new();
@@ -13,7 +34,11 @@ fn report(cfg: &Config, live: Option<&crate::weight::Snapshot>) -> String {
         Some(s) if s.port_up => format!(
             "связь есть, {:.3} кг, {}",
             s.mass_kg,
-            if s.stable { "вес стабилен" } else { "вес нестабилен" }
+            if s.stable {
+                "вес стабилен"
+            } else {
+                "вес нестабилен"
+            }
         ),
         Some(_) => "нет связи с весовым модулем".to_string(),
         None => probe_serial(Path::new(&cfg.scales.port), cfg.scales.baud),
@@ -128,5 +153,19 @@ mod tests {
         assert!(r.contains("Принтер"));
         assert!(r.contains("База PLU"));
         assert!(r.contains("Набор от центра"));
+    }
+    #[test]
+    fn scales_diag_shows_only_scales() {
+        let mut snap = crate::weight::Snapshot {
+            port_up: true,
+            mass_kg: 0.5,
+            stable: true,
+            updated_at_ms: 0,
+        };
+        let r = collect_scales(&snap);
+        assert!(r.contains("Весы"));
+        assert!(r.contains("0.500 кг"));
+        assert!(!r.contains("Принтер"));
+        assert!(!r.contains("База"));
     }
 }

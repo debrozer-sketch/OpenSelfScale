@@ -1,7 +1,12 @@
 use serde_json::Value;
 
 pub const MM_TO_DOTS: i32 = 8;
-const REQUIRED: [LabelKind; 4] = [LabelKind::Name, LabelKind::Weight, LabelKind::Sum, LabelKind::Barcode];
+const REQUIRED: [LabelKind; 4] = [
+    LabelKind::Name,
+    LabelKind::Weight,
+    LabelKind::Sum,
+    LabelKind::Barcode,
+];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LabelKind {
@@ -119,8 +124,7 @@ fn parse_field(v: &Value, index: usize) -> Result<LabelField, String> {
 }
 
 pub fn parse(spec_json: &str) -> Result<LabelSpec, String> {
-    let v: Value =
-        serde_json::from_str(spec_json).map_err(|e| format!("JSON не разобран: {e}"))?;
+    let v: Value = serde_json::from_str(spec_json).map_err(|e| format!("JSON не разобран: {e}"))?;
     if v.get("format").and_then(Value::as_i64) != Some(1) {
         return Err("format должен быть 1".into());
     }
@@ -151,7 +155,11 @@ pub fn parse(spec_json: &str) -> Result<LabelSpec, String> {
     let mut fields = Vec::new();
     for (i, f) in raw_fields.iter().enumerate() {
         let field = parse_field(f, i)?;
-        if field.x_mm < 0.0 || field.y_mm < 0.0 || field.x_mm >= width_mm as f64 || field.y_mm >= height_mm as f64 {
+        if field.x_mm < 0.0
+            || field.y_mm < 0.0
+            || field.x_mm >= width_mm as f64
+            || field.y_mm >= height_mm as f64
+        {
             return Err(format!(
                 "поле {i} ({}): координаты вне границ этикетки",
                 field.kind.name()
@@ -161,10 +169,7 @@ pub fn parse(spec_json: &str) -> Result<LabelSpec, String> {
     }
     for req in REQUIRED {
         if !fields.iter().any(|f| f.kind == req) {
-            return Err(format!(
-                "нет обязательного поля kind \"{}\"",
-                req.name()
-            ));
+            return Err(format!("нет обязательного поля kind \"{}\"", req.name()));
         }
     }
     Ok(LabelSpec {
@@ -182,7 +187,9 @@ pub fn choose(specs: &[LabelSpec], len_mm: i32) -> Option<LabelSpec> {
         if diff > 5 {
             continue;
         }
-        let better = best.map_or(true, |(bd, bf, _)| diff < bd || (diff == bd && spec.fields.len() > bf));
+        let better = best.map_or(true, |(bd, bf, _)| {
+            diff < bd || (diff == bd && spec.fields.len() > bf)
+        });
         if better {
             best = Some((diff, spec.fields.len(), spec));
         }
@@ -224,10 +231,18 @@ mod tests {
         assert_eq!(spec.name, "58x40");
         assert_eq!((spec.width_mm, spec.height_mm), (58, 40));
         assert_eq!(spec.fields.len(), 6);
-        let text = spec.fields.iter().find(|f| f.kind == LabelKind::Text).unwrap();
+        let text = spec
+            .fields
+            .iter()
+            .find(|f| f.kind == LabelKind::Text)
+            .unwrap();
         assert_eq!(text.text, "СПАСИБО ЗА ПОКУПКУ");
         assert!(!text.font_a);
-        let sum = spec.fields.iter().find(|f| f.kind == LabelKind::Sum).unwrap();
+        let sum = spec
+            .fields
+            .iter()
+            .find(|f| f.kind == LabelKind::Sum)
+            .unwrap();
         assert!(sum.size2);
     }
 
@@ -297,11 +312,17 @@ mod tests {
 
     #[test]
     fn parse_accepts_half_mm_step() {
-        let half = minimal().replace(r#""kind":"name","x":2,"y":1"#, r#""kind":"name","x":0.5,"y":1.5"#);
+        let half = minimal().replace(
+            r#""kind":"name","x":2,"y":1"#,
+            r#""kind":"name","x":0.5,"y":1.5"#,
+        );
         let spec = parse(&half).unwrap();
         assert_eq!(spec.fields[0].x_mm, 0.5);
         assert_eq!(spec.fields[0].y_mm, 1.5);
-        let quarter = minimal().replace(r#""kind":"name","x":2,"y":1"#, r#""kind":"name","x":2.25,"y":1"#);
+        let quarter = minimal().replace(
+            r#""kind":"name","x":2,"y":1"#,
+            r#""kind":"name","x":2.25,"y":1"#,
+        );
         let err = parse(&quarter).unwrap_err();
         assert!(err.contains("0,5"), "{err}");
     }
@@ -314,7 +335,12 @@ mod tests {
             r#"{"kind":"barcode","x":2,"y":5,"font":"A","size":1},{"kind":"price","x":2,"y":26,"font":"A","size":1}]"#,
         );
         let b = parse(&b_spec).unwrap();
-        let far = parse(&minimal().replace("\"height_mm\":40", "\"height_mm\":50").replace("58x40", "50c")).unwrap();
+        let far = parse(
+            &minimal()
+                .replace("\"height_mm\":40", "\"height_mm\":50")
+                .replace("58x40", "50c"),
+        )
+        .unwrap();
         let specs = vec![a.clone(), b.clone(), far];
         assert_eq!(choose(&specs, 40).unwrap().name, "40a");
         assert_eq!(choose(&specs, 38).unwrap().name, "38b");

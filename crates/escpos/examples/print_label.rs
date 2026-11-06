@@ -1,4 +1,3 @@
-
 use escpos::{FieldStyle, LabelJob};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut job = LabelJob::begin((448, 232));
@@ -16,7 +15,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for chunk in bytes.chunks(16) {
                 println!(
                     "{}",
-                    chunk.iter().map(|b| format!("{b:02x} ")).collect::<String>()
+                    chunk
+                        .iter()
+                        .map(|b| format!("{b:02x} "))
+                        .collect::<String>()
                 );
             }
         }

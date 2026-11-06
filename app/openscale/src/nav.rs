@@ -1,4 +1,3 @@
-
 pub struct Screen {
     pub stage: u8,
     pub slint: u8,
@@ -10,32 +9,209 @@ pub struct Screen {
 const EXIT: u8 = 0;
 
 pub const SCREENS: &[Screen] = &[
-    Screen { stage: 1, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
-    Screen { stage: 2, slint: 6, title: "МЕНЮ НАСТРОЕК", parent: EXIT, back: false },
-    Screen { stage: 3, slint: 4, title: "ВИТРИНА · КОМПОНОВКА", parent: 12, back: true },
-    Screen { stage: 4, slint: 7, title: "ДИАГНОСТИКА ВЕСОВ", parent: 13, back: true },
-    Screen { stage: 5, slint: 8, title: "СЕТЬ И ВРЕМЯ", parent: 2, back: true },
-    Screen { stage: 6, slint: 9, title: "ПЕЧАТЬ", parent: 2, back: true },
-    Screen { stage: 7, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 25, back: false },
-    Screen { stage: 8, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 25, back: false },
-    Screen { stage: 9, slint: 10, title: "СМЕНА ПАРОЛЯ", parent: 25, back: false },
-    Screen { stage: 12, slint: 13, title: "ВИТРИНА", parent: 2, back: true },
-    Screen { stage: 13, slint: 14, title: "ВЕСЫ И ТОРГОВЛЯ", parent: 2, back: true },
-    Screen { stage: 15, slint: 16, title: "ИМПОРТ КОНФИГУРАЦИИ", parent: 25, back: true },
-    Screen { stage: 16, slint: 17, title: "ОТЧЁТЫ", parent: 25, back: true },
-    Screen { stage: 17, slint: 18, title: "ПРИНТЕР · ДИАГНОСТИКА", parent: 6, back: true },
-    Screen { stage: 20, slint: 19, title: "НАСТРОЙКА ВЕСОВ", parent: EXIT, back: false },
-    Screen { stage: 21, slint: 20, title: "ЭТИКЕТКИ", parent: 6, back: true },
-    Screen { stage: 22, slint: 23, title: "ЖУРНАЛ ДЕЙСТВИЙ", parent: 25, back: true },
-    Screen { stage: 23, slint: 24, title: "СОСТОЯНИЕ", parent: 2, back: true },
-    Screen { stage: 24, slint: 27, title: "ОБСЛУЖИВАНИЕ", parent: 2, back: true },
-    Screen { stage: 25, slint: 26, title: "ДОСТУП И СЕРВИС", parent: 2, back: true },
-    Screen { stage: 30, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
-    Screen { stage: 31, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
-    Screen { stage: 32, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
-    Screen { stage: 33, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
-    Screen { stage: 34, slint: 5, title: "ДАТА И ВРЕМЯ", parent: EXIT, back: false },
-    Screen { stage: 35, slint: 5, title: "ВХОД ПЕРСОНАЛА", parent: EXIT, back: false },
+    Screen {
+        stage: 1,
+        slint: 5,
+        title: "ВХОД ПЕРСОНАЛА",
+        parent: EXIT,
+        back: false,
+    },
+    Screen {
+        stage: 2,
+        slint: 6,
+        title: "УПРАВЛЕНИЕ",
+        parent: EXIT,
+        back: false,
+    },
+    Screen {
+        stage: 3,
+        slint: 4,
+        title: "ВИТРИНА · КОМПОНОВКА",
+        parent: 12,
+        back: true,
+    },
+    Screen {
+        stage: 4,
+        slint: 7,
+        title: "ДИАГНОСТИКА ВЕСОВ",
+        parent: 13,
+        back: true,
+    },
+    Screen {
+        stage: 5,
+        slint: 8,
+        title: "СЕТЬ И ВРЕМЯ",
+        parent: 41,
+        back: true,
+    },
+    Screen {
+        stage: 6,
+        slint: 9,
+        title: "ЭТИКЕТКИ И ПРИНТЕР",
+        parent: 2,
+        back: true,
+    },
+    Screen {
+        stage: 7,
+        slint: 10,
+        title: "СМЕНА ПАРОЛЯ",
+        parent: 43,
+        back: false,
+    },
+    Screen {
+        stage: 8,
+        slint: 10,
+        title: "СМЕНА ПАРОЛЯ",
+        parent: 43,
+        back: false,
+    },
+    Screen {
+        stage: 9,
+        slint: 10,
+        title: "СМЕНА ПАРОЛЯ",
+        parent: 43,
+        back: false,
+    },
+    Screen {
+        stage: 12,
+        slint: 13,
+        title: "ИНТЕРФЕЙС",
+        parent: 2,
+        back: true,
+    },
+    Screen {
+        stage: 13,
+        slint: 14,
+        title: "ВЕСЫ",
+        parent: 2,
+        back: true,
+    },
+    Screen {
+        stage: 15,
+        slint: 16,
+        title: "ИМПОРТ КОНФИГУРАЦИИ",
+        parent: 41,
+        back: true,
+    },
+    Screen {
+        stage: 16,
+        slint: 17,
+        title: "ОТЧЁТЫ",
+        parent: 42,
+        back: true,
+    },
+    Screen {
+        stage: 17,
+        slint: 18,
+        title: "ПРИНТЕР · ДИАГНОСТИКА",
+        parent: 6,
+        back: true,
+    },
+    Screen {
+        stage: 20,
+        slint: 19,
+        title: "НАСТРОЙКА ВЕСОВ",
+        parent: EXIT,
+        back: false,
+    },
+    Screen {
+        stage: 21,
+        slint: 20,
+        title: "ЭТИКЕТКИ",
+        parent: 6,
+        back: true,
+    },
+    Screen {
+        stage: 22,
+        slint: 23,
+        title: "ЖУРНАЛ ДЕЙСТВИЙ",
+        parent: 42,
+        back: true,
+    },
+    Screen {
+        stage: 23,
+        slint: 24,
+        title: "СОСТОЯНИЕ ОБОРУДОВАНИЯ",
+        parent: 2,
+        back: true,
+    },
+    Screen {
+        stage: 24,
+        slint: 27,
+        title: "ОБСЛУЖИВАНИЕ БД",
+        parent: 43,
+        back: true,
+    },
+    Screen {
+        stage: 41,
+        slint: 30,
+        title: "СЕТЬ И ОБМЕН",
+        parent: 2,
+        back: true,
+    },
+    Screen {
+        stage: 42,
+        slint: 31,
+        title: "ОТЧЁТЫ И ЖУРНАЛ",
+        parent: 2,
+        back: true,
+    },
+    Screen {
+        stage: 43,
+        slint: 32,
+        title: "ОБСЛУЖИВАНИЕ",
+        parent: 2,
+        back: true,
+    },
+    Screen {
+        stage: 30,
+        slint: 5,
+        title: "ВХОД ПЕРСОНАЛА",
+        parent: EXIT,
+        back: false,
+    },
+    Screen {
+        stage: 31,
+        slint: 5,
+        title: "ВХОД ПЕРСОНАЛА",
+        parent: EXIT,
+        back: false,
+    },
+    Screen {
+        stage: 32,
+        slint: 5,
+        title: "ВХОД ПЕРСОНАЛА",
+        parent: EXIT,
+        back: false,
+    },
+    Screen {
+        stage: 33,
+        slint: 5,
+        title: "ВХОД ПЕРСОНАЛА",
+        parent: EXIT,
+        back: false,
+    },
+    Screen {
+        stage: 34,
+        slint: 5,
+        title: "ДАТА И ВРЕМЯ",
+        parent: EXIT,
+        back: false,
+    },
+    Screen {
+        stage: 35,
+        slint: 5,
+        title: "ВХОД ПЕРСОНАЛА",
+        parent: EXIT,
+        back: false,
+    },
+    Screen {
+        stage: 36,
+        slint: 29,
+        title: "ЗЕРКАЛО КАРТИНОК",
+        parent: 41,
+        back: true,
+    },
 ];
 
 const FALLBACK_SLINT: u8 = 7;
@@ -92,7 +268,12 @@ mod tests {
         let stages: std::collections::HashSet<u8> = SCREENS.iter().map(|s| s.stage).collect();
         for s in SCREENS {
             if s.parent != EXIT {
-                assert!(stages.contains(&s.parent), "stage {}: parent {} не в таблице", s.stage, s.parent);
+                assert!(
+                    stages.contains(&s.parent),
+                    "stage {}: parent {} не в таблице",
+                    s.stage,
+                    s.parent
+                );
             }
         }
     }
@@ -110,10 +291,22 @@ mod tests {
     #[test]
     fn admin_tree_is_two_levels_from_main_menu() {
         let parent = |st: u8| screen_parent(st);
-        for top in [12u8, 13, 6, 5, 23, 25] {
+        for top in [12u8, 13, 6, 41, 42, 43] {
             assert_eq!(parent(top), 2, "stage {top}");
         }
-        for (child, via) in [(3u8, 12u8), (4, 13), (21, 6), (17, 6), (15, 25), (16, 25), (22, 25)] {
+        for (child, via) in [
+            (3u8, 12u8),
+            (4, 13),
+            (21, 6),
+            (17, 6),
+            (5, 41),
+            (15, 41),
+            (36, 41),
+            (16, 42),
+            (22, 42),
+            (24, 43),
+            (7, 43),
+        ] {
             assert_eq!(parent(child), via, "stage {child}");
         }
     }
@@ -123,10 +316,17 @@ mod tests {
         assert_eq!(screen_slint(3), 4);
         assert_eq!(screen_slint(22), 23);
         assert_eq!(screen_slint(23), 24);
-        assert_eq!(screen_slint(25), 26);
+        assert_eq!(screen_slint(41), 30);
+        assert_eq!(screen_slint(42), 31);
+        assert_eq!(screen_slint(43), 32);
         assert_eq!(screen_title(22), "ЖУРНАЛ ДЕЙСТВИЙ");
         assert_eq!(screen_title(3), "ВИТРИНА · КОМПОНОВКА");
         assert_eq!(screen_parent(3), 12);
+        assert_eq!(screen_title(2), "УПРАВЛЕНИЕ");
+        assert_eq!(screen_title(12), "ИНТЕРФЕЙС");
+        assert_eq!(screen_title(13), "ВЕСЫ");
+        assert_eq!(screen_title(6), "ЭТИКЕТКИ И ПРИНТЕР");
+        assert_eq!(screen_title(43), "ОБСЛУЖИВАНИЕ");
         assert_eq!(screen_slint(30), 5);
         assert_eq!(screen_title(30), "ВХОД ПЕРСОНАЛА");
         assert_eq!(screen_title(34), "ДАТА И ВРЕМЯ");

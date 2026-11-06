@@ -1,7 +1,6 @@
-
-use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 use crate::config::Config;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 pub const FORMAT: i64 = 1;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConfigFile {
@@ -184,10 +183,9 @@ pub fn parse(path: &Path) -> Result<ConfigFile, String> {
             MAX_FILE_BYTES / 1024
         ));
     }
-    let body = std::fs::read_to_string(path)
-        .map_err(|e| format!("чтение {}: {e}", path.display()))?;
-    let parsed: ConfigFile =
-        toml::from_str(&body).map_err(|e| format!("формат файла: {e}"))?;
+    let body =
+        std::fs::read_to_string(path).map_err(|e| format!("чтение {}: {e}", path.display()))?;
+    let parsed: ConfigFile = toml::from_str(&body).map_err(|e| format!("формат файла: {e}"))?;
     if parsed.format != FORMAT {
         return Err(format!(
             "версия формата {} не поддерживается (ожидается {FORMAT})",
@@ -243,25 +241,31 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
         datastore::set_calibration(&tx, "dept_cols", v.clamp(1, 10)).map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.dept_sort_alpha {
-        datastore::set_calibration(&tx, "dept_sort_alpha", i64::from(v)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "dept_sort_alpha", i64::from(v))
+            .map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.dept_cell {
         datastore::set_calibration(&tx, "dept_cell", i64::from(v)).map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.idle_timeout_secs {
-        datastore::set_calibration(&tx, "idle_timeout_secs", v.clamp(10, 60)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "idle_timeout_secs", v.clamp(10, 60))
+            .map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.price_rounding {
-        datastore::set_calibration(&tx, "price_rounding", v.clamp(0, 2)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "price_rounding", v.clamp(0, 2))
+            .map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.min_weight_g {
-        datastore::set_calibration(&tx, "min_weight_g", v.clamp(10, 1000)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "min_weight_g", v.clamp(10, 1000))
+            .map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.card_show_name {
-        datastore::set_calibration(&tx, "card_show_name", i64::from(v)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "card_show_name", i64::from(v))
+            .map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.catalog_back_btn {
-        datastore::set_calibration(&tx, "catalog_back_btn", i64::from(v)).map_err(|e| e.to_string())?;
+        datastore::set_calibration(&tx, "catalog_back_btn", i64::from(v))
+            .map_err(|e| e.to_string())?;
     }
     if let Some(v) = f.item_cols {
         datastore::set_calibration(&tx, "item_cols", v.clamp(4, 12)).map_err(|e| e.to_string())?;
@@ -303,8 +307,14 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
             .map(|e| {
                 (
                     e.name().trim().to_uppercase(),
-                    e.bg_ref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
-                    e.fg_ref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+                    e.bg_ref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string),
+                    e.fg_ref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string),
                 )
             })
             .collect();
@@ -322,8 +332,14 @@ pub fn apply(cfg: &Config, f: &ConfigFile) -> Result<String, String> {
             if bg.is_none() && fg.is_none() {
                 continue;
             }
-            datastore::dept_style(&tx, name, None, bg.as_deref().map(Some), fg.as_deref().map(Some))
-                .map_err(|e| format!("цвет отдела {name}: {e}"))?;
+            datastore::dept_style(
+                &tx,
+                name,
+                None,
+                bg.as_deref().map(Some),
+                fg.as_deref().map(Some),
+            )
+            .map_err(|e| format!("цвет отдела {name}: {e}"))?;
             colored += 1;
         }
         tx.commit().map_err(|e| format!("запись: {e}"))?;
@@ -359,19 +375,16 @@ mod tests {
             let conn = datastore::open(&cfg.db_path).unwrap();
             datastore::dept_add(&conn, "ФРУКТЫ", None, None, None).unwrap();
             datastore::group_assign(&conn, "Фрукты", "ФРУКТЫ").unwrap();
-        datastore::label_layout_put(
-            &conn,
-            "test-58x40",
-            58,
-            40,
-            "{\"format\":1}",
-        )
-        .unwrap();
+            datastore::label_layout_put(&conn, "test-58x40", 58, 40, "{\"format\":1}").unwrap();
             datastore::set_calibration(&conn, "dept_cols", 7).unwrap();
         }
         let path = export(&cfg).unwrap();
         let file = parse(&path).unwrap();
-        assert_eq!(file.dept_cols, Some(7), "экспорт 7 колонок не должен зажиматься до 5");
+        assert_eq!(
+            file.dept_cols,
+            Some(7),
+            "экспорт 7 колонок не должен зажиматься до 5"
+        );
         assert!(
             file.group_depts
                 .iter()
@@ -507,12 +520,17 @@ mod tests {
         datastore::set_setting(&conn, "setup_done", "1").unwrap();
         datastore::set_setting(&conn, "setup_stage", "5").unwrap();
         datastore::set_setting(&conn, "label_layout_name", "market-56x38").unwrap();
-        datastore::auth::create_user(&conn, 1, "admin", "12345").unwrap().unwrap();
+        datastore::auth::create_user(&conn, 1, "admin", "12345")
+            .unwrap()
+            .unwrap();
         drop(conn);
         let path = export(&cfg).expect("export");
         let body = std::fs::read_to_string(&path).unwrap();
         for leak in ["setup_", "pin_salt", "pin_hash", "label_layout_name"] {
-            assert!(!body.contains(leak), "в файле экспорта найдено: {leak}\n{body}");
+            assert!(
+                !body.contains(leak),
+                "в файле экспорта найдено: {leak}\n{body}"
+            );
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

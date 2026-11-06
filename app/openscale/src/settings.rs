@@ -1,13 +1,14 @@
-use crate::MainWindow;
 use crate::admin;
 use crate::calib;
 use crate::cfgio;
 use crate::config::Config;
 use crate::context::AppContext;
 use crate::diag;
+use crate::imgsync;
 use crate::net::{self, net_rows_set};
 use crate::print;
 use crate::setup;
+use crate::MainWindow;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -612,6 +613,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 k.admin_stage = 20;
                 return;
             }
+            // «Состояние» возвращают туда, откуда открыли (как в admin_close).
+            if k.admin_stage == 23 && k.status_from != 0 {
+                k.admin_stage = k.status_from;
+                k.status_from = 0;
+                return;
+            }
             // Единая таблица «назад» — nav::screen_parent (дубль таблиц удалён по аудиту).
             k.admin_stage = crate::nav::screen_parent_for(k.admin_stage, k.role);
         }
@@ -910,10 +917,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
         let trade = trade.clone();
         let relayout = flow.relayout.clone();
         move |id: slint::SharedString| {
-            const ADMIN_TAPS: [&str; 23] = [
-                "createstaff", "net", "restart", "actionlog", "access", "equip", "goods", "trade",
-                "layout", "cols", "sortalpha", "deptview", "itemscols", "cardname", "backbtn",
-                "idletimeout", "rounding", "minweight", "export", "import", "vnctoggle", "resetkey", "itemsort",
+            const ADMIN_TAPS: [&str; 27] = [
+                "createstaff", "net", "restart", "actionlog", "catnet", "catreports", "catservice",
+                "backup", "equip", "goods", "trade", "layout", "cols", "sortalpha", "deptview",
+                "itemscols", "cardname", "backbtn", "idletimeout", "rounding", "minweight",
+                "export", "import", "vnctoggle", "resetkey", "itemsort", "imgsync",
             ];
             if ADMIN_TAPS.contains(&id.as_str()) && kiosk.borrow().role != 1 {
                 log::warn!("меню: отказ: «{id}» только для администратора");
@@ -942,6 +950,34 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                 "goods" => {
                     refresh_setting_labels(&ui_handle, &trade, &idle_secs);
                     kiosk.borrow_mut().admin_stage = 12;
+                }
+                "imgsync" => {
+                    let mut k = kiosk.borrow_mut();
+                    match datastore::open(&cfg.db_path) {
+                        Ok(conn) => k.img_buf = imgsync::load(&conn),
+                        Err(e) => {
+                            log::warn!("меню: imgsync: база: {e}");
+                            k.img_buf = Default::default();
+                        }
+                    }
+                    // Настройки, сделанные руками до появления экрана,
+                    // показываем из conf-файла зеркала.
+                    if k.img_buf[0].is_empty() {
+                        if let Some(f) = imgsync::read_conf() {
+                            k.img_buf = f;
+                        }
+                    }
+                    k.img_focus = 0;
+                    let buf = k.img_buf.clone();
+                    let focus = k.img_focus;
+                    drop(k);
+                    if let Some(ui) = ui_handle.upgrade() {
+                        imgsync::img_rows_set(&ui, &buf, focus);
+                        ui.set_img_ok(true);
+                        ui.set_img_status(String::new().into());
+                        ui.set_img_busy(false);
+                    }
+                    kiosk.borrow_mut().admin_stage = 36;
                 }
                 "trade" => {
                     refresh_setting_labels(&ui_handle, &trade, &idle_secs);
@@ -1231,18 +1267,21 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     let ui_handle = ui_handle.clone();
                     let cfg_t = cfg.clone();
                     std::thread::spawn(move || {
-                        // -n: пароль не запрашивается никогда. Потоки не
-                        // наследуют tty1: sudo с парольным prompt получает
-                        // SIGTTIN/SIGTTOU и останавливает весь киоск.
-                        let mut cmd = std::process::Command::new("sudo");
-                        cmd.arg("-n")
-                            .arg("/usr/local/sbin/openscale-vnc-toggle")
-                            .arg(arg)
-                            .stdin(std::process::Stdio::null())
-                            .stdout(std::process::Stdio::null())
-                            .stderr(std::process::Stdio::null());
-                        let res = match run_cmd_timeout(&mut cmd, std::time::Duration::from_secs(5)) {
-                            Ok(true) => {
+                        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            // -n: пароль не запрашивается никогда. Потоки не
+                            // наследуют tty1: sudo с парольным prompt получает
+                            // SIGTTIN/SIGTTOU и останавливает весь киоск.
+                            let mut cmd = std::process::Command::new("sudo");
+                            cmd.arg("-n")
+                                .arg("/usr/local/sbin/openscale-vnc-toggle")
+                                .arg(arg)
+                                .stdin(std::process::Stdio::null())
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null());
+                            run_cmd_timeout(&mut cmd, std::time::Duration::from_secs(5))
+                        }));
+                        let res = match r {
+                            Ok(Ok(true)) => {
                                 kiosk_vnc_note(next);
                                 log_action(&cfg_t.db_path, "удалённый доступ", format!("VNC {}", if next { "включён" } else { "выключен" }));
                                 let _ = slint::invoke_from_event_loop(move || {
@@ -1256,8 +1295,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                     }
                                 });
                             }
-                            Ok(false) => log::warn!("vnc-toggle: хелпер сообщил об ошибке"),
-                            Err(e) => log::warn!("vnc-toggle: {e}"),
+                            Ok(Ok(false)) => log::warn!("vnc-toggle: хелпер сообщил об ошибке"),
+                            Ok(Err(e)) => log::warn!("vnc-toggle: {e}"),
+                            Err(_) => {
+                                log::error!("vnc-toggle: поток переключения прерван паникой");
+                            }
                         };
                         VNC_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
                         res
@@ -1291,8 +1333,74 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                         Err(e) => log::warn!("resetkey: {e}"),
                     }
                 }
-                "access" => {
-                    kiosk.borrow_mut().admin_stage = 25;
+                "catnet" => {
+                    kiosk.borrow_mut().admin_stage = 41;
+                }
+                "catreports" => {
+                    kiosk.borrow_mut().admin_stage = 42;
+                }
+                "catservice" => {
+                    kiosk.borrow_mut().admin_stage = 43;
+                }
+                "backup" => {
+                    // Повторный запуск занятой операции игнорируется.
+                    if MAINT_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        log::info!("меню: резервная копия: операция уже выполняется");
+                        return;
+                    }
+                    let app_state = app_state.clone();
+                    let cfg_t = cfg.clone();
+                    let ui_handle = ui_handle.clone();
+                    let ui_panic = ui_handle.clone();
+                    spawn_menu_task(
+                        "резервная копия",
+                        move |msg| {
+                            MAINT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                            show_cfg_popup(&ui_panic, false, format!("Копия не создана: {msg}"));
+                        },
+                        move || {
+                            let res = match crate::backup::create_backup(&cfg_t, None) {
+                                Ok(path) => {
+                                    let name = path
+                                        .file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_default();
+                                    log::info!("меню: резервная копия: {name}");
+                                    Ok(name)
+                                }
+                                Err(e) => {
+                                    log::warn!("меню: резервная копия не удалась: {e}");
+                                    Err("Не удалось создать резервную копию.\nПопробуйте ещё раз.".to_string())
+                                }
+                            };
+                            // Обновление статусов обслуживания — вне UI-потока.
+                            let rows = match std::panic::catch_unwind(
+                                std::panic::AssertUnwindSafe(|| maint_rows(&cfg_t, &app_state)),
+                            ) {
+                                Ok(rows) => rows,
+                                Err(_) => {
+                                    log::error!("меню: сбор статусов после копии прерван паникой");
+                                    vec![maint_row(
+                                        "Обслуживание",
+                                        ("статус не собран после копии".to_string(), 2),
+                                    )]
+                                }
+                            };
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ui) = ui_handle.upgrade() {
+                                    ui.set_maint_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+                                    match res {
+                                        Ok(name) => show_cfg_popup(
+                                            &ui_handle,
+                                            true,
+                                            format!("Резервная копия создана:\n{name}"),
+                                        ),
+                                        Err(text) => show_cfg_popup(&ui_handle, false, text),
+                                    }
+                                }
+                            });
+                        },
+                    );
                 }
                 "changepin" => {
                     let mut k = kiosk.borrow_mut();
@@ -1501,11 +1609,11 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     if let Some(ui) = ui_handle.upgrade() {
                         ui.set_diag_text("Собираю отчёт…".into());
                     }
-                    let cfg = cfg.clone();
                     let ui_handle = ui_handle.clone();
                     let snap = app_state.snapshot();
                     std::thread::spawn(move || {
-                        let text = diag::collect_live(&cfg, &snap);
+                        // Только весы: статус принтера — на своём экране.
+                        let text = diag::collect_scales(&snap);
                         slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_handle.upgrade() {
                                 ui.set_diag_text(text.into());
@@ -1608,85 +1716,6 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             });
         }
     });
-    ui.on_maint_print_test({
-        let ui_handle = ui_handle.clone();
-        move || {
-            // Подтверждение печатается оператором; диалог не открываем,
-            // пока уже идёт проверка принтера (PRN_BUSY — общий BUSY).
-            if PRN_BUSY.load(std::sync::atomic::Ordering::SeqCst) {
-                return;
-            }
-            if let Some(ui) = ui_handle.upgrade() {
-                ui.set_maint_confirm_open(true);
-            }
-        }
-    });
-    ui.on_maint_confirm_close({
-        let ui_handle = ui_handle.clone();
-        move || {
-            if let Some(ui) = ui_handle.upgrade() {
-                ui.set_maint_confirm_open(false);
-            }
-        }
-    });
-    ui.on_maint_print_apply({
-        let cfg = cfg.clone();
-        let app_state = app_state.clone();
-        let ui_handle = ui_handle.clone();
-        move || {
-            if let Some(ui) = ui_handle.upgrade() {
-                ui.set_maint_confirm_open(false);
-            }
-            // Один и тот же BUSY, что и у тестовой печати в настройках.
-            if PRN_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                log::info!("обслуживание: проверка принтера уже выполняется");
-                return;
-            }
-            if let Some(ui) = ui_handle.upgrade() {
-                ui.set_maint_busy(true);
-            }
-            let ui_handle = ui_handle.clone();
-            let app_state = app_state.clone();
-            let cfg = cfg.clone();
-            std::thread::spawn(move || {
-                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    print::print_test_label(&cfg)
-                }));
-                PRN_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
-                // Три исхода проверки: датчик подтвердил выдачу, достоверный
-                // отказ до отправки, неопределённый результат (этикетка могла
-                // выйти). Автоповтора при неопределённом результате нет.
-                let msg = match r {
-                    Ok(ok) => test_print_message(&ok),
-                    Err(_) => Err("Проверка не удалась. Попробуйте ещё раз.".to_string()),
-                };
-                // Сборка статусов — в рабочем потоке: integrity_check не в UI.
-                let rows = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    maint_rows(&cfg, &app_state)
-                })) {
-                    Ok(rows) => rows,
-                    Err(_) => {
-                        log::error!("обслуживание: сбор статусов после проверки прерван паникой");
-                        vec![maint_row(
-                            "Обслуживание",
-                            ("статус не собран после проверки".to_string(), 2),
-                        )]
-                    }
-                };
-                let sent = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui_handle.upgrade() {
-                        ui.set_maint_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
-                        ui.set_maint_busy(false);
-                        match msg {
-                            Ok(text) => show_cfg_popup(&ui_handle, true, text),
-                            Err(text) => show_cfg_popup(&ui_handle, false, text),
-                        }
-                    }
-                });
-                let _ = sent;
-            });
-        }
-    });
     ui.on_net_mode({
         let kiosk = kiosk.clone();
         let ui_handle = ui_handle.clone();
@@ -1765,6 +1794,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             spawn_menu_task(
                 "сеть",
                 move |msg| {
+                    NET_APPLYING.store(false, std::sync::atomic::Ordering::SeqCst);
                     show_panic(false, format!("Не применено: внутренняя ошибка ({msg})"));
                 },
                 move || {
@@ -1840,6 +1870,105 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     }
                 }
             }
+        }
+    });
+    ui.on_img_tap({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
+        move |i: i32| {
+            kiosk.borrow_mut().img_focus = (i as usize).min(3);
+            if let Some(ui) = ui_handle.upgrade() {
+                let k = kiosk.borrow();
+                imgsync::img_rows_set(&ui, &k.img_buf, k.img_focus);
+            }
+        }
+    });
+    ui.on_img_key({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
+        move |key: slint::SharedString| {
+            let mut k = kiosk.borrow_mut();
+            let focus = k.img_focus;
+            imgsync::key(&mut k.img_buf, focus, key.as_str());
+            if let Some(ui) = ui_handle.upgrade() {
+                imgsync::img_rows_set(&ui, &k.img_buf, k.img_focus);
+            }
+        }
+    });
+    ui.on_img_save({
+        let kiosk = kiosk.clone();
+        let ui_handle = ui_handle.clone();
+        let cfg = cfg.clone();
+        move || {
+            let mut k = kiosk.borrow_mut();
+            let buf = std::mem::take(&mut k.img_buf);
+            let result = (|| -> Result<bool, String> {
+                let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
+                let active = imgsync::save(&conn, &buf)?;
+                imgsync::write_conf(&buf)?;
+                Ok(active)
+            })();
+            let (ok, text) = match result {
+                Ok(true) => (true, "Сохранено: зеркало включено".into()),
+                Ok(false) => (true, "Сохранено: зеркало отключено".into()),
+                Err(e) => {
+                    log::warn!("меню: imgsync: сохранение: {e}");
+                    (false, format!("Не сохранено: {e}"))
+                }
+            };
+            k.img_buf = buf;
+            log_action(&cfg.db_path, "меню", format!("зеркало картинок: {text}"));
+            if let Some(ui) = ui_handle.upgrade() {
+                imgsync::img_rows_set(&ui, &k.img_buf, k.img_focus);
+                ui.set_img_ok(ok);
+                ui.set_img_status(text.into());
+            }
+        }
+    });
+    ui.on_img_fetch({
+        let ui_handle = ui_handle.clone();
+        let cfg2 = cfg.clone();
+        move || {
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_img_busy(true);
+                ui.set_img_ok(true);
+                ui.set_img_status("Скачиваю...".into());
+            }
+            let ui_panic = ui_handle.clone();
+            let ui_done = ui_handle.clone();
+            let cfg_run = cfg2.clone();
+            spawn_menu_task(
+                "imgsync: загрузка",
+                move |msg| {
+                    if let Some(ui) = ui_panic.upgrade() {
+                        ui.set_img_busy(false);
+                        ui.set_img_ok(false);
+                        ui.set_img_status(format!("Прервано: {msg}").into());
+                    }
+                },
+                move || {
+                    let res = imgsync::fetch_now(&cfg_run);
+                    match &res {
+                        Ok(t) => log::info!("меню: imgsync: {t}"),
+                        Err(e) => log::warn!("меню: imgsync: {e}"),
+                    }
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_done.upgrade() {
+                            ui.set_img_busy(false);
+                            match &res {
+                                Ok(t) => {
+                                    ui.set_img_ok(true);
+                                    ui.set_img_status(t.clone().into());
+                                }
+                                Err(e) => {
+                                    ui.set_img_ok(false);
+                                    ui.set_img_status(e.clone().into());
+                                }
+                            }
+                        }
+                    });
+                },
+            );
         }
     });
     ui.on_import_tap({
@@ -2146,7 +2275,18 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             let cfg = cfg.clone();
             let ui_handle = ui_handle.clone();
             std::thread::spawn(move || {
-                let res = print::print_reprint(&cfg, rowid);
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    print::print_reprint(&cfg, rowid)
+                }));
+                let res = match r {
+                    Ok(res) => res,
+                    Err(_) => {
+                        log::error!("повтор печати: поток прерван паникой");
+                        Err(print::PrintError::Printer(
+                            "внутренняя ошибка повтора печати".into(),
+                        ))
+                    }
+                };
                 let _ = slint::invoke_from_event_loop(move || {
                     REPRINT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
                     if let Some(ui) = ui_handle.upgrade() {
@@ -2566,11 +2706,15 @@ fn maint_rows(
     cfg: &crate::config::Config,
     app_state: &std::sync::Arc<crate::weight::WeightSource>,
 ) -> Vec<crate::MaintRow> {
-    let db = match datastore::open(&cfg.db_path) {
-        Ok(conn) => {
-            let n: i64 = conn
+    // Fail-closed: только существующая установленная база, создание
+    // запрещено. Guard живёт до конца ветки, соединение не переживёт его.
+    let db = match crate::backup::open_existing(&cfg.db_path) {
+        Ok(guard) => {
+            let n: i64 = guard
+                .conn
                 .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
                 .unwrap_or(0);
+            drop(guard);
             match crate::backup::integrity_check(&cfg.db_path) {
                 Ok(_) => (format!("доступна · товаров {n}"), 0),
                 Err(e) => {
@@ -2640,13 +2784,16 @@ fn maint_rows(
         maint_row("Весы", scales),
         maint_row("Принтер", printer),
     ];
-    match datastore::open(&cfg.db_path) {
-        Ok(conn) => {
-            for line in crate::sync_status::display(crate::sync_status::read(&conn)) {
+    match crate::backup::open_existing(&cfg.db_path) {
+        Ok(guard) => {
+            for line in crate::sync_status::display(crate::sync_status::read(&guard.conn)) {
                 rows.push(maint_row("Синхронизация", line));
             }
         }
-        Err(_) => rows.push(maint_row("Синхронизация", ("нет данных".to_string(), 0))),
+        Err(_) => rows.push(maint_row(
+            "Синхронизация",
+            ("база недоступна".to_string(), 2),
+        )),
     }
     rows
 }
@@ -2751,39 +2898,56 @@ fn status_rows(
             )
         }
     };
-    let (count, size) = match datastore::open(&cfg.db_path) {
-        Ok(conn) => {
-            let c: i64 = conn
+    // Fail-closed: при потерянной установленной базе показываем состояние
+    // прямо, вместо «товаров 0», выглядящего как пустая, но живая база.
+    let db_line = match crate::backup::open_existing(&cfg.db_path) {
+        Ok(guard) => {
+            let c: i64 = guard
+                .conn
                 .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
                 .unwrap_or(0);
+            drop(guard);
             let sz = std::fs::metadata(&cfg.db_path)
                 .map(|m| m.len())
                 .unwrap_or(0);
-            (c, sz)
+            format!(
+                "База: товаров {c}, размер {:.1} МБ",
+                sz as f64 / 1_048_576.0
+            )
         }
-        Err(_) => (0, 0),
+        Err(e) => {
+            log::warn!("состояние: база недоступна: {e}");
+            "База: НЕДОСТУПНА (файл потерян или не установлен)".to_string()
+        }
     };
     vec![
         format!("Версия: {}", env!("CARGO_PKG_VERSION")).into(),
         scales.into(),
         printer.into(),
         net_txt.into(),
-        format!(
-            "База: товаров {count}, размер {:.1} МБ",
-            size as f64 / 1_048_576.0
-        )
-        .into(),
+        db_line.into(),
     ]
 }
 fn refresh_action_log(cfg: &crate::config::Config, ui_handle: &slint::Weak<MainWindow>) {
     let db_path = cfg.db_path.clone();
     let ui_handle = ui_handle.clone();
     std::thread::spawn(move || {
-        let rows = match datastore::open(&db_path) {
-            Ok(conn) => datastore::action_log_recent(&conn, 50).unwrap_or_default(),
+        // Fail-closed: без установленной базы журнал не читается и
+        // пустой список не притворяется успешным результатом.
+        let rows = match crate::backup::open_existing(&db_path) {
+            Ok(guard) => datastore::action_log_recent(&guard.conn, 50).unwrap_or_default(),
             Err(e) => {
                 log::error!("меню: журнал действий: база: {e}");
-                Vec::new()
+                let lines: Vec<slint::SharedString> =
+                    vec![
+                        format!("Журнал недоступен: база потеряна или не установлена.\n{e}").into(),
+                    ];
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle.upgrade() {
+                        ui.set_actionlog_rows(slint::ModelRc::new(slint::VecModel::from(lines)));
+                    }
+                });
+                return;
             }
         };
         let lines: Vec<slint::SharedString> = rows
@@ -2823,11 +2987,24 @@ fn refresh_report(
         ui.set_report_text("Собираю отчёт…".into());
     }
     // Список последних операций для повторной печати обновляется сразу
-    // (короткий запрос), текст отчёта — в фоне.
-    if let Ok(conn) = datastore::open(&cfg.db_path) {
-        let ops = report_ops(&conn);
-        if let Some(ui) = ui_handle.upgrade() {
-            ui.set_report_ops(slint::ModelRc::new(slint::VecModel::from(ops)));
+    // (короткий запрос), текст отчёта — в фоне. Fail-closed: без
+    // установленной базы операции не читаются, файл не создаётся.
+    match crate::backup::open_existing(&cfg.db_path) {
+        Ok(guard) => {
+            let ops = report_ops(&guard.conn);
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_report_ops(slint::ModelRc::new(slint::VecModel::from(ops)));
+            }
+        }
+        Err(e) => {
+            log::warn!("меню: отчёт: операции: база: {e}");
+            if let Some(ui) = ui_handle.upgrade() {
+                ui.set_report_ops(slint::ModelRc::new(slint::VecModel::from(Vec::<
+                    crate::ReportOp,
+                >::new(
+                ))));
+            }
+            // Текст недоступности придёт из build_report в фоне.
         }
     }
     let my_gen = REPORT_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -2949,10 +3126,12 @@ fn label_info(cfg: &crate::config::Config) -> (Option<i64>, Option<String>) {
     (len, layout)
 }
 fn build_report(cfg: &crate::config::Config, period: usize, kind: usize) -> String {
-    let conn = match datastore::open(&cfg.db_path) {
-        Ok(c) => c,
+    // Fail-closed: отчёт строится только по существующей установленной базе.
+    let guard = match crate::backup::open_existing(&cfg.db_path) {
+        Ok(g) => g,
         Err(e) => return format!("Отчёт недоступен: база: {e}"),
     };
+    let conn = &guard.conn;
     let since = match period {
         0 => Some(print::today_start()),
         1 => Some(print::today_start() - 2 * 86_400),
@@ -3245,7 +3424,18 @@ fn spawn_wizard_test_print(cfg: &Config) {
     }
     let cfg = cfg.clone();
     std::thread::spawn(move || {
-        let res = print::print_test_label(&cfg);
+        let res = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            print::print_test_label(&cfg)
+        })) {
+            Ok(res) => res,
+            Err(_) => {
+                log::error!("настройка: тестовая печать прервана паникой");
+                Err(crate::print::PrintFail {
+                    text: "внутренняя ошибка печати".to_string(),
+                    unknown: false,
+                })
+            }
+        };
         PRN_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
         match res {
             Ok(()) => log::info!("настройка: тестовая этикетка напечатана"),
@@ -3555,6 +3745,138 @@ fn spawn_settime_then_advance(cfg: &Config, args: &[&str], ui_handle: slint::Wea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Установленная база: создание через datastore::open (штатный путь
+    /// первой установки) + маркер установки, как это делает киоск.
+    fn make_installed(path: &std::path::Path) {
+        let conn = datastore::open(path).unwrap();
+        conn.execute("DELETE FROM plucodes", []).unwrap();
+        crate::backup::ensure_marker(path);
+    }
+
+    fn frozen_state() -> std::sync::Arc<crate::weight::WeightSource> {
+        let snap = crate::weight::Snapshot {
+            mass_kg: 0.0,
+            stable: true,
+            port_up: true,
+            updated_at_ms: crate::weight::now_ms(),
+        };
+        let (src, _) = crate::weight::WeightSource::frozen(snap);
+        std::sync::Arc::new(src)
+    }
+
+    fn test_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("openscale-fc-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn lost_installed_db_is_not_recreated_by_maintenance_screens() {
+        let dir = test_dir("lost");
+        let db = dir.join("plu.db");
+        make_installed(&db);
+        std::fs::remove_file(&db).unwrap(); // потеря: файл нет, маркер есть
+        assert!(!db.exists(), "предусловие: база потеряна");
+        let cfg = crate::config::Config {
+            db_path: db.clone(),
+            ..crate::config::Config::default()
+        };
+        let app_state = frozen_state();
+
+        let _ = maint_rows(&cfg, &app_state);
+        assert!(!db.exists(), "обслуживание не должно создавать базу");
+
+        let rows = status_rows(&cfg, &app_state);
+        assert!(
+            rows.iter().any(|r| r.contains("НЕДОСТУПНА")),
+            "состояние показывает потерю базы явно: {rows:?}"
+        );
+        assert!(!db.exists(), "состояние не должно создавать базу");
+
+        let report = build_report(&cfg, 0, 0);
+        assert!(
+            report.contains("недоступен"),
+            "отчёт не притворяется пустым успехом: {report}"
+        );
+        assert!(!db.exists(), "отчёт не должен создавать базу");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lost_installed_db_is_not_recreated_by_action_log() {
+        // Журнал действий работает в фоне: проверяем сам запрос чтения
+        // через тот же fail-closed путь, что использует refresh_action_log.
+        let dir = test_dir("lost-log");
+        let db = dir.join("plu.db");
+        make_installed(&db);
+        std::fs::remove_file(&db).unwrap();
+        let guard = crate::backup::open_existing(&db);
+        assert!(guard.is_err(), "без файла открытие отклоняется");
+        assert!(!db.exists(), "открытие журнала не создаёт файл");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn incomplete_db_is_not_accepted_as_installed() {
+        let dir = test_dir("partial");
+        let db = dir.join("plu.db");
+        // Пустой файл и схема из одной таблицы — оба случая отклоняются.
+        std::fs::write(&db, b"").unwrap();
+        crate::backup::ensure_marker(&db);
+        let cfg = crate::config::Config {
+            db_path: db.clone(),
+            ..crate::config::Config::default()
+        };
+        let app_state = frozen_state();
+        let rows = maint_rows(&cfg, &app_state);
+        assert!(
+            rows[0].value.contains("недоступна") && rows[0].state == 2,
+            "пустая база не считается установленной: {rows:?}"
+        );
+        let report = build_report(&cfg, 0, 0);
+        assert!(report.contains("недоступен"), "{report}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn healthy_db_serves_all_four_screens() {
+        let dir = test_dir("healthy");
+        let db = dir.join("plu.db");
+        make_installed(&db);
+        let cfg = crate::config::Config {
+            db_path: db.clone(),
+            ..crate::config::Config::default()
+        };
+        let app_state = frozen_state();
+        let rows = maint_rows(&cfg, &app_state);
+        assert!(rows[0].value.contains("доступна"), "{rows:?}");
+        assert!(
+            rows.iter().any(|r| r.label == "Синхронизация"),
+            "строка синхронизации на месте: {rows:?}"
+        );
+        let status = status_rows(&cfg, &app_state);
+        assert!(status.iter().any(|r| r.contains("товаров")), "{status:?}");
+        let report = build_report(&cfg, 0, 0);
+        assert!(!report.contains("недоступен"), "{report}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_install_still_creates_database() {
+        // Штатное создание при первой установке не изменено: datastore::open
+        // по-прежнему создаёт и наполняет пустую базу без маркера.
+        let dir = test_dir("first-install");
+        let db = dir.join("plu.db");
+        assert!(!db.exists());
+        let conn = datastore::open(&db).unwrap();
+        let goods: i64 = conn
+            .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+            .unwrap();
+        assert!(goods == 0 && db.exists(), "база создана штатно");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn test_print_message_distinguishes_three_outcomes() {

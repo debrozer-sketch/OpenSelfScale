@@ -1,7 +1,8 @@
-
 #[cfg(unix)]
 fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "/dev/scales".into());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/dev/scales".into());
     use std::os::unix::io::FromRawFd;
     let speed = libc::B115200;
     unsafe {
@@ -30,7 +31,10 @@ fn main() {
         term.c_cc[libc::VMIN as usize] = 0;
         term.c_cc[libc::VTIME as usize] = 5;
         let rc = libc::tcsetattr(fd, libc::TCSANOW, &term);
-        println!("tcsetattr rc={rc} errno={}", std::io::Error::last_os_error());
+        println!(
+            "tcsetattr rc={rc} errno={}",
+            std::io::Error::last_os_error()
+        );
         let mask: libc::c_int = libc::TIOCM_DTR | libc::TIOCM_RTS;
         let rc = libc::ioctl(fd, libc::TIOCMBIS, &mask);
         println!("TIOCMBIS rc={rc}");
@@ -49,7 +53,11 @@ fn main() {
             println!(
                 "read#{i} n={n} dt={:?} {}",
                 t0.elapsed(),
-                buf[..n].iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
+                buf[..n]
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
             );
             if n == 0 {
                 std::thread::sleep(std::time::Duration::from_millis(400));

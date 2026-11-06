@@ -1,7 +1,6 @@
-
-use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
+use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
     Admin,
@@ -93,7 +92,10 @@ fn stretch(salt: &str, pin: &str) -> String {
 }
 fn pbkdf2_stored(salt: &str, pin: &str, iters: u32) -> String {
     let d = pbkdf2_hmac_sha256(pin.as_bytes(), salt.as_bytes(), iters);
-    format!("{PIN_TAG_PBKDF2}{iters}${}", d.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    format!(
+        "{PIN_TAG_PBKDF2}{iters}${}",
+        d.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    )
 }
 fn new_pin_hash(salt: &str, pin: &str) -> String {
     // В тестах полные 200k итераций (debug-сборка) делают проверку блокировки
@@ -134,8 +136,8 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
 fn random_salt() -> String {
     use std::io::Read;
     let mut buf = [0u8; 16];
-    let mut f = std::fs::File::open("/dev/urandom")
-        .expect("/dev/urandom открывается на целевой платформе");
+    let mut f =
+        std::fs::File::open("/dev/urandom").expect("/dev/urandom открывается на целевой платформе");
     f.read_exact(&mut buf)
         .expect("/dev/urandom читается на целевой платформе");
     buf.iter().map(|b| format!("{b:02x}")).collect()
@@ -200,7 +202,8 @@ fn migrate_single_user_schema(conn: &Connection) -> rusqlite::Result<()> {
              DROP TABLE {table};
              ALTER TABLE {table}_fix RENAME TO {table};",
             rest = match table {
-                "admin_user" => "role TEXT NOT NULL, pin_salt TEXT NOT NULL, pin_hash TEXT NOT NULL",
+                "admin_user" =>
+                    "role TEXT NOT NULL, pin_salt TEXT NOT NULL, pin_hash TEXT NOT NULL",
                 _ => "failed INTEGER NOT NULL DEFAULT 0, locked_until INTEGER NOT NULL DEFAULT 0",
             }
         ))?;
@@ -265,9 +268,8 @@ pub fn verify(conn: &Connection, pin: &str) -> Result<Auth, rusqlite::Error> {
     if wait > 0 {
         return Ok(Auth::Denied { wait_secs: wait });
     }
-    let mut stmt = conn.prepare(
-        "SELECT id, pin_salt, pin_hash, role FROM admin_user ORDER BY id",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, pin_salt, pin_hash, role FROM admin_user ORDER BY id")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let id: i64 = row.get(0)?;
@@ -285,7 +287,10 @@ pub fn verify(conn: &Connection, pin: &str) -> Result<Auth, rusqlite::Error> {
                 rusqlite::params![salt, upgraded, id],
             )?;
         }
-        conn.execute("UPDATE admin_lock SET failed = 0, locked_until = 0 WHERE id = 1", [])?;
+        conn.execute(
+            "UPDATE admin_lock SET failed = 0, locked_until = 0 WHERE id = 1",
+            [],
+        )?;
         return Ok(Role::from_db(&role).map_or(Auth::Denied { wait_secs: 0 }, Auth::Granted));
     }
     let failed = failed + 1;
@@ -298,7 +303,11 @@ pub fn verify(conn: &Connection, pin: &str) -> Result<Auth, rusqlite::Error> {
 }
 pub fn lock_left(conn: &Connection) -> u64 {
     let locked_until: i64 = conn
-        .query_row("SELECT locked_until FROM admin_lock WHERE id = 1", [], |r| r.get(0))
+        .query_row(
+            "SELECT locked_until FROM admin_lock WHERE id = 1",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or(0);
     let now = now_unix() as i64;
     effective_wait(locked_until, now)
@@ -328,8 +337,7 @@ pub fn change_pin(
     if !pin_is(conn, id, old)? {
         return Ok(Err("старый пароль неверен"));
     }
-    let well_formed =
-        new.len() >= 4 && new.len() <= 8 && new.bytes().all(|b| b.is_ascii_digit());
+    let well_formed = new.len() >= 4 && new.len() <= 8 && new.bytes().all(|b| b.is_ascii_digit());
     if !well_formed {
         return Ok(Err("новый пароль: 4–8 цифр"));
     }
@@ -342,7 +350,10 @@ pub fn change_pin(
         "UPDATE admin_user SET pin_salt = ?1, pin_hash = ?2 WHERE id = ?3",
         rusqlite::params![salt, hash, id],
     )?;
-    conn.execute("UPDATE admin_lock SET failed = 0, locked_until = 0 WHERE id = 1", [])?;
+    conn.execute(
+        "UPDATE admin_lock SET failed = 0, locked_until = 0 WHERE id = 1",
+        [],
+    )?;
     Ok(Ok(()))
 }
 #[cfg(test)]
@@ -380,7 +391,9 @@ mod tests {
     fn create_user_rejects_bad_input() {
         let conn = Connection::open_in_memory().unwrap();
         assert!(create_user(&conn, 1, "admin", "123").unwrap().is_err());
-        assert!(create_user(&conn, 1, "admin", "123456789").unwrap().is_err());
+        assert!(create_user(&conn, 1, "admin", "123456789")
+            .unwrap()
+            .is_err());
         assert!(create_user(&conn, 1, "admin", "12ab").unwrap().is_err());
         assert!(create_user(&conn, 1, "boss", "12345").unwrap().is_err());
         assert!(!user_exists(&conn).unwrap());
@@ -426,7 +439,10 @@ mod tests {
     fn brute_force_lockout_persists_and_blocks_even_correct_pin() {
         let conn = db_staff();
         for pin in ["11111", "22222", "33333"] {
-            assert!(matches!(verify(&conn, pin).unwrap(), Auth::Denied { wait_secs: 0 }));
+            assert!(matches!(
+                verify(&conn, pin).unwrap(),
+                Auth::Denied { wait_secs: 0 }
+            ));
         }
         assert!(matches!(
             verify(&conn, "44444").unwrap(),
@@ -446,9 +462,11 @@ mod tests {
         }
         assert_eq!(verify(&conn, "12345").unwrap(), Auth::Granted(Role::Admin));
         let (failed, locked): (i64, i64) = conn
-            .query_row("SELECT failed, locked_until FROM admin_lock WHERE id = 1", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT failed, locked_until FROM admin_lock WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert_eq!((failed, locked), (0, 0));
     }
@@ -506,9 +524,11 @@ mod tests {
         .unwrap();
         assert_eq!(verify(&conn, "12345").unwrap(), Auth::Granted(Role::Admin));
         let (_, hash): (String, String) = conn
-            .query_row("SELECT pin_salt, pin_hash FROM admin_user WHERE id = 1", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT pin_salt, pin_hash FROM admin_user WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert!(hash.starts_with(PIN_TAG_PBKDF2));
         assert_eq!(verify(&conn, "12345").unwrap(), Auth::Granted(Role::Admin));
@@ -525,9 +545,11 @@ mod tests {
         .unwrap();
         assert_eq!(verify(&conn, "12345").unwrap(), Auth::Granted(Role::Admin));
         let (salt, hash): (String, String) = conn
-            .query_row("SELECT pin_salt, pin_hash FROM admin_user WHERE id = 1", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
+            .query_row(
+                "SELECT pin_salt, pin_hash FROM admin_user WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .unwrap();
         assert!(hash.starts_with(PIN_TAG_PBKDF2));
         assert_ne!(salt, "aabbccdd00112233");

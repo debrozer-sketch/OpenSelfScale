@@ -1,6 +1,5 @@
-
-use rusqlite::Connection;
 use datastore::{get_setting, set_setting};
+use rusqlite::Connection;
 pub const STEP_FINAL: u8 = 8;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -23,7 +22,10 @@ pub fn stage(conn: &Connection) -> u8 {
     }
 }
 pub fn set_stage(conn: &Connection, value: u8) {
-    log_db(set_setting(conn, "setup_stage", &value.to_string()), "setup_stage");
+    log_db(
+        set_setting(conn, "setup_stage", &value.to_string()),
+        "setup_stage",
+    );
 }
 pub fn wizard_done(conn: &Connection) -> bool {
     setting_is(conn, "setup_wizard_done")
@@ -38,7 +40,10 @@ pub fn entered(conn: &Connection) -> bool {
     setting_is(conn, "setup_done")
 }
 pub fn set_entered(conn: &Connection, value: bool) {
-    log_db(set_setting(conn, "setup_done", if value { "1" } else { "0" }), "setup_done");
+    log_db(
+        set_setting(conn, "setup_done", if value { "1" } else { "0" }),
+        "setup_done",
+    );
 }
 fn setting_is(conn: &Connection, key: &str) -> bool {
     matches!(get_setting(conn, key), Ok(Some(v)) if v.trim() == "1")
@@ -106,6 +111,8 @@ mod tests {
         assert!(entered(&conn));
         set_wizard_done(&conn, false);
         assert!(!wizard_done(&conn));
-        assert!(datastore::get_calibration(&conn, "setup_stage").unwrap().is_none());
+        assert!(datastore::get_calibration(&conn, "setup_stage")
+            .unwrap()
+            .is_none());
     }
 }

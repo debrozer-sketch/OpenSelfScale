@@ -1,4 +1,3 @@
-
 use std::time::{Duration, Instant};
 pub const DONE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
@@ -52,6 +51,8 @@ pub struct Kiosk {
     pub net_focus: usize,
     pub net_dhcp: bool,
     pub net_buf: [String; 4],
+    pub img_focus: usize,
+    pub img_buf: [String; 4],
     pub admin_pin_buf: String,
     pub pin_pending: String,
     pub pin_new: String,
@@ -102,6 +103,8 @@ impl Kiosk {
             net_focus: 0,
             net_dhcp: false,
             net_buf: Default::default(),
+            img_focus: 0,
+            img_buf: Default::default(),
             admin_pin_buf: String::new(),
             pin_pending: String::new(),
             pin_new: String::new(),
@@ -207,7 +210,12 @@ mod tests {
     }
     #[test]
     fn weight_state_thresholds() {
-        let mut s = crate::weight::Snapshot { mass_kg: -0.006, stable: true, port_up: true, updated_at_ms: 1 };
+        let mut s = crate::weight::Snapshot {
+            mass_kg: -0.006,
+            stable: true,
+            port_up: true,
+            updated_at_ms: 1,
+        };
         assert_eq!(weight_state(&s, 0.010), 0);
         s.mass_kg = 1.35;
         assert_eq!(weight_state(&s, 0.010), 2);

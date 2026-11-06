@@ -1,8 +1,9 @@
-
 use std::io::{Read, Write};
 use std::time::Duration;
 fn main() -> anyhow_free_result::Result<()> {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "/dev/scales".into());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/dev/scales".into());
     let port = serialport::new(&path, 115_200)
         .timeout(Duration::from_millis(1000))
         .open()

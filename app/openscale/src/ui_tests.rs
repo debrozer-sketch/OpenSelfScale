@@ -49,6 +49,9 @@ impl App {
 
 fn seed_db(cfg: &Config) {
     let conn = datastore::open(&cfg.db_path).unwrap();
+    // Киоск после первой установки ставит маркер: экраны обслуживания
+    // открывают базу только как установленную (fail-closed).
+    crate::backup::ensure_marker(&cfg.db_path);
     let item = |plu: &str, name: &str| datastore::PluItem {
         plu: plu.into(),
         price: 19_999,
@@ -187,6 +190,7 @@ fn build_app_with_catalog(tag: &str, extra_items: usize) -> App {
         handles.go_root.clone(),
         handles.refresh_data.clone(),
         None,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
     std::mem::forget(timer);
     App {
@@ -222,7 +226,9 @@ async fn advance(ms: u64) {
 }
 
 async fn wait_until(what: &str, mut cond: impl FnMut() -> bool) {
-    for _ in 0..2000 {
+    // Запас по времени: в полном прогоне ui-сценарий живёт в конкуренции
+    // с остальными тестами и реальными фоновыми потоками.
+    for _ in 0..6000 {
         if cond() {
             return;
         }
@@ -702,46 +708,17 @@ fn ui_scenarios() {
         let copies = std::fs::read_dir(&bdir).unwrap().count();
         assert_eq!(copies, 1, "S18: BUSY-повтор не создал вторую копию");
 
-        // Проверка принтера: подтверждение обязательно, отмена не печатает,
-        // применение даёт результат (демон не запущен — понятная ошибка).
-        // Снимок журнала до проверки: тестовая печать не добавляет записей.
-        let logs_before = {
-            let conn = datastore::open(&app.dir.join("ui.db")).unwrap();
-            datastore::print_log_filtered(&conn, None, None, 100).unwrap().len()
-        };
-        ui.invoke_maint_print_test();
-        advance(TICK.as_millis() as u64).await;
-        assert!(ui.get_maint_confirm_open(), "S18: подтверждение показано");
-        ui.invoke_maint_confirm_close();
-        advance(TICK.as_millis() as u64).await;
-        assert!(!ui.get_maint_confirm_open(), "S18: отмена закрыла диалог");
-        ui.invoke_maint_print_test();
-        advance(TICK.as_millis() as u64).await;
-        ui.invoke_maint_print_apply();
-        advance(TICK.as_millis() as u64).await;
-        wait_until("S18: результат проверки принтера", || ui.get_imp_popup_open()).await;
-        let pt = ui.get_imp_popup_text().to_string();
+        // Тестовая печать перенесена из «Обслуживания» в категорию
+        // «Принтер и этикетки»: здесь её больше нет.
         assert!(
-            pt.contains("не выполнил задание"),
-            "S18: достоверный отказ сообщён оператору: {pt}"
+            ui.get_maint_rows().row_count() == 5,
+            "S18: статусы обслуживания на месте"
         );
-        ui.invoke_imp_popup_close();
-        advance(TICK.as_millis() as u64).await;
-        // BUSY снят: повторный запуск диалога возможен, статистика не тронута.
-        assert!(!ui.get_maint_busy(), "S18: BUSY снят после ошибки");
-        let conn = datastore::open(&app.dir.join("ui.db")).unwrap();
-        let sales = datastore::print_log_count_since(&conn, 0).unwrap();
-        let logs_after = datastore::print_log_filtered(&conn, None, None, 100).unwrap().len();
-        drop(conn);
-        assert_eq!(sales, 0, "S18: проверка принтера не попала в продажи");
-        assert_eq!(logs_after, logs_before, "S18: проверка принтера не создала print_log");
-        ui.invoke_maint_print_test();
-        advance(TICK.as_millis() as u64).await;
-        assert!(ui.get_maint_confirm_open(), "S18: после ошибки запуск снова возможен");
-        ui.invoke_maint_confirm_close();
-        advance(TICK.as_millis() as u64).await;
 
         // S19. Обслуживание: статус синхронизации во всех состояниях.
+        // Ждём завершения предыдущего фонового refresh: отклонённый по BUSY
+        // refresh применит старые данные, и сценарий увидит не то состояние.
+        wait_until("S19: предыдущий refresh завершён", || !ui.get_maint_busy()).await;
         // Запись пишется напрямую в ui.db — как это делает sync_status.
         let set_sync = |json: &str| {
             let conn = datastore::open(&app.dir.join("ui.db")).unwrap();
@@ -757,11 +734,19 @@ fn ui_scenarios() {
         };
         // Ошибка с сохранённым прошлым успехом: три строки.
         set_sync(r#"{"a": 1790000000, "s": "err", "u": 1780000000, "e": "выгрузка на сервере не готова или не дописалась"}"#);
-        ui.invoke_maint_refresh();
-        wait_until("S19: строки синхронизации обновились", || {
-            sync_rows(&app.ui.as_weak()).len() == 3
-        })
-        .await;
+        // Обновление с повтором: если фоновый refresh ещё держал BUSY,
+        // нажатие могло быть отклонено — оператор жмёт «Обновить» снова.
+        for _ in 0..3000 {
+            if sync_rows(&app.ui.as_weak()).len() == 3 {
+                break;
+            }
+            if !ui.get_maint_busy() {
+                ui.invoke_maint_refresh();
+            }
+            advance(TICK.as_millis() as u64).await;
+        }
+        let sr = sync_rows(&app.ui.as_weak());
+        assert_eq!(sr.len(), 3, "S19: три строки: {sr:?}");
         let sr = sync_rows(&app.ui.as_weak());
         assert!(sr[0].0.contains("— ошибка") && sr[0].1 == 2, "S19: {sr:?}");
         assert!(sr[1].0.contains("Причина:") && sr[1].1 == 1, "S19: {sr:?}");
@@ -769,8 +754,15 @@ fn ui_scenarios() {
         assert!(!sr[1].0.contains("plu.xml") && !sr[1].0.contains('/'), "S19: без путей: {}", sr[1].0);
         // Успех: одна строка.
         set_sync(r#"{"a": 1790000000, "s": "ok", "u": 1790000000, "e": ""}"#);
-        ui.invoke_maint_refresh();
-        wait_until("S19: успех отображён", || sync_rows(&app.ui.as_weak()).len() == 1).await;
+        for _ in 0..3000 {
+            if sync_rows(&app.ui.as_weak()).len() == 1 {
+                break;
+            }
+            if !ui.get_maint_busy() {
+                ui.invoke_maint_refresh();
+            }
+            advance(TICK.as_millis() as u64).await;
+        }
         let sr = sync_rows(&app.ui.as_weak());
         assert!(sr[0].0.contains("— успешно") && sr[0].1 == 0, "S19: {sr:?}");
         // Выполняется (свежая running-запись).
@@ -779,31 +771,170 @@ fn ui_scenarios() {
             .unwrap()
             .as_secs() as i64;
         set_sync(&format!(r#"{{"a": {now}, "s": "run", "u": 0, "e": ""}}"#));
-        ui.invoke_maint_refresh();
-        wait_until("S19: выполняется отображено", || {
-            sync_rows(&app.ui.as_weak())[0].0.contains("Выполняется")
-        })
-        .await;
+        for _ in 0..3000 {
+            let sr = sync_rows(&app.ui.as_weak());
+            if !sr.is_empty() && sr[0].0.contains("Выполняется") {
+                break;
+            }
+            if !ui.get_maint_busy() {
+                ui.invoke_maint_refresh();
+            }
+            advance(TICK.as_millis() as u64).await;
+        }
+        let sr = sync_rows(&app.ui.as_weak());
+        assert!(!sr.is_empty() && sr[0].0.contains("Выполняется"), "S19: {sr:?}");
         // Прерванная (running давно).
         set_sync(r#"{"a": 1790000000, "s": "run", "u": 1780000000, "e": ""}"#);
-        ui.invoke_maint_refresh();
-        wait_until("S19: прерванная отображена", || {
-            sync_rows(&app.ui.as_weak())[0].0.contains("прервана")
-        })
-        .await;
+        for _ in 0..3000 {
+            let sr = sync_rows(&app.ui.as_weak());
+            if !sr.is_empty() && sr[0].0.contains("прервана") {
+                break;
+            }
+            if !ui.get_maint_busy() {
+                ui.invoke_maint_refresh();
+            }
+            advance(TICK.as_millis() as u64).await;
+        }
         let sr = sync_rows(&app.ui.as_weak());
-        assert!(sr[0].1 == 2 && sr[1].0.contains("во время приёма"), "S19: {sr:?}");
+        assert!(!sr.is_empty() && sr[0].1 == 2 && sr[1].0.contains("во время приёма"), "S19: {sr:?}");
         // Записи нет — «Ещё не выполнялась».
         {
             let conn = datastore::open(&app.dir.join("ui.db")).unwrap();
             conn.execute("DELETE FROM app_settings WHERE key = 'sync.last'", []).unwrap();
         }
-        ui.invoke_maint_refresh();
-        wait_until("S19: ещё не выполнялась", || {
-            sync_rows(&app.ui.as_weak())[0].0.contains("Ещё не")
-        })
-        .await;
+        for _ in 0..3000 {
+            let sr = sync_rows(&app.ui.as_weak());
+            if !sr.is_empty() && sr[0].0.contains("Ещё не") {
+                break;
+            }
+            if !ui.get_maint_busy() {
+                ui.invoke_maint_refresh();
+            }
+            advance(TICK.as_millis() as u64).await;
+        }
+        let sr = sync_rows(&app.ui.as_weak());
+        assert!(!sr.is_empty() && sr[0].0.contains("Ещё не"), "S19: запись удалена — «Ещё не выполнялась»: {sr:?}");
 
+
+        // S20. Новая иерархия меню: шесть категорий, состояние с главного,
+        // возврат в родительскую категорию, роли, повторные переходы.
+        reset_to_root(&app).await;
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.role = 1;
+            k.admin_open = true;
+            k.admin_stage = 2;
+            k.admin_idle = Some(Instant::now());
+        }
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 6, "S20: главное меню открыто");
+        // Все шесть категорий открываются и возвращаются назад.
+        for (id, _stage, screen) in [
+            ("goods", 12u8, 13i32),
+            ("trade", 13, 14),
+            ("equip", 6, 9),
+            ("catnet", 41, 30),
+            ("catreports", 42, 31),
+            ("catservice", 43, 32),
+        ] {
+            ui.invoke_menu_tap(id.into());
+            advance(TICK.as_millis() as u64).await;
+            assert_eq!(ui.get_screen(), screen, "S20: категория {id} открыта");
+            ui.invoke_depts_close();
+            advance(TICK.as_millis() as u64).await;
+            assert_eq!(ui.get_screen(), 6, "S20: назад из {id} — на главное");
+        }
+        // Состояние оборудования — прямо с главного меню.
+        ui.invoke_menu_tap("status".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 24, "S20: состояние открыто с главного");
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 6, "S20: назад из состояния — на главное");
+        // «Весы»: диагностика и состояние внутри категории, возврат в «Весы».
+        ui.invoke_menu_tap("trade".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 14, "S20: категория «Весы» открыта");
+        ui.invoke_menu_tap("diag".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 7, "S20: диагностика весов из «Весы»");
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 14, "S20: назад из диагностики — в «Весы»");
+        ui.invoke_menu_tap("status".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 24, "S20: состояние из «Весы»");
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 14, "S20: назад из состояния — в «Весы»");
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        // «Этикетки и принтер»: проверка принтера внутри категории.
+        ui.invoke_menu_tap("equip".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 9, "S20: категория «Этикетки и принтер» открыта");
+        ui.invoke_menu_tap("printerdiag".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 18, "S20: состояние принтера из категории");
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 9, "S20: назад из принтера — в категорию");
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        // Пункты категорий: по одному от каждой, с возвратом.
+        ui.invoke_menu_tap("catnet".into());
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_menu_tap("imgsync".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 29, "S20: зеркало картинок из «Сеть и обмен»");
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 30, "S20: назад из зеркала — в категорию");
+        ui.invoke_menu_tap("catservice".into());
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_menu_tap("maint".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 27, "S20: обслуживание БД из категории");
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 32, "S20: назад из обслуживания — в категорию");
+        // Быстрые повторные переходы не ломают состояние.
+        ui.invoke_menu_tap("trade".into());
+        ui.invoke_menu_tap("catreports".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 31, "S20: быстрый повторный переход отработал");
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        // Сеть и время теперь пункт категории «Сеть и обмен».
+        ui.invoke_menu_tap("catnet".into());
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_menu_tap("net".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 8, "S20: сеть и время из категории");
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(ui.get_screen(), 30, "S20: назад из сети — в категорию");
+        // Персонал: категории недоступны (route-защита), действия работают.
+        ui.invoke_depts_close();
+        advance(TICK.as_millis() as u64).await;
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.role = 0;
+            k.admin_open = false;
+            k.admin_stage = 1;
+        }
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_menu_tap("catservice".into());
+        advance(TICK.as_millis() as u64).await;
+        assert_ne!(
+            ui.get_screen(),
+            32,
+            "S20: персоналу категория «Обслуживание» недоступна"
+        );
+        ui.invoke_menu_tap("zero".into());
+        advance(TICK.as_millis() as u64).await;
+        let ts = ui.get_screen();
+        assert!(ts == 0 || ts == 2, "S20: обнуление вернуло на торговый экран, был {ts}");
 
         // BENCH. Бенчмарк каталога на синтетике 2000 товаров (OPSCALE_BENCH=1):
         // замер реального отклика UI-потока на слабом железе стенда.

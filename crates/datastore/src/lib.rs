@@ -432,6 +432,23 @@ pub fn label_layout_delete(conn: &Connection, name: &str) -> Result<bool, StoreE
     let n = conn.execute("DELETE FROM label_layouts WHERE name = ?1", [name])?;
     Ok(n > 0)
 }
+
+/// Можно ли сохранить раскладку с этим именем: замена своей — всегда да,
+/// новая — только если лимит ещё не исчерпан.
+pub fn label_layout_limit_ok(
+    conn: &Connection,
+    name: &str,
+    max: usize,
+) -> Result<bool, StoreError> {
+    let known = label_layout_get(conn, name)?.is_some();
+    if known {
+        return Ok(true);
+    }
+    let n = conn.query_row("SELECT COUNT(*) FROM label_layouts", [], |r| {
+        r.get::<_, i64>(0)
+    })?;
+    Ok(n < max as i64)
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeptRow {
     pub name: String,
@@ -1798,12 +1815,10 @@ mod tests {
         // Привязка группы живёт отдельно; удаление отдела её снимает.
         group_assign(&conn, "КЛЮКВА", "ЯГОДЫ").unwrap();
         dept_remove(&conn, "ЯГОДЫ").unwrap();
-        assert!(
-            group_depts(&conn)
-                .unwrap()
-                .iter()
-                .all(|(_, d)| d != "ЯГОДЫ")
-        );
+        assert!(group_depts(&conn)
+            .unwrap()
+            .iter()
+            .all(|(_, d)| d != "ЯГОДЫ"));
     }
     #[test]
     fn label_layout_roundtrip_and_list() {
@@ -1871,12 +1886,10 @@ mod tests {
             !gd.contains_key("ПУСТО"),
             "пустая группа не маршрутизируется"
         );
-        assert!(
-            depts_list(&conn)
-                .unwrap()
-                .iter()
-                .any(|d| d.name == FALLBACK_DEPT)
-        );
+        assert!(depts_list(&conn)
+            .unwrap()
+            .iter()
+            .any(|d| d.name == FALLBACK_DEPT));
     }
     #[test]
     fn rows_with_null_names_are_not_dropped() {

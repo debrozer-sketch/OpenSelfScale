@@ -1,4 +1,3 @@
-
 use std::net::Ipv4Addr;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -12,7 +11,12 @@ pub struct NetConfig {
 }
 impl NetConfig {
     pub fn fields(&self) -> [String; 4] {
-        [self.ip.clone(), self.mask.clone(), self.gateway.clone(), self.dns.clone()]
+        [
+            self.ip.clone(),
+            self.mask.clone(),
+            self.gateway.clone(),
+            self.dns.clone(),
+        ]
     }
 }
 fn run(cmd: &str, args: &[&str]) -> String {
@@ -50,7 +54,11 @@ fn run(cmd: &str, args: &[&str]) -> String {
     }
 }
 pub fn prefix_to_mask(pre: u8) -> String {
-    let v = if pre == 0 { 0u32 } else { u32::MAX << (32 - pre as u32) };
+    let v = if pre == 0 {
+        0u32
+    } else {
+        u32::MAX << (32 - pre as u32)
+    };
     Ipv4Addr::from(v).to_string()
 }
 static LIVE_CACHE: std::sync::RwLock<Option<NetConfig>> = std::sync::RwLock::new(None);
@@ -125,13 +133,14 @@ pub fn validate(
     gateway: &str,
     dns: &str,
 ) -> Result<(Ipv4Addr, u8, Ipv4Addr, Ipv4Addr), String> {
-    let ip: Ipv4Addr = ip
-        .parse()
-        .map_err(|_| format!("неверный IP: {ip}"))?;
+    let ip: Ipv4Addr = ip.parse().map_err(|_| format!("неверный IP: {ip}"))?;
     let pre = if let Some(p) = mask.strip_prefix('/') {
-        p.parse::<u8>().map_err(|_| format!("неверная маска: {mask}"))?
+        p.parse::<u8>()
+            .map_err(|_| format!("неверная маска: {mask}"))?
     } else {
-        let m: Ipv4Addr = mask.parse().map_err(|_| format!("неверная маска: {mask}"))?;
+        let m: Ipv4Addr = mask
+            .parse()
+            .map_err(|_| format!("неверная маска: {mask}"))?;
         let bits = u32::from(m);
         if (bits.reverse_bits()).trailing_ones() != bits.count_ones() {
             return Err(format!("маска не непрерывная: {mask}"));
@@ -144,9 +153,7 @@ pub fn validate(
     let gateway: Ipv4Addr = gateway
         .parse()
         .map_err(|_| format!("неверный шлюз: {gateway}"))?;
-    let dns: Ipv4Addr = dns
-        .parse()
-        .map_err(|_| format!("неверный DNS: {dns}"))?;
+    let dns: Ipv4Addr = dns.parse().map_err(|_| format!("неверный DNS: {dns}"))?;
     let m = u32::MAX << (32 - pre as u32);
     let host = |a: Ipv4Addr| u32::from(a) & !m;
     if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() || ip.is_broadcast() {
@@ -193,7 +200,10 @@ pub fn net_rows_set(ui: &crate::MainWindow, kiosk: &crate::session::Kiosk) {
     let rows: Vec<crate::NetworkField> = labels
         .iter()
         .zip(kiosk.net_buf.iter())
-        .map(|(l, v)| crate::NetworkField { label: (*l).into(), value: v.clone().into() })
+        .map(|(l, v)| crate::NetworkField {
+            label: (*l).into(),
+            value: v.clone().into(),
+        })
         .collect();
     ui.set_net_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
     ui.set_net_focus(kiosk.net_focus as i32);
@@ -213,9 +223,30 @@ mod tests {
     use super::*;
     #[test]
     fn mask_formats_are_accepted() {
-        assert_eq!(validate("203.0.113.10", "255.255.255.0", "203.0.113.1", "198.51.100.53").unwrap().1, 24);
-        assert_eq!(validate("203.0.113.10", "/24", "203.0.113.1", "198.51.100.53").unwrap().1, 24);
-        assert!(validate("203.0.113.10", "255.0.255.0", "203.0.113.1", "198.51.100.53").is_err());
+        assert_eq!(
+            validate(
+                "203.0.113.10",
+                "255.255.255.0",
+                "203.0.113.1",
+                "198.51.100.53"
+            )
+            .unwrap()
+            .1,
+            24
+        );
+        assert_eq!(
+            validate("203.0.113.10", "/24", "203.0.113.1", "198.51.100.53")
+                .unwrap()
+                .1,
+            24
+        );
+        assert!(validate(
+            "203.0.113.10",
+            "255.0.255.0",
+            "203.0.113.1",
+            "198.51.100.53"
+        )
+        .is_err());
         assert!(validate("не ip", "255.255.255.0", "203.0.113.1", "198.51.100.53").is_err());
         assert!(validate("203.0.113.10", "255.255.255.0", "шлюз", "198.51.100.53").is_err());
     }
@@ -224,11 +255,23 @@ mod tests {
         let ok = |ip, m, g| validate(ip, m, g, "198.51.100.53");
         assert!(ok("203.0.113.10", "/24", "203.0.113.1").is_ok());
         assert!(ok("0.0.0.0", "/24", "203.0.113.1").is_err(), "нулевой IP");
-        assert!(ok("203.0.113.10", "/32", "203.0.113.1").is_err(), "маска /32");
+        assert!(
+            ok("203.0.113.10", "/32", "203.0.113.1").is_err(),
+            "маска /32"
+        );
         assert!(ok("203.0.113.10", "/0", "203.0.113.1").is_err(), "маска /0");
-        assert!(ok("203.0.113.10", "/24", "203.0.114.1").is_err(), "шлюз вне подсети");
-        assert!(ok("203.0.113.255", "/24", "203.0.113.1").is_err(), "IP-broadcast");
-        assert!(ok("203.0.113.10", "/24", "203.0.113.10").is_err(), "шлюз = IP");
+        assert!(
+            ok("203.0.113.10", "/24", "203.0.114.1").is_err(),
+            "шлюз вне подсети"
+        );
+        assert!(
+            ok("203.0.113.255", "/24", "203.0.113.1").is_err(),
+            "IP-broadcast"
+        );
+        assert!(
+            ok("203.0.113.10", "/24", "203.0.113.10").is_err(),
+            "шлюз = IP"
+        );
     }
     #[test]
     fn prefix_to_mask_roundtrip() {

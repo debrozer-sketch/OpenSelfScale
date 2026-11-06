@@ -1,4 +1,3 @@
-
 use crate::config;
 pub fn admin_rows(
     conn: &rusqlite::Connection,
@@ -49,7 +48,11 @@ pub fn color_state(
     let color_of = |v: u32| slint::Color::from_argb_encoded(0xFF00_0000 | v);
     match idx {
         0 => {
-            let label = if bg.is_some() { "свой".to_string() } else { "Авто".to_string() };
+            let label = if bg.is_some() {
+                "свой".to_string()
+            } else {
+                "Авто".to_string()
+            };
             let swatch = bg
                 .as_deref()
                 .and_then(|s| u32::from_str_radix(s, 16).ok())
@@ -77,7 +80,9 @@ pub fn admin_step(cfg: &config::Config, name: &str, delta: i64) {
         .into_iter()
         .map(|d| d.name)
         .collect();
-    let Some(i) = list.iter().position(|n| n == name) else { return };
+    let Some(i) = list.iter().position(|n| n == name) else {
+        return;
+    };
     let j = i as i64 + delta;
     if j < 0 || j as usize >= list.len() {
         return;
@@ -115,7 +120,9 @@ pub fn admin_color_next(
         return false;
     };
     let list = datastore::depts_list(&conn).unwrap_or_default();
-    let Some(d) = list.iter().find(|d| d.name == name) else { return false };
+    let Some(d) = list.iter().find(|d| d.name == name) else {
+        return false;
+    };
     let n = palette.len() + 1;
     let next = (color_state(&d.bg, palette, palette_names).0 + 1) % n;
     let res = match next {

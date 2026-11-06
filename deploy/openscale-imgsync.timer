@@ -1,0 +1,8 @@
+[Unit]
+Description=ScaleFW image mirror timer (30 min)
+[Timer]
+OnCalendar=*-*-* *:0/30:00
+Persistent=true
+[Install]
+WantedBy=timers.target
+

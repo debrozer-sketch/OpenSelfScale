@@ -1,4 +1,4 @@
-use openscale::cli::{Mode, parse_cli};
+use openscale::cli::{parse_cli, Mode};
 use openscale::context::AppContext;
 use openscale::session::Kiosk;
 use openscale::*;
@@ -450,7 +450,13 @@ fn run_kiosk(cfg: openscale::config::Config) {
         ui.set_db_unavailable(true);
         ui.set_db_error_text("Проверьте журнал: /var/log/openscale/kiosk.log".into());
         drop(maint_lock);
-        let timer = tick::start(&ctx, flow_handles.go_root, flow_handles.refresh_data, None);
+        let timer = tick::start(
+            &ctx,
+            flow_handles.go_root,
+            flow_handles.refresh_data,
+            None,
+            pushsrv::spawn(Arc::new((*cfg).clone())),
+        );
         ui.run().expect("UI loop failed");
         drop(timer);
         return;
@@ -492,6 +498,18 @@ fn run_kiosk(cfg: openscale::config::Config) {
         Err(e) => log::error!("настройка: база: {e}"),
     }
     (flow_handles.relayout)();
+    // Диагностический показ для снимков экрана поддержки:
+    // OPENSCALE_UI_STAGE=<stage> сразу открывает меню администратора.
+    if let Ok(stage) = std::env::var("OPENSCALE_UI_STAGE") {
+        if let Ok(stage) = stage.parse::<u8>() {
+            let mut k = ctx.kiosk.borrow_mut();
+            k.role = 1;
+            k.admin_open = true;
+            k.admin_stage = stage;
+            k.admin_idle = Some(std::time::Instant::now());
+            log::info!("диагностика: открыт экран stage {stage} (OPENSCALE_UI_STAGE)");
+        }
+    }
     if ctx.depts_all.borrow().len() == 1 {
         (flow_handles.go_root)();
     }
@@ -499,14 +517,16 @@ fn run_kiosk(cfg: openscale::config::Config) {
     let sync_rx = sync::spawn_auto_sync(&cfg);
     print::spawn_daemon(&cfg);
     net::spawn_live_monitor();
+    let cfg_plain = Arc::new((*cfg).clone());
+    let logo_updated = pushsrv::spawn(cfg_plain.clone());
+    let _backup_thread = backup::spawn_daily(cfg_plain);
     let timer = tick::start(
         &ctx,
         flow_handles.go_root,
         flow_handles.refresh_data,
         Some(sync_rx),
+        logo_updated,
     );
-    let cfg_plain = Arc::new((*cfg).clone());
-    let _backup_thread = backup::spawn_daily(cfg_plain);
     ui.run().expect("UI loop failed");
     drop(timer);
     drop(maint_lock);

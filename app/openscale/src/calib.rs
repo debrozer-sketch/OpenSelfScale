@@ -1,6 +1,5 @@
-
-use escpos::LabelJob;
 use crate::config::Config;
+use escpos::LabelJob;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FeedCalibration {
     pub backward_space: u16,
@@ -9,7 +8,11 @@ pub struct FeedCalibration {
 }
 impl Default for FeedCalibration {
     fn default() -> Self {
-        Self { backward_space: 75, opto_thermo_space: 362, extra_feed: 0 }
+        Self {
+            backward_space: 75,
+            opto_thermo_space: 362,
+            extra_feed: 0,
+        }
     }
 }
 type CalibField = fn(&mut FeedCalibration) -> &mut u16;
@@ -41,17 +44,33 @@ impl FeedCalibration {
     }
 }
 pub fn test_label_bytes() -> Vec<u8> {
-    const COLS: usize = 37; 
+    const COLS: usize = 37;
     let mut bytes = vec![0x1D, 0x0C];
     let mut job = LabelJob::begin((448, 232));
     let _ = job.field(0, 0, escpos::FieldStyle::Normal, "ТЕСТОВАЯ ПЕЧАТЬ 12345");
     let solid = "█".repeat(COLS);
-    let even: String = (0..COLS).map(|i| if i % 2 == 0 { '█' } else { ' ' }).collect();
-    let odd: String = (0..COLS).map(|i| if i % 2 == 1 { '█' } else { ' ' }).collect();
-    let up_even: String = even.chars().map(|c| if c == '█' { '▀' } else { c }).collect();
-    let up_odd: String = odd.chars().map(|c| if c == '█' { '▀' } else { c }).collect();
-    let down_even: String = even.chars().map(|c| if c == '█' { '▄' } else { c }).collect();
-    let down_odd: String = odd.chars().map(|c| if c == '█' { '▄' } else { c }).collect();
+    let even: String = (0..COLS)
+        .map(|i| if i % 2 == 0 { '█' } else { ' ' })
+        .collect();
+    let odd: String = (0..COLS)
+        .map(|i| if i % 2 == 1 { '█' } else { ' ' })
+        .collect();
+    let up_even: String = even
+        .chars()
+        .map(|c| if c == '█' { '▀' } else { c })
+        .collect();
+    let up_odd: String = odd
+        .chars()
+        .map(|c| if c == '█' { '▀' } else { c })
+        .collect();
+    let down_even: String = even
+        .chars()
+        .map(|c| if c == '█' { '▄' } else { c })
+        .collect();
+    let down_odd: String = odd
+        .chars()
+        .map(|c| if c == '█' { '▄' } else { c })
+        .collect();
     let _ = job.field(0, 56, escpos::FieldStyle::Normal, &up_even);
     let _ = job.field(0, 68, escpos::FieldStyle::Normal, &up_odd);
     let _ = job.field(0, 80, escpos::FieldStyle::Normal, &down_even);
@@ -107,7 +126,8 @@ fn send_test_label(cfg: &Config, _cal: &FeedCalibration) -> Result<(), String> {
         .open()
         .map_err(|e| format!("{}: {e}", cfg.printer.port))?;
     let mut port = port;
-    port.write_all(&test_label_bytes()).map_err(|e| e.to_string())?;
+    port.write_all(&test_label_bytes())
+        .map_err(|e| e.to_string())?;
     port.flush().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -130,28 +150,26 @@ mod tests {
     fn test_label_pattern_is_glyph_based_and_compact() {
         let bytes = test_label_bytes();
         assert!(bytes.len() < 1024, "размер задания {} байт", bytes.len());
-        assert!(bytes.contains(&0xDE)); 
-        assert!(bytes.contains(&0xDF)); 
-        assert!(bytes.contains(&0xDB)); 
-        assert!(bytes.contains(&0xB2)); 
+        assert!(bytes.contains(&0xDE));
+        assert!(bytes.contains(&0xDF));
+        assert!(bytes.contains(&0xDB));
+        assert!(bytes.contains(&0xB2));
     }
     #[test]
     fn raster_rejects_bad_size() {
         let mut job = LabelJob::begin((448, 232));
         assert!(job.raster(0, 0, 56, &[0u8; 100]).is_err());
         assert!(job.raster(0, 0, 0, &[0u8; 16]).is_err());
-        assert!(job.raster(0, 0, 2, &[0u8; 16]).is_ok()); 
+        assert!(job.raster(0, 0, 2, &[0u8; 16]).is_ok());
     }
     #[test]
     fn calibration_survives_db_roundtrip() {
         let conn = datastore::open(":memory:".as_ref()).unwrap();
         let mut c = FeedCalibration::load(&conn).unwrap();
-        assert_eq!(c, FeedCalibration::default()); 
+        assert_eq!(c, FeedCalibration::default());
         c.backward_space = 91;
         c.save(&conn).unwrap();
         assert_eq!(FeedCalibration::load(&conn).unwrap().backward_space, 91);
         assert_eq!(FeedCalibration::load(&conn).unwrap().opto_thermo_space, 362);
     }
 }
-
-

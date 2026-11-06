@@ -397,7 +397,7 @@ component MenuPage inherits Rectangle {
             width: parent.width - 16px;
             height: 74px;
             border-radius: Theme.r-button;
-            background: mp-ta.pressed ? Theme.pressed : Theme.surface;
+            background: r.id == "" ? transparent : (mp-ta.pressed ? Theme.pressed : Theme.surface);
             animate background { duration: 80ms; }
             opacity: root.role == 1 || !r.admin ? 1.0 : 0.45;
             Text {
@@ -405,10 +405,10 @@ component MenuPage inherits Rectangle {
                 y: r.sub == "" ? 0px : (parent.height - 50px) / 2;
                 width: parent.width - (r.value == "" ? 110px : 330px);
                 height: r.sub == "" ? parent.height : 28px;
-                text: r.label + (r.admin && root.role != 1 ? " · только администратор" : "");
-                font-size: 24px;
+                text: r.label + (r.id != "" && r.admin && root.role != 1 ? " · только администратор" : "");
+                font-size: r.id == "" ? 18px : 24px;
                 font-weight: 700;
-                color: Theme.ink;
+                color: r.id == "" ? Theme.ink-mute : Theme.ink;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -441,7 +441,7 @@ component MenuPage inherits Rectangle {
                     vertical-alignment: center;
                 }
             }
-            if r.value == "" && r.id != "status" : Text {
+            if r.value == "" && r.id != "status" && r.id != "" : Text {
                 x: parent.width - 44px;
                 width: 28px;
                 height: parent.height;
@@ -470,8 +470,9 @@ component MenuPage inherits Rectangle {
                 }
             }
             mp-ta := TouchArea {
+                enabled: r.id != "" && (root.role == 1 || !r.admin);
                 clicked => {
-                    (root.role == 1 || !r.admin) ? root.page-tap(r.id) : {};
+                    root.page-tap(r.id);
                 }
             }
         }
@@ -509,7 +510,9 @@ export component MainWindow inherits Window {
             root.cx = root.cr + root.width - root.gdxr;
             exit-t.running = true;
         } else {
-            root.cx = root.cr - root.gdxr;
+            // Недотянутый свайп: панель возвращается на место с анимацией,
+            // база не меняется — смещение не накапливается.
+            root.cx = root.cr;
             back-t.running = true;
         }
     }
@@ -529,8 +532,13 @@ export component MainWindow inherits Window {
         running: false;
         triggered => {
             back-t.running = false;
-            root.pr = root.px;
-            root.cr = root.cx;
+            // Конец цикла: чистый ноль у обеих панелей — телепорты не
+            // накапливаются в базах, смещение не наследуется следующим
+            // экраном или страницей.
+            root.px = 0px;
+            root.pr = 0px;
+            root.cx = 0px;
+            root.cr = 0px;
             root.gbusy = false;
         }
     }
@@ -605,6 +613,10 @@ export component MainWindow inherits Window {
     property <[string]> kb2: ["ф","ы","в","а","п","р","о","л","д","ж","э"];
     property <[string]> kb3: ["я","ч","с","м","и","т","ь","б","ю"];
     property <[string]> kb4: ["1","2","3","4","5","6","7","8","9","0","-","ё"];
+    property <[string]> kb-en1: ["q","w","e","r","t","y","u","i","o","p"];
+    property <[string]> kb-en2: ["a","s","d","f","g","h","j","k","l"];
+    property <[string]> kb-en3: ["z","x","c","v","b","n","m"];
+    in-out property <bool> img-latin;
     property <bool> can-tap: phase != 2 && phase != 3 && phase != 4;
     in property <[AdminRow]> admin-rows;
     in property <string> pin-mask;
@@ -644,6 +656,15 @@ export component MainWindow inherits Window {
     in property <bool> net-popup-open;
     callback net-popup-close();
     in property <bool> net-dhcp;
+    in property <[NetworkField]> img-rows;
+    in property <int> img-focus;
+    in property <string> img-status;
+    in property <bool> img-ok: true;
+    in property <bool> img-busy;
+    callback img-tap(int);
+    callback img-key(string);
+    callback img-save();
+    callback img-fetch();
     in property <string> goods-cols: "2";
     in property <string> goods-sort: "по алфавиту";
     in property <string> goods-idle: "30 с";
@@ -680,12 +701,8 @@ export component MainWindow inherits Window {
     callback status-refresh();
     in property <[MaintRow]> maint-rows;
     in property <bool> maint-busy: false;
-    in property <bool> maint-confirm-open: false;
     callback maint-refresh();
     callback maint-backup();
-    callback maint-print-test();
-    callback maint-print-apply();
-    callback maint-confirm-close();
     callback actionlog-refresh();
     in property <[string]> labels-rows;
     in property <[string]> labels-files;
@@ -850,7 +867,7 @@ export component MainWindow inherits Window {
                 tile-h: root.tile-h;
                 font: root.dept-font;
                 d: d;
-                active: root.can-tap;
+                active: root.can-tap && !root.gbusy;
                 tapped(dept) => { if (!root.gbusy) { root.dept-tapped(dept); } }
                 dragging(dx) => { root.drag-move(dx); }
                 drag-end(dx) => { root.drag-release(dx); }
@@ -1537,15 +1554,15 @@ export component MainWindow inherits Window {
             border-color: Theme.border;
             background: Theme.surface;
             Text {
-                x: root.screen == 12 ? (parent.width - 440px) / 2 : 16px;
+                x: 16px;
                 width: parent.width - 440px;
                 height: parent.height;
-                text: root.screen == 12 ? "Настройки" : root.admin-title;
+                text: root.admin-title;
                 font-size: Theme.font-h3;
                 font-weight: 700;
                 color: Theme.ink;
                 vertical-alignment: center;
-                horizontal-alignment: root.screen == 12 ? TextHorizontalAlignment.center : TextHorizontalAlignment.left;
+                horizontal-alignment: TextHorizontalAlignment.left;
                 overflow: elide;
             }
             if root.admin-back-visible && !root.pin-forced : Rectangle {
@@ -1891,31 +1908,124 @@ export component MainWindow inherits Window {
                 clicked => { root.pin-try(); }
             }
         }
-        if root.screen == 6 : MenuPage {
+        if root.screen == 6 : Rectangle {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
-            property <[MenuRow]> rows-staff: [
-                { label: "Состояние", id: "status", admin: false, sub: "Весы, принтер, бумага", value: "" },
-                { label: "Обнулить весы", id: "zero", admin: false, sub: "При пустой платформе", value: "" },
-                { label: "Протяжка этикетки", id: "feed", admin: false, sub: "", value: "" },
-                { label: "Тестовая печать", id: "testprint", admin: false, sub: "", value: "" },
-                { label: "Отчёты", id: "reports", admin: false, sub: "Печать по периодам", value: "" },
-                { label: "Мой PIN", id: "changepin", admin: false, sub: "", value: "" },
-            ];
-            property <[MenuRow]> rows-admin: [
-                { label: "Состояние", id: "status", admin: false, sub: "Весы, принтер, бумага, выгрузка", value: "" },
-                { label: "Витрина", id: "goods", admin: true, sub: "Отделы, карточки, возврат на главный", value: "" },
-                { label: "Печать", id: "equip", admin: true, sub: "Этикетки, принтер, протяжка", value: "" },
-                { label: "Весы и торговля", id: "trade", admin: true, sub: "Обнуление, диагностика, округление", value: "" },
-                { label: "Сеть и время", id: "net", admin: true, sub: "IP, дата и время", value: "" },
-                { label: "Обслуживание", id: "maint", admin: true, sub: "База данных, резервная копия, оборудование", value: "" },
-                { label: "Доступ и сервис", id: "access", admin: true, sub: "Пароли, журнал, отчёты, перезагрузка", value: "" },
-            ];
-            rows: root.role == 0 ? self.rows-staff : self.rows-admin;
-            role: root.role;
-            ok: root.status-text == "" && root.scales-ok && !root.printer-fault;
-            page-tap(id) => { root.menu-tap(id); }
+            // Меню персонала: шесть повседневных действий списком.
+            if root.role == 0 : MenuPage {
+                x: 0; y: 0;
+                width: parent.width;
+                height: parent.height;
+                property <[MenuRow]> rows-staff: [
+                    { label: "Состояние оборудования", id: "status", admin: false, sub: "Весы, принтер, бумага, выгрузка", value: "" },
+                    { label: "Обнулить весы", id: "zero", admin: false, sub: "При пустой платформе", value: "" },
+                    { label: "Протяжка этикетки", id: "feed", admin: false, sub: "", value: "" },
+                    { label: "Тестовая печать", id: "testprint", admin: false, sub: "", value: "" },
+                    { label: "Отчёты", id: "reports", admin: false, sub: "Печать по периодам", value: "" },
+                    { label: "Мой PIN", id: "changepin", admin: false, sub: "", value: "" },
+                ];
+                rows: self.rows-staff;
+                role: 1;
+                page-tap(id) => { root.menu-tap(id); }
+            }
+            // Меню администратора: шесть категорий сеткой 2×3 и
+            // отдельный блок состояния оборудования.
+            if root.role != 0 : Rectangle {
+                property <length> gap: 12px;
+                property <length> cw: (parent.width - 24px - gap) / 2;
+                property <length> ch: 148px;
+                property <[MenuRow]> cats: [
+                    { label: "Интерфейс", id: "goods", admin: true, sub: "Экран покупателя: отделы, товары, возврат", value: "" },
+                    { label: "Весы", id: "trade", admin: true, sub: "Диагностика, обнуление, настройки веса", value: "" },
+                    { label: "Этикетки и принтер", id: "equip", admin: true, sub: "Принтер, макеты, тестовая печать", value: "" },
+                    { label: "Сеть и обмен", id: "catnet", admin: true, sub: "IP и время, фото товаров, конфигурация", value: "" },
+                    { label: "Отчёты и журнал", id: "catreports", admin: true, sub: "Отчёты по периодам, журнал действий", value: "" },
+                    { label: "Обслуживание", id: "catservice", admin: true, sub: "БД, копии, PIN, VNC, мастер, перезагрузка", value: "" },
+                ];
+                property <[string]> cat-icons: ["⌂", "⚖", "⎙", "⇄", "≡", "⚙"];
+                for c[i] in cats : Rectangle {
+                    x: 8px + Math.mod(i, 2) * (cw + gap);
+                    y: 8px + Math.floor(i / 2) * (ch + gap);
+                    width: cw;
+                    height: ch;
+                    border-radius: Theme.r-card;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    background: cat-ta.pressed ? Theme.pressed : Theme.surface;
+                    Text {
+                        x: 24px;
+                        y: 22px;
+                        width: 48px;
+                        height: 56px;
+                        text: cat-icons[i];
+                        font-family: "DejaVu Sans";
+                        font-size: 40px;
+                        color: Theme.ink-soft;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        x: 80px;
+                        y: 22px;
+                        width: parent.width - 104px;
+                        height: 56px;
+                        text: c.label;
+                        font-size: 30px;
+                        font-weight: 700;
+                        color: Theme.ink;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Text {
+                        x: 24px;
+                        y: 82px;
+                        width: parent.width - 48px;
+                        height: 48px;
+                        text: c.sub;
+                        font-size: 17px;
+                        color: Theme.ink-soft;
+                        vertical-alignment: top;
+                        wrap: word-wrap;
+                        overflow: elide;
+                    }
+                    cat-ta := TouchArea { clicked => { root.menu-tap(c.id); } }
+                }
+                Rectangle { // Состояние оборудования — с главного меню
+                    x: 8px;
+                    y: 3 * (ch + gap) + 8px;
+                    width: parent.width - 16px;
+                    height: ch;
+                    border-radius: Theme.r-card;
+                    border-width: 1px;
+                    border-color: root.status-text == "" && root.scales-ok && !root.printer-fault ? Theme.success : Theme.danger;
+                    background: st-ta.pressed ? Theme.pressed : Theme.surface;
+                    Text {
+                        x: 24px;
+                        y: 22px;
+                        width: parent.width - 48px;
+                        height: 56px;
+                        text: "Состояние оборудования";
+                        font-size: 30px;
+                        font-weight: 700;
+                        color: Theme.ink;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Text {
+                        x: 24px;
+                        y: 82px;
+                        width: parent.width - 48px;
+                        height: 48px;
+                        text: "Весы, принтер, бумага, синхронизация — сразу открыть";
+                        font-size: 17px;
+                        color: Theme.ink-soft;
+                        vertical-alignment: top;
+                        wrap: word-wrap;
+                        overflow: elide;
+                    }
+                    st-ta := TouchArea { clicked => { root.menu-tap("status"); } }
+                }
+            }
         }
         if root.screen == 7 : Rectangle {
             x: 0; y: 84px;
@@ -2108,10 +2218,13 @@ export component MainWindow inherits Window {
             width: parent.width;
             height: parent.height - 84px;
             rows: [
-                { label: "Этикетки", id: "labels", admin: false, sub: "Раскладка, калибровка, выбор шаблона", value: "" },
-                { label: "Принтер: состояние", id: "printerdiag", admin: false, sub: "Лента, крышка, ошибки", value: "" },
+                { label: "СОСТОЯНИЕ И ПРОВЕРКА", id: "", admin: true, sub: "", value: "" },
+                { label: "Состояние принтера", id: "printerdiag", admin: false, sub: "Лента, крышка, ошибки", value: "" },
+                { label: "ДЕЙСТВИЯ", id: "", admin: true, sub: "", value: "" },
                 { label: "Протяжка этикетки", id: "feed", admin: false, sub: "", value: "" },
                 { label: "Тестовая печать", id: "testprint", admin: false, sub: "", value: "" },
+                { label: "НАСТРОЙКИ", id: "", admin: true, sub: "", value: "" },
+                { label: "Раскладки этикеток", id: "labels", admin: false, sub: "Шаблоны, калибровка и линейка, выбор", value: "" },
             ];
             role: root.role;
             page-tap(id) => { root.menu-tap(id); }
@@ -2122,27 +2235,34 @@ export component MainWindow inherits Window {
             height: parent.height - 84px;
             rows: [
                 { label: "Компоновка разделов", id: "layout", admin: true, sub: "Порядок, цвета, картинки отделов", value: "" },
+                { label: "ОТДЕЛЫ", id: "", admin: true, sub: "", value: "" },
                 { label: "Вид отделов", id: "deptview", admin: true, sub: "", value: root.goods-deptview },
                 { label: "Колонок на экране", id: "cols", admin: true, sub: "", value: root.goods-cols },
                 { label: "Порядок отделов", id: "sortalpha", admin: true, sub: "", value: root.goods-sort },
+                { label: "ТОВАРЫ", id: "", admin: true, sub: "", value: "" },
                 { label: "Столбцов с товарами", id: "itemscols", admin: true, sub: "", value: root.goods-itemscols },
                 { label: "Порядок товаров", id: "itemsort", admin: true, sub: "Популярные: чаще печатаемые за 30 дней сверху", value: root.goods-itemsort },
                 { label: "Название в карточке", id: "cardname", admin: true, sub: "", value: root.goods-cardname },
+                { label: "ПОВЕДЕНИЕ ЭКРАНА", id: "", admin: true, sub: "", value: "" },
                 { label: "Кнопка «← Назад» в каталоге", id: "backbtn", admin: true, sub: "", value: root.goods-backbtn },
                 { label: "Возврат на главный экран", id: "idletimeout", admin: true, sub: "", value: root.goods-idle },
             ];
             role: root.role;
             page-tap(id) => { root.menu-tap(id); }
         }
-if root.screen == 14 : MenuPage {
+        if root.screen == 14 : MenuPage {
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
             rows: [
+                { label: "СОСТОЯНИЕ И ПРОВЕРКА", id: "", admin: true, sub: "", value: "" },
+                { label: "Диагностика весов", id: "diag", admin: false, sub: "Связь, ноль, текущий вес", value: "" },
+                { label: "Состояние оборудования", id: "status", admin: false, sub: "Весы, принтер, бумага, выгрузка", value: "" },
+                { label: "ДЕЙСТВИЯ", id: "", admin: true, sub: "", value: "" },
                 { label: "Обнулить весы", id: "zero", admin: false, sub: "При пустой платформе", value: "" },
-                { label: "Диагностика весов", id: "diag", admin: false, sub: "Связь, вес, принтер", value: "" },
-                { label: "Округление цены", id: "rounding", admin: true, sub: "", value: root.trade-rounding },
+                { label: "НАСТРОЙКИ", id: "", admin: true, sub: "", value: "" },
                 { label: "Минимальный вес печати", id: "minweight", admin: true, sub: "", value: root.trade-minw },
+                { label: "Округление цены", id: "rounding", admin: true, sub: "", value: root.trade-rounding },
             ];
             role: root.role;
             page-tap(id) => { root.menu-tap(id); }
@@ -2441,19 +2561,44 @@ if root.screen == 14 : MenuPage {
                 }
             }
         }
-if root.screen == 26 : MenuPage {
+if root.screen == 30 : MenuPage { // Сеть и обмен
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
             rows: [
-                { label: "Пароль администратора", id: "changepin", admin: true, sub: "", value: "" },
-                { label: "Пароль кассира", id: "createstaff", admin: true, sub: "", value: "" },
-                { label: "Сбросить PIN ключом с USB", id: "resetkey", admin: true, sub: "", value: "" },
-                { label: "Удалённый доступ (VNC)", id: "vnctoggle", admin: true, sub: "", value: "" },
-                { label: "Журнал действий", id: "actionlog", admin: true, sub: "", value: "" },
-                { label: "Отчёты", id: "reports", admin: true, sub: "Печать по периодам", value: "" },
+                { label: "Сеть и время", id: "net", admin: true, sub: "IP, маска, шлюз, DNS, дата и время", value: "" },
+                { label: "Зеркало картинок", id: "imgsync", admin: true, sub: "Фото товаров с FTP-источника", value: "" },
                 { label: "Экспорт конфигурации", id: "export", admin: true, sub: "", value: "" },
                 { label: "Импорт конфигурации", id: "import", admin: true, sub: "", value: "" },
+            ];
+            role: root.role;
+            page-tap(id) => { root.menu-tap(id); }
+        }
+        if root.screen == 31 : MenuPage { // Отчёты и журнал
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+            rows: [
+                { label: "Отчёты", id: "reports", admin: true, sub: "Печать по периодам", value: "" },
+                { label: "Журнал действий", id: "actionlog", admin: true, sub: "Кто и что менял в настройках", value: "" },
+            ];
+            role: root.role;
+            page-tap(id) => { root.menu-tap(id); }
+        }
+        if root.screen == 32 : MenuPage { // Обслуживание и доступ
+            x: 0; y: 84px;
+            width: parent.width;
+            height: parent.height - 84px;
+            rows: [
+                { label: "РЕЗЕРВНЫЕ КОПИИ И СОСТОЯНИЕ", id: "", admin: true, sub: "", value: "" },
+                { label: "Состояние и обслуживание БД", id: "maint", admin: true, sub: "Целостность, журнал, копия", value: "" },
+                { label: "Резервная копия БД", id: "backup", admin: true, sub: "Создать копию сейчас", value: "" },
+                { label: "ПОЛЬЗОВАТЕЛИ И ДОСТУП", id: "", admin: true, sub: "", value: "" },
+                { label: "PIN администратора", id: "changepin", admin: true, sub: "", value: "" },
+                { label: "PIN персонала", id: "createstaff", admin: true, sub: "", value: "" },
+                { label: "Сбросить PIN ключом с USB", id: "resetkey", admin: true, sub: "", value: "" },
+                { label: "Удалённый доступ (VNC)", id: "vnctoggle", admin: true, sub: "", value: "" },
+                { label: "СИСТЕМА", id: "", admin: true, sub: "", value: "" },
                 { label: "Мастер настройки", id: "setup", admin: true, sub: "", value: "" },
                 { label: "Перезагрузка весов", id: "restart", admin: true, sub: "", value: "" },
             ];
@@ -2461,8 +2606,7 @@ if root.screen == 26 : MenuPage {
             page-tap(id) => { root.menu-tap(id); }
         }
 
-
-        if root.screen == 27 : Rectangle { // Обслуживание
+        if root.screen == 27 : Rectangle { // Обслуживание БД
             x: 0; y: 84px;
             width: parent.width;
             height: parent.height - 84px;
@@ -2535,16 +2679,6 @@ if root.screen == 26 : MenuPage {
                 enabled: !root.maint-busy;
                 clicked => { root.maint-backup(); }
             }
-            AppButton { // проверить принтер
-                x: 16px + (parent.width - 24px) / 2;
-                y: parent.height - 140px;
-                width: (parent.width - 24px) / 2;
-                height: 56px;
-                label: "Проверить принтер";
-                font-size: Theme.font-sm;
-                enabled: !root.maint-busy;
-                clicked => { root.maint-print-test(); }
-            }
             Text {
                 x: 8px;
                 y: parent.height - 76px;
@@ -2555,62 +2689,6 @@ if root.screen == 26 : MenuPage {
                 color: Theme.ink-mute;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-            }
-            if root.maint-confirm-open : Rectangle { // подтверждение тестовой печати
-                x: 0; y: 0;
-                width: parent.width;
-                height: parent.height;
-                background: Theme.overlay-strong;
-                mt-c-ta := TouchArea { }
-                Rectangle {
-                    x: (parent.width - 560px) / 2;
-                    y: (parent.height - 260px) / 2;
-                    width: 560px;
-                    height: 260px;
-                    border-radius: Theme.r-panel;
-                    background: Theme.surface;
-                    Text {
-                        x: 24px; y: 24px;
-                        width: parent.width - 48px;
-                        height: 90px;
-                        text: "Будет напечатана тестовая этикетка.\nПродолжить?";
-                        font-size: Theme.font-h3;
-                        font-weight: 700;
-                        color: Theme.ink;
-                        horizontal-alignment: center;
-                        wrap: word-wrap;
-                    }
-                    Rectangle {
-                        x: 24px;
-                        y: parent.height - 84px;
-                        width: (parent.width - 64px) / 2;
-                        height: 60px;
-                        border-radius: Theme.r-button;
-                        background: mt-c-no-ta.pressed ? Theme.pressed : Theme.chip;
-                        Text {
-                            text: "Отмена";
-                            font-size: Theme.font-body;
-                            font-weight: 700;
-                            color: Theme.ink;
-                            width: parent.width;
-                            height: parent.height;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        mt-c-no-ta := TouchArea { clicked => { root.maint-confirm-close(); } }
-                    }
-                    AppButton {
-                        x: 40px + (parent.width - 64px) / 2;
-                        y: parent.height - 84px;
-                        width: (parent.width - 64px) / 2;
-                        height: 60px;
-                        kind: 1;
-                        label: "Печатать";
-                        font-size: Theme.font-body;
-                        text-color: Theme.surface;
-                        clicked => { root.maint-print-apply(); }
-                    }
-                }
             }
         }
 
@@ -3161,6 +3239,146 @@ if root.screen == 26 : MenuPage {
                       lbl-pv-ta := TouchArea { clicked => { root.labels-preview-close(); } }
                 }
             }
+    }
+    if root.screen == 29 : Rectangle { // Зеркало картинок
+        x: 0; y: 84px;
+        width: parent.width;
+        height: parent.height - 84px;
+        property <[string]> im4: ["1","2","3","4","5","6","7","8","9","0","-","."];
+        property <[string]> row1: root.img-latin ? root.kb-en1 : root.kb1;
+        property <[string]> row2: root.img-latin ? root.kb-en2 : root.kb2;
+        property <[string]> row3: root.img-latin ? root.kb-en3 : root.kb3;
+        for f[i] in root.img-rows : Rectangle {
+            x: 8px;
+            y: 8px + i * 58px;
+            width: parent.width - 16px;
+            height: 52px;
+            border-radius: Theme.r-button;
+            border-width: root.img-focus == i ? 2px : 1px;
+            border-color: root.img-focus == i ? Theme.accent : Theme.border;
+            background: Theme.surface;
+            Text {
+                x: 16px;
+                width: 190px;
+                height: parent.height;
+                text: f.label;
+                font-size: Theme.font-body;
+                font-weight: 700;
+                color: Theme.ink-soft;
+                vertical-alignment: center;
+            }
+            Text {
+                x: 220px;
+                width: parent.width - 236px;
+                height: parent.height;
+                text: f.value;
+                font-size: Theme.font-lg;
+                font-weight: 700;
+                color: Theme.ink;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            TouchArea {
+                clicked => { root.img-tap(i); }
+            }
+        }
+        Rectangle {
+            x: parent.width - 130px;
+            y: 252px;
+            width: 118px;
+            height: 54px;
+            border-radius: Theme.r-button;
+            border-width: 1px;
+            border-color: Theme.border;
+            background: img-lang-ta.pressed ? Theme.pressed : Theme.surface;
+            Text {
+                text: root.img-latin ? "РУС" : "ENG";
+                font-size: Theme.font-body;
+                font-weight: 700;
+                color: Theme.ink;
+            }
+            img-lang-ta := TouchArea { clicked => { root.img-latin = !root.img-latin; } }
+        }
+        for k[i] in row1 : KbKey {
+            kx: 8px + i * 78px;
+            y: 250px;
+            key: k;
+            key-tapped(k) => { root.img-key(k); }
+        }
+        for k[i] in row2 : KbKey {
+            kx: 82px + i * 78px;
+            y: 316px;
+            key: k;
+            key-tapped(k) => { root.img-key(k); }
+        }
+        for k[i] in row3 : KbKey {
+            kx: 8px + i * 78px;
+            y: 382px;
+            key: k;
+            key-tapped(k) => { root.img-key(k); }
+        }
+        for k[i] in im4 : KbKey {
+            kx: 8px + i * 78px;
+            y: 448px;
+            key: k;
+            key-tapped(k) => { root.img-key(k); }
+        }
+        KbKey {
+            kx: 712px;
+            y: 448px;
+            kw: 170px;
+            key: "ПРОБЕЛ";
+            key-tapped(k) => { root.img-key(k); }
+        }
+        KbKey {
+            kx: 890px;
+            y: 448px;
+            kw: 118px;
+            key: "←";
+            key-tapped(k) => { root.img-key(k); }
+        }
+        Rectangle {
+            x: 8px;
+            y: 524px;
+            width: (parent.width - 24px) / 2;
+            height: 54px;
+            border-radius: Theme.r-button;
+            background: img-save-ta.pressed ? Theme.accent-pressed : Theme.accent;
+            Text {
+                text: "СОХРАНИТЬ";
+                font-size: Theme.font-lg;
+                font-weight: 700;
+                color: Theme.surface;
+            }
+            img-save-ta := TouchArea { clicked => { root.img-save(); } }
+        }
+        Rectangle {
+            x: 16px + (parent.width - 24px) / 2;
+            y: 524px;
+            width: (parent.width - 24px) / 2;
+            height: 54px;
+            border-radius: Theme.r-button;
+            background: root.img-busy ? Theme.accent-disabled : (img-fetch-ta.pressed ? Theme.pressed : Theme.surface);
+            Text {
+                text: root.img-busy ? "СКАЧИВАЮ..." : "СКАЧАТЬ СЕЙЧАС";
+                font-size: Theme.font-lg;
+                font-weight: 700;
+                color: Theme.ink;
+            }
+            img-fetch-ta := TouchArea { enabled: !root.img-busy; clicked => { root.img-fetch(); } }
+        }
+        Text {
+            x: 16px;
+            y: 588px;
+            width: parent.width - 32px;
+            height: 40px;
+            text: root.img-status;
+            font-size: Theme.font-sm;
+            color: root.img-ok ? Theme.success : Theme.danger;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
     }
     if root.db-unavailable : Rectangle {
         // Блокирующий оверлей: торговля и меню недоступны до восстановления БД.

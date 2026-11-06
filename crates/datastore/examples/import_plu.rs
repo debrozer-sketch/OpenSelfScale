@@ -1,4 +1,3 @@
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let src = std::env::args().nth(1).expect("путь к plu.xml");
     let dst = std::env::args().nth(2).unwrap_or_else(|| "plu.db".into());

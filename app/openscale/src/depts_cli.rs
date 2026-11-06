@@ -1,4 +1,3 @@
-
 use crate::config;
 fn db(cfg: &config::Config) -> crate::backup::CliDb {
     match crate::backup::CliDb::open(cfg, false, true) {
@@ -16,13 +15,18 @@ pub fn list(cfg: &config::Config) {
     let gd = datastore::group_depts(&conn).unwrap_or_default();
     println!("Отделы (порядок экранный; «альф» = по алфавиту):");
     for d in &depts {
-        let mut groups: Vec<&str> =
-            gd.iter().filter(|(_, dep)| dep == &d.name).map(|(g, _)| g.as_str()).collect();
+        let mut groups: Vec<&str> = gd
+            .iter()
+            .filter(|(_, dep)| dep == &d.name)
+            .map(|(g, _)| g.as_str())
+            .collect();
         groups.sort_unstable();
         println!(
             "  {:<14} [{}] {}",
             d.name,
-            d.ord.map(|n| n.to_string()).unwrap_or_else(|| "альф".into()),
+            d.ord
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "альф".into()),
             d.img.clone().unwrap_or_else(|| "нет картинки".into())
         );
         if !groups.is_empty() {
@@ -30,7 +34,13 @@ pub fn list(cfg: &config::Config) {
         }
     }
 }
-pub fn add(cfg: &config::Config, name: &str, img: Option<&str>, bg: Option<&str>, fg: Option<&str>) {
+pub fn add(
+    cfg: &config::Config,
+    name: &str,
+    img: Option<&str>,
+    bg: Option<&str>,
+    fg: Option<&str>,
+) {
     let db = db(cfg);
     let conn = &db.conn;
     let existed = datastore::depts_list(&conn)
@@ -47,7 +57,13 @@ pub fn add(cfg: &config::Config, name: &str, img: Option<&str>, bg: Option<&str>
         println!("отдел «{name}» добавлен (порядок — алфавит)");
     }
 }
-pub fn style(cfg: &config::Config, name: &str, img: Option<String>, bg: Option<String>, fg: Option<String>) {
+pub fn style(
+    cfg: &config::Config,
+    name: &str,
+    img: Option<String>,
+    bg: Option<String>,
+    fg: Option<String>,
+) {
     let db = db(cfg);
     let conn = &db.conn;
     let opt = |v: &Option<String>| match v.as_deref() {
@@ -89,14 +105,18 @@ pub fn move_dept(cfg: &config::Config, name: &str, ord: Option<i64>) {
     });
     println!(
         "отдел «{name}»: {}",
-        ord.map(|n| format!("позиция {n}")).unwrap_or_else(|| "по алфавиту".into())
+        ord.map(|n| format!("позиция {n}"))
+            .unwrap_or_else(|| "по алфавиту".into())
     );
 }
 pub fn group_assign(cfg: &config::Config, group: &str, dept: &str) {
     let db = db(cfg);
     let conn = &db.conn;
-    let depts: Vec<String> =
-        datastore::depts_list(&conn).unwrap_or_default().into_iter().map(|d| d.name).collect();
+    let depts: Vec<String> = datastore::depts_list(&conn)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|d| d.name)
+        .collect();
     if !depts.iter().any(|d| d == dept) {
         eprintln!("нет отдела «{dept}» (есть: {})", depts.join(", "));
         std::process::exit(1);
@@ -107,5 +127,3 @@ pub fn group_assign(cfg: &config::Config, group: &str, dept: &str) {
     });
     println!("группа «{group}» → отдел «{dept}»");
 }
-
-

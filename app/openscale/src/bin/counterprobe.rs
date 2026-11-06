@@ -1,9 +1,10 @@
-
+use escpos::{FieldStyle, LabelJob};
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
-use escpos::{FieldStyle, LabelJob};
 fn main() {
-    let port_path = std::env::args().nth(1).unwrap_or_else(|| "/dev/ttyS3".into());
+    let port_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/dev/ttyS3".into());
     let mut port = serialport::new(&port_path, 19_200)
         .timeout(Duration::from_millis(400))
         .open()
@@ -12,13 +13,20 @@ fn main() {
     port.write_request_to_send(true).expect("RTS");
     let mode = std::env::args().nth(2).unwrap_or_default();
     if mode == "series" {
-        let n: usize = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(10);
+        let n: usize = std::env::args()
+            .nth(3)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10);
         let mut job = LabelJob::begin((448, 232));
         let _ = job.field(0, 0, FieldStyle::Normal, "ТЕСТОВАЯ ПЕЧАТЬ 12345");
         let cols = 37;
         let solid = "█".repeat(cols);
-        let up_even: String = (0..cols).map(|i| if i % 2 == 0 { '▀' } else { ' ' }).collect();
-        let up_odd: String = (0..cols).map(|i| if i % 2 == 1 { '▀' } else { ' ' }).collect();
+        let up_even: String = (0..cols)
+            .map(|i| if i % 2 == 0 { '▀' } else { ' ' })
+            .collect();
+        let up_odd: String = (0..cols)
+            .map(|i| if i % 2 == 1 { '▀' } else { ' ' })
+            .collect();
         let _ = job.field(0, 56, FieldStyle::Normal, &up_even);
         let _ = job.field(0, 68, FieldStyle::Normal, &up_odd);
         let _ = job.field(0, 80, FieldStyle::Normal, &"▄".repeat(cols));
@@ -41,7 +49,7 @@ fn main() {
                 for &byte in &b[..got] {
                     if byte & 0x93 == 0x12 {
                         reads += 1;
-                        let fault = byte & 0x04 == 0; 
+                        let fault = byte & 0x04 == 0;
                         if fault {
                             fault_reads += 1;
                         }
@@ -62,7 +70,7 @@ fn main() {
         return;
     }
     if mode == "step" {
-        let _ = port.write_all(&[0x1B, 0x40]); 
+        let _ = port.write_all(&[0x1B, 0x40]);
         let _ = port.flush();
         std::thread::sleep(Duration::from_millis(600));
         for step in 0..60 {

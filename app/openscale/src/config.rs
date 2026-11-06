@@ -1,7 +1,6 @@
-
-use std::path::{Path, PathBuf};
 use drivers_api::{PrinterProfile, ScalesProfile};
 use serde::Deserialize;
+use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct UiProfile {
@@ -76,7 +75,10 @@ impl std::fmt::Debug for CenterProfile {
             .field("host", &self.host)
             .field("port", &self.port)
             .field("user", &self.user)
-            .field("password", &if self.password.is_empty() { "" } else { "***" })
+            .field(
+                "password",
+                &if self.password.is_empty() { "" } else { "***" },
+            )
             .field("plu_path", &self.plu_path)
             .field("layout_path", &self.layout_path)
             .field("img_dir", &self.img_dir)
@@ -84,7 +86,14 @@ impl std::fmt::Debug for CenterProfile {
             .field("history_dir", &self.history_dir)
             .field("interval_secs", &self.interval_secs)
             .field("timeout_secs", &self.timeout_secs)
-            .field("external_cmd", &if self.external_cmd.is_empty() { "" } else { "***" })
+            .field(
+                "external_cmd",
+                &if self.external_cmd.is_empty() {
+                    ""
+                } else {
+                    "***"
+                },
+            )
             .field("external_input", &self.external_input)
             .finish()
     }
@@ -120,7 +129,11 @@ impl KioskProfile {
                     continue;
                 }
             };
-            let parse = |s: &str| u32::from_str_radix(s.trim_start_matches('#'), 16).ok().filter(|v| *v <= 0xFF_FFFF);
+            let parse = |s: &str| {
+                u32::from_str_radix(s.trim_start_matches('#'), 16)
+                    .ok()
+                    .filter(|v| *v <= 0xFF_FFFF)
+            };
             match (parse(bg), parse(fg)) {
                 (Some(b), Some(f)) => out.push((b, f)),
                 _ => warnings.push(format!(
@@ -139,7 +152,10 @@ pub struct TimeProfile {
 }
 impl Default for TimeProfile {
     fn default() -> Self {
-        Self { ntp: true, server: String::new() }
+        Self {
+            ntp: true,
+            server: String::new(),
+        }
     }
 }
 #[derive(Debug, Clone, Deserialize)]
@@ -173,31 +189,61 @@ impl Default for Config {
         }
     }
 }
-const KNOWN_TOP: &[&str] =
-    &["scales", "printer", "ui", "kiosk", "center", "time", "incoming_dir", "db_path", "log_file"];
+const KNOWN_TOP: &[&str] = &[
+    "scales",
+    "printer",
+    "ui",
+    "kiosk",
+    "center",
+    "time",
+    "incoming_dir",
+    "db_path",
+    "log_file",
+];
 const KNOWN_SECTIONS: &[(&str, &[&str])] = &[
     ("scales", &["kind", "port", "baud"]),
-    ("printer", &["kind", "port", "baud", "enabled", "debug_dump"]),
+    (
+        "printer",
+        &["kind", "port", "baud", "enabled", "debug_dump"],
+    ),
     (
         "ui",
         &["screen_width", "screen_height", "fullscreen", "img_dir"],
     ),
     (
         "kiosk",
-        &["return_to_root_after_print", "idle_timeout_secs", "cfg_export_dir", "dept_palette"],
+        &[
+            "return_to_root_after_print",
+            "idle_timeout_secs",
+            "cfg_export_dir",
+            "dept_palette",
+        ],
     ),
     (
         "center",
         &[
-            "protocol", "host", "port", "user", "password", "plu_path", "layout_path", "img_dir",
-            "img_local_dir", "history_dir", "interval_secs", "timeout_secs", "external_cmd",
+            "protocol",
+            "host",
+            "port",
+            "user",
+            "password",
+            "plu_path",
+            "layout_path",
+            "img_dir",
+            "img_local_dir",
+            "history_dir",
+            "interval_secs",
+            "timeout_secs",
+            "external_cmd",
             "external_input",
         ],
     ),
     ("time", &["ntp", "server"]),
 ];
 fn unknown_keys(text: &str) -> Vec<String> {
-    let Ok(toml::Value::Table(root)) = text.parse::<toml::Value>() else { return Vec::new() };
+    let Ok(toml::Value::Table(root)) = text.parse::<toml::Value>() else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     for (k, v) in &root {
         if !KNOWN_TOP.contains(&k.as_str()) {
@@ -218,8 +264,7 @@ fn unknown_keys(text: &str) -> Vec<String> {
 }
 impl Config {
     pub fn load(path: &Path) -> Result<Self, String> {
-        let text =
-            std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut cfg: Config = toml::from_str(&text).map_err(|e| e.to_string())?;
         cfg.warnings = unknown_keys(&text);
         cfg.sanitize();
@@ -228,11 +273,17 @@ impl Config {
     fn sanitize(&mut self) {
         let mut note = |s: String| self.warnings.push(s);
         if self.center.timeout_secs == 0 || self.center.timeout_secs > 600 {
-            note(format!("center.timeout_secs={} → 30", self.center.timeout_secs));
+            note(format!(
+                "center.timeout_secs={} → 30",
+                self.center.timeout_secs
+            ));
             self.center.timeout_secs = 30;
         }
         if self.center.interval_secs != 0 && self.center.interval_secs < 30 {
-            note(format!("center.interval_secs={} → 30", self.center.interval_secs));
+            note(format!(
+                "center.interval_secs={} → 30",
+                self.center.interval_secs
+            ));
             self.center.interval_secs = 30;
         }
         if self.scales.baud == 0 {
@@ -268,7 +319,11 @@ impl Config {
             self.printer.baud,
             self.ui.screen_width,
             self.ui.screen_height,
-            if self.ui.fullscreen { " fullscreen" } else { "" },
+            if self.ui.fullscreen {
+                " fullscreen"
+            } else {
+                ""
+            },
             self.db_path.display(),
             self.log_file.display(),
         )
@@ -304,7 +359,10 @@ baud = 115200
         assert_eq!(c.scales.kind, "sometech-x");
         assert_eq!(c.scales.baud, 9600);
         assert_eq!(c.printer.baud, 115_200);
-        assert!(c.scales.port.starts_with("COM"), "другая платформа = другой путь порта");
+        assert!(
+            c.scales.port.starts_with("COM"),
+            "другая платформа = другой путь порта"
+        );
         // Незаполненные поля — из дефолтов, а не ошибка.
         assert_eq!(c.db_path, PathBuf::from("/home/scales/plu.db"));
     }
@@ -327,18 +385,17 @@ baud = 115200
     #[test]
     fn time_section_parses() {
         let mut c = Config::default();
-        c.time = crate::config::TimeProfile { ntp: true, server: String::new() };
+        c.time = crate::config::TimeProfile {
+            ntp: true,
+            server: String::new(),
+        };
         assert!(c.time.ntp);
         // Разбор секции из текста.
         let dir = std::env::temp_dir().join(format!("openscale-time-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
-        std::fs::write(
-            &path,
-            "[time]\nntp = false\nserver = \"192.168.1.1\"\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "[time]\nntp = false\nserver = \"192.168.1.1\"\n").unwrap();
         let c = Config::load(&path).unwrap();
         assert!(!c.time.ntp);
         assert_eq!(c.time.server, "192.168.1.1");
@@ -360,7 +417,10 @@ baud = 115200
         let mut c = Config::default();
         c.kiosk.cfg_export_dir = PathBuf::from("/var/ftp/scale/cfg");
         c.sanitize();
-        assert_eq!(c.kiosk.cfg_export_dir, PathBuf::from("/var/lib/openscale/cfg-import"));
+        assert_eq!(
+            c.kiosk.cfg_export_dir,
+            PathBuf::from("/var/lib/openscale/cfg-import")
+        );
         assert!(c.warnings.iter().any(|w| w.contains("cfg_export_dir")));
     }
     #[test]
@@ -370,7 +430,14 @@ baud = 115200
         c.center.interval_secs = 5;
         c.printer.baud = 0;
         c.sanitize();
-        assert_eq!((c.center.timeout_secs, c.center.interval_secs, c.printer.baud), (30, 30, 19_200));
+        assert_eq!(
+            (
+                c.center.timeout_secs,
+                c.center.interval_secs,
+                c.printer.baud
+            ),
+            (30, 30, 19_200)
+        );
         assert_eq!(c.warnings.len(), 3);
     }
 }

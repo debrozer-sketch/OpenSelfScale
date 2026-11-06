@@ -1,14 +1,13 @@
-
+use crate::config::Config;
+use crate::session::Kiosk;
+use crate::weight::WeightSource;
+use crate::{DeptDef, MainWindow, PluTile};
+use slint::Weak;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use slint::Weak;
-use crate::config::Config;
-use crate::session::Kiosk;
-use crate::weight::WeightSource;
-use crate::{DeptDef, MainWindow, PluTile};
 #[derive(Clone)]
 pub struct TradeSettings {
     pub cols: Rc<std::cell::Cell<usize>>,

@@ -1,23 +1,32 @@
-
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::mpsc::Receiver;
-use std::time::{Duration, Instant};
 use crate::context::AppContext;
 use crate::print;
-use crate::session::{self, DONE_TIMEOUT, ERROR_TIMEOUT, round_sum, sum_kopecks, sum_str, weight_state};
+use crate::session::{
+    self, round_sum, sum_kopecks, sum_str, weight_state, DONE_TIMEOUT, ERROR_TIMEOUT,
+};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::mpsc::Receiver;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 pub fn start(
     ctx: &AppContext,
     go_root: Rc<dyn Fn()>,
     refresh_data: Rc<dyn Fn()>,
     sync_rx: Option<Receiver<String>>,
+    logo_updated: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> slint::Timer {
     let (print_tx, print_rx) = std::sync::mpsc::channel::<(u64, Result<u32, print::PrintFail>)>();
     let lock_db: RefCell<Option<rusqlite::Connection>> = RefCell::new(None);
     type TickCache = (String, i32, bool, bool, i32, bool, bool);
-    let tick_cache: Rc<RefCell<TickCache>> =
-        Rc::new(RefCell::new((String::new(), -1, false, false, -1, false, false)));
+    let tick_cache: Rc<RefCell<TickCache>> = Rc::new(RefCell::new((
+        String::new(),
+        -1,
+        false,
+        false,
+        -1,
+        false,
+        false,
+    )));
     let timer = slint::Timer::default();
     {
         let kiosk = ctx.kiosk.clone();
@@ -30,10 +39,10 @@ pub fn start(
         let trade = ctx.trade.clone();
         let refresh_data = refresh_data;
         let tick_cache = tick_cache.clone();
-        let checklist_cache: Rc<RefCell<(i32, u32, i32)>> =
-            Rc::new(RefCell::new((-1, 0, 0)));
+        let checklist_cache: Rc<RefCell<(i32, u32, i32)>> = Rc::new(RefCell::new((-1, 0, 0)));
         let admin_fp: Rc<RefCell<u64>> = Rc::new(RefCell::new(0));
         let logo_hold: Rc<RefCell<Option<Instant>>> = Rc::new(RefCell::new(None));
+        let img_dir = ctx.img_dir.clone();
         let go_root = go_root.clone();
         timer.start(
             slint::TimerMode::Repeated,
@@ -103,6 +112,18 @@ pub fn start(
                     // синхронизации (BUSY защищает от двойного обновления).
                     if ui.get_screen() == 27 {
                         crate::settings::spawn_maint_refresh(&cfg, &app_state, &ui_handle);
+                    }
+                }
+                // Логотип перезалит через приёмник загрузок — показать
+                // без перезапуска.
+                if logo_updated.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                    match slint::Image::load_from_path(&img_dir.join("logo.png")) {
+                        Ok(img) => {
+                            ui.set_logo_img(img);
+                            ui.set_logo_has(true);
+                            log::info!("логотип обновлён по сети");
+                        }
+                        Err(e) => log::warn!("логотип после загрузки: {e}"),
                     }
                 }
                 let mut k = kiosk.borrow_mut();
@@ -430,9 +451,10 @@ pub fn start(
                     go_root();
                 }
                 if k.phase != 2 {
-                    k.print_weight_g = None; 
+                    k.print_weight_g = None;
                 }
-                let (text, level): (String, i32) = match k.phase {                    1 => (
+                let (text, level): (String, i32) = match k.phase {
+                    1 => (
                         format!(
                             "{}: взвешиваем…",
                             k.selected

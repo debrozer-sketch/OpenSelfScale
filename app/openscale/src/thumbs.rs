@@ -12,7 +12,11 @@ pub fn thumb_dir(plu_dir: &Path) -> PathBuf {
 pub fn make_thumb(src: &Path, dst: &Path) -> Result<(), String> {
     let meta = std::fs::metadata(src).map_err(|e| format!("{}: {e}", src.display()))?;
     if meta.len() > MAX_SRC_BYTES {
-        return Err(format!("{}: файл больше {} МБ", src.display(), MAX_SRC_BYTES >> 20));
+        return Err(format!(
+            "{}: файл больше {} МБ",
+            src.display(),
+            MAX_SRC_BYTES >> 20
+        ));
     }
     let reader = image::io::Reader::open(src)
         .map_err(|e| format!("{}: {e}", src.display()))?
@@ -46,7 +50,10 @@ pub fn make_thumb(src: &Path, dst: &Path) -> Result<(), String> {
 }
 
 fn is_fresh(src: &Path, dst: &Path) -> bool {
-    match (src.metadata().and_then(|m| m.modified()), dst.metadata().and_then(|m| m.modified())) {
+    match (
+        src.metadata().and_then(|m| m.modified()),
+        dst.metadata().and_then(|m| m.modified()),
+    ) {
         (Ok(s), Ok(d)) => d >= s,
         _ => false,
     }
@@ -55,11 +62,16 @@ fn is_fresh(src: &Path, dst: &Path) -> bool {
 pub fn ensure_dir(plu_dir: &Path, budget: Duration) -> usize {
     let started = Instant::now();
     let out = thumb_dir(plu_dir);
-    let Ok(rd) = std::fs::read_dir(plu_dir) else { return 0 };
+    let Ok(rd) = std::fs::read_dir(plu_dir) else {
+        return 0;
+    };
     let mut made = 0usize;
     for ent in rd.flatten() {
         if started.elapsed() > budget {
-            log::warn!("миниатюры: бюджет {} с исчерпан, продолжим в следующий раз", budget.as_secs());
+            log::warn!(
+                "миниатюры: бюджет {} с исчерпан, продолжим в следующий раз",
+                budget.as_secs()
+            );
             break;
         }
         let p = ent.path();
@@ -79,18 +91,23 @@ pub fn ensure_dir(plu_dir: &Path, budget: Duration) -> usize {
         std::thread::sleep(Duration::from_millis(4));
     }
     if made > 0 {
-        log::info!("миниатюры: создано {made} за {} мс", started.elapsed().as_millis());
+        log::info!(
+            "миниатюры: создано {made} за {} мс",
+            started.elapsed().as_millis()
+        );
     }
     made
 }
 
 pub fn spawn_background(plu_dir: PathBuf) {
-    let _ = std::thread::Builder::new().name("thumbs".into()).spawn(move || {
-        let r = std::panic::catch_unwind(|| ensure_dir(&plu_dir, Duration::from_secs(300)));
-        if r.is_err() {
-            log::error!("миниатюры: поток паниковал");
-        }
-    });
+    let _ = std::thread::Builder::new()
+        .name("thumbs".into())
+        .spawn(move || {
+            let r = std::panic::catch_unwind(|| ensure_dir(&plu_dir, Duration::from_secs(300)));
+            if r.is_err() {
+                log::error!("миниатюры: поток паниковал");
+            }
+        });
 }
 
 #[cfg(test)]
@@ -105,7 +122,9 @@ mod tests {
     }
 
     fn write_png(path: &Path, w: u32, h: u32) {
-        let img = image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([(x % 256) as u8, (y % 256) as u8, 90, 255]));
+        let img = image::RgbaImage::from_fn(w, h, |x, y| {
+            image::Rgba([(x % 256) as u8, (y % 256) as u8, 90, 255])
+        });
         img.save(path).unwrap();
     }
 
@@ -148,7 +167,9 @@ mod tests {
     #[test]
     fn jpeg_thumb_is_written_as_jpeg() {
         let d = tmpdir("d");
-        let rgb = image::RgbImage::from_fn(600, 600, |x, y| image::Rgb([(x / 3) as u8, (y / 3) as u8, 40]));
+        let rgb = image::RgbImage::from_fn(600, 600, |x, y| {
+            image::Rgb([(x / 3) as u8, (y / 3) as u8, 40])
+        });
         rgb.save(d.join("5.jpg")).unwrap();
         ensure_dir(&d, Duration::from_secs(10));
         let (w, h) = image::image_dimensions(thumb_dir(&d).join("5.jpg")).unwrap();

@@ -26,11 +26,16 @@ fn query(port: &mut Box<dyn serialport::SerialPort>, cmd: &[u8]) {
 }
 
 fn hex(cmd: &[u8]) -> String {
-    cmd.iter().map(|b| format!("{b:#04X}")).collect::<Vec<_>>().join(" ")
+    cmd.iter()
+        .map(|b| format!("{b:#04X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "/dev/ttyS3".into());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/dev/ttyS3".into());
     let baud: u32 = std::env::args()
         .nth(2)
         .and_then(|s| s.parse().ok())

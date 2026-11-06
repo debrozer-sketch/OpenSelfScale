@@ -1,10 +1,10 @@
-
+use crate::context::AppContext;
+use crate::session::weight_state;
+use crate::tiles;
+use crate::{DeptDef, MainWindow, PluTile};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
-use crate::context::AppContext;
-use crate::session::weight_state;use crate::tiles;
-use crate::{DeptDef, MainWindow, PluTile};
 pub struct FlowHandles {
     pub go_root: Rc<dyn Fn()>,
     pub refresh_data: Rc<dyn Fn()>,
@@ -45,7 +45,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         move |plu| {
             let mut k = kiosk.borrow_mut();
             if k.db_unavailable || k.phase >= 2 {
-                return; 
+                return;
             }
             k.idle_since = None;
             let entry = {
@@ -76,7 +76,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             if k.phase >= 2 || k.db_unavailable {
                 return;
             }
-            let Some(entry) = k.pending.clone() else { return };
+            let Some(entry) = k.pending.clone() else {
+                return;
+            };
             let min_kg = trade.min_weight_g.get() / 1000.0;
             // Один снимок на подтверждение: та же масса, по которой popup
             // показывал сумму, становится весом этикетки. Пересчёт в тике
@@ -91,7 +93,10 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             {
                 Ok(Some(item)) => item,
                 Ok(None) => {
-                    log::warn!("позиция PLU {} исчезла из БД — подтверждение отменено", entry.plu);
+                    log::warn!(
+                        "позиция PLU {} исчезла из БД — подтверждение отменено",
+                        entry.plu
+                    );
                     return;
                 }
                 Err(e) => {
@@ -134,7 +139,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let img_dir = img_dir.clone();
         move |page: usize| {
             let t0 = std::time::Instant::now();
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             let cols = item_cols.get().max(2);
             let col_w = ((ui.get_screen_w() - 16.0 - (cols as f32 - 1.0) * 8.0) / cols as f32)
                 .floor()
@@ -169,7 +176,11 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             kiosk.borrow_mut().item_page = page;
             let dt = t0.elapsed();
             if dt >= std::time::Duration::from_millis(10) {
-                log::info!("[тайминг] страница товаров {}: {} мс", page + 1, dt.as_millis());
+                log::info!(
+                    "[тайминг] страница товаров {}: {} мс",
+                    page + 1,
+                    dt.as_millis()
+                );
             }
         }
     };
@@ -182,21 +193,34 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let show = show_items_page.clone();
         let sort_pop = ctx.trade.item_sort_pop.clone();
         let db_path = ctx.cfg.db_path.clone();
-        let pop_cache: std::rc::Rc<std::cell::RefCell<(Option<std::time::Instant>, std::collections::HashMap<String, u32>)>> =
-            std::rc::Rc::new(std::cell::RefCell::new((None, std::collections::HashMap::new())));
+        let pop_cache: std::rc::Rc<
+            std::cell::RefCell<(
+                Option<std::time::Instant>,
+                std::collections::HashMap<String, u32>,
+            )>,
+        > = std::rc::Rc::new(std::cell::RefCell::new((
+            None,
+            std::collections::HashMap::new(),
+        )));
         move |dept: &str| {
             if kiosk.borrow().phase >= 2 {
-                return; 
+                return;
             }
             kiosk.borrow_mut().idle_since = None;
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             let t0 = std::time::Instant::now();
             let gd = group_dept.borrow();
             let mut items: Vec<PluTile> = catalog
                 .borrow()
                 .iter()
                 .filter(|p| {
-                    let g = if p.group.is_empty() { "ПРОЧЕЕ" } else { p.group.as_str() };
+                    let g = if p.group.is_empty() {
+                        "ПРОЧЕЕ"
+                    } else {
+                        p.group.as_str()
+                    };
                     gd.get(g).map(|d| d == dept).unwrap_or(false)
                 })
                 .map(tiles::tile_light)
@@ -213,7 +237,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                         .map(|d| d.as_secs() as i64)
                         .unwrap_or(0)
                         - 30 * 86_400;
-                    match datastore::open(&db_path).and_then(|c| datastore::print_popularity(&c, since)) {
+                    match datastore::open(&db_path)
+                        .and_then(|c| datastore::print_popularity(&c, since))
+                    {
                         Ok(m) => *pop_cache.borrow_mut() = (Some(std::time::Instant::now()), m),
                         Err(e) => {
                             log::warn!("популярность товаров: {e}");
@@ -232,7 +258,11 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             ui.set_screen(2);
             let dt = t0.elapsed();
             if dt >= std::time::Duration::from_millis(10) {
-                log::info!("[тайминг] открытие каталога «{dept}»: {} мс, {} товаров", dt.as_millis(), n_items);
+                log::info!(
+                    "[тайминг] открытие каталога «{dept}»: {} мс, {} товаров",
+                    dt.as_millis(),
+                    n_items
+                );
             }
         }
     };
@@ -258,7 +288,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let depts_all = depts_all.clone();
         let kiosk = kiosk.clone();
         move |hpage: usize| {
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             let cap = header_capacity(&ui);
             let pages_total = depts_all.borrow().len().div_ceil(cap).max(1);
             let hpage = hpage.min(pages_total - 1);
@@ -284,7 +316,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let dept_cell = ctx.trade.dept_cell.clone();
         let set_header_slice = set_header_slice.clone();
         move |page: usize| {
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             let per_page = tiles::dept_per_page(cols.get().max(1), dept_cell.get());
             let pages_total = depts_all.borrow().len().div_ceil(per_page).max(1);
             let page = page.min(pages_total - 1);
@@ -309,7 +343,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let ui_handle = ui_handle.clone();
         let set_dept_slice = set_dept_slice.clone();
         move |page: usize| {
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             set_dept_slice(page);
             ui.set_screen(0);
         }
@@ -358,36 +394,48 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             let ui_handle2 = ui_handle.clone();
             let palette2: Vec<(u32, u32)> = palette.iter().cloned().collect();
             std::thread::spawn(move || {
-                let data = (|| -> Option<(Vec<datastore::DeptRow>, Vec<(String, String)>)> {
-                    let conn = datastore::open(&cfg2.db_path).ok()?;
-                    let depts = datastore::depts_list(&conn).ok()?;
-                    let mut gd_map: std::collections::HashMap<String, String> =
-                        datastore::group_depts(&conn).ok()?.into_iter().collect();
-                    let all_groups = datastore::groups_alpha(&conn).ok()?;
-                    match datastore::route_unmapped_groups(&conn, &mut gd_map, &all_groups) {
-                        Ok(un) if !un.is_empty() => {
-                            for g in &un {
-                                log::warn!("группа без отдела: {g} → {}", datastore::FALLBACK_DEPT);
+                let data = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    (|| -> Option<(Vec<datastore::DeptRow>, Vec<(String, String)>)> {
+                        let conn = datastore::open(&cfg2.db_path).ok()?;
+                        let depts = datastore::depts_list(&conn).ok()?;
+                        let mut gd_map: std::collections::HashMap<String, String> =
+                            datastore::group_depts(&conn).ok()?.into_iter().collect();
+                        let all_groups = datastore::groups_alpha(&conn).ok()?;
+                        match datastore::route_unmapped_groups(&conn, &mut gd_map, &all_groups) {
+                            Ok(un) if !un.is_empty() => {
+                                for g in &un {
+                                    log::warn!(
+                                        "группа без отдела: {g} → {}",
+                                        datastore::FALLBACK_DEPT
+                                    );
+                                }
                             }
+                            Ok(_) => {}
+                            Err(e) => log::error!("раскладка: группы без отдела: {e}"),
                         }
-                        Ok(_) => {}
-                        Err(e) => log::error!("раскладка: группы без отдела: {e}"),
+                        let depts = if depts.is_empty() {
+                            datastore::depts_list(&conn).unwrap_or(depts)
+                        } else {
+                            depts
+                        };
+                        Some((depts, gd_map.into_iter().collect()))
+                    })()
+                }));
+                let data = match data {
+                    Ok(d) => d,
+                    Err(_) => {
+                        log::error!("раскладка: сбор данных прерван паникой");
+                        None
                     }
-                    let depts = if depts.is_empty() {
-                        datastore::depts_list(&conn).unwrap_or(depts)
-                    } else {
-                        depts
-                    };
-                Some((depts, gd_map.into_iter().collect()))
-            })();
-            RELAYOUT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
-            let Some((depts, gd_pairs)) = data else {
-                log::error!("раскладка: база недоступна");
-                return;
-            };
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = ui_handle2.upgrade() {
-                    FLOW_RC.with(|c| {
+                };
+                RELAYOUT_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+                let Some((depts, gd_pairs)) = data else {
+                    log::error!("раскладка: база недоступна");
+                    return;
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_handle2.upgrade() {
+                        FLOW_RC.with(|c| {
                         let st = c.borrow();
                         let st = st.as_ref().expect("flow state");
                         let gd_map: std::collections::HashMap<String, String> =
@@ -399,51 +447,53 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                         *st.group_dept.borrow_mut() = gd_map;
                         *st.depts_all.borrow_mut() =
                             tiles::dept_tiles(&depts, &st.img_dir, &palette2);
-                            let cols = st.trade.cols.get().max(1);
-                            let cell = st.trade.dept_cell.get();
-                            let n = st.depts_all.borrow().len();
-                            let win_w = ui.get_screen_w() as i32;
-                            let win_h = ui.get_screen_h() as i32;
-                            let (colw, tile_h, pages_total) =
-                                tiles::dept_grid(cols, cell, n, win_w, win_h);
-                            ui.set_col_w(colw as f32);
-                            ui.set_tile_h(tile_h as f32);
-                            ui.set_dept_cols(cols as i32);
-                            ui.set_dept_cell(cell);
-                            let pager_y = tiles::dept_pager_y(tile_h, cell);
-                            ui.set_pager_y(pager_y as f32);
-                            let per_page = tiles::dept_per_page(cols, cell);
-                            let rows_pp = per_page / cols;
-                            let maxlen = st
-                                .depts_all
-                                .borrow()
-                                .iter()
-                                .map(|d| d.name.chars().count())
-                                .max()
-                                .unwrap_or(4) as f32;
-                            let font_px = ((colw - 32) as f32 / (maxlen * 0.82)).floor().clamp(18.0, 60.0);
-                            ui.set_dept_font(font_px);
-                            log::info!(
-                                "отделы: {cols} колонок × {colw} px, {rows_pp} ряд(а), шрифт {font_px} px"
-                            );
-                            let page = st.kiosk.borrow().dept_page.min(pages_total - 1);
-                            let tiles: Vec<DeptDef> = st
-                                .depts_all
-                                .borrow()
-                                .iter()
-                                .skip(page * per_page)
-                                .take(per_page)
-                                .cloned()
-                                .collect();
-                            ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
-                            ui.set_page_no(page as i32);
-                            ui.set_pages_total(pages_total as i32);
-                            st.kiosk.borrow_mut().dept_page = page;
-                            let hpage = st.kiosk.borrow().header_dept_page;
-                            (st.set_header)(hpage);
-                            let ipage = st.kiosk.borrow().item_page;
-                            (st.show_items)(ipage);
-                        });
+                        let n = st.depts_all.borrow().len();
+                        let cell = st.trade.dept_cell.get();
+                        // Колонки подстраиваются под выгрузку: настройка
+                        // действует, только если категорий не меньше пяти.
+                        let cols = tiles::adaptive_dept_cols(n, st.trade.cols.get());
+                        let win_w = ui.get_screen_w() as i32;
+                        let win_h = ui.get_screen_h() as i32;
+                        let (colw, tile_h, pages_total) =
+                            tiles::dept_grid(cols, cell, n, win_w, win_h);
+                        ui.set_col_w(colw as f32);
+                        ui.set_tile_h(tile_h as f32);
+                        ui.set_dept_cols(cols as i32);
+                        ui.set_dept_cell(cell);
+                        let pager_y = tiles::dept_pager_y(tile_h, cell);
+                        ui.set_pager_y(pager_y as f32);
+                        let per_page = tiles::dept_per_page(cols, cell);
+                        let rows_pp = per_page / cols;
+                        let maxlen = st
+                            .depts_all
+                            .borrow()
+                            .iter()
+                            .map(|d| d.name.chars().count())
+                            .max()
+                            .unwrap_or(4) as f32;
+                        let font_px = ((colw - 32) as f32 / (maxlen * 0.82)).floor().clamp(18.0, 60.0);
+                        ui.set_dept_font(font_px);
+                        log::info!(
+                            "отделы: {cols} колонок × {colw} px, {rows_pp} ряд(а), шрифт {font_px} px"
+                        );
+                        let page = st.kiosk.borrow().dept_page.min(pages_total - 1);
+                        let tiles: Vec<DeptDef> = st
+                            .depts_all
+                            .borrow()
+                            .iter()
+                            .skip(page * per_page)
+                            .take(per_page)
+                            .cloned()
+                            .collect();
+                        ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
+                        ui.set_page_no(page as i32);
+                        ui.set_pages_total(pages_total as i32);
+                        st.kiosk.borrow_mut().dept_page = page;
+                        let hpage = st.kiosk.borrow().header_dept_page;
+                        (st.set_header)(hpage);
+                        let ipage = st.kiosk.borrow().item_page;
+                        (st.show_items)(ipage);
+                    });
                     }
                 });
             });
@@ -460,7 +510,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let img_dir = img_dir.clone();
         move || {
             let t0 = std::time::Instant::now();
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             let q = query.borrow().to_uppercase();
             let items: Vec<PluTile> = if q.is_empty() {
                 Vec::new()
@@ -516,7 +568,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                 return;
             }
             kiosk.borrow_mut().idle_since = None;
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             query.borrow_mut().clear();
             ui.set_search_text("".into());
             apply();
@@ -551,7 +605,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                     }
                 }
             }
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             ui.set_search_text(query.borrow().clone().into());
             apply();
         }
@@ -564,7 +620,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         move || {
             kiosk.borrow_mut().idle_since = None;
             query.borrow_mut().clear();
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             ui.set_search_text("".into());
             apply();
         }
@@ -582,7 +640,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let catalog_back = ctx.trade.catalog_back.clone();
         move || {
             kiosk.borrow_mut().idle_since = None;
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             match ui.get_screen() {
                 2 => {
                     let cap = item_cols.get().max(2) * 3;
@@ -608,7 +668,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let ui_handle = ui_handle.clone();
         move || {
             kiosk.borrow_mut().idle_since = None;
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             match ui.get_screen() {
                 2 => {
                     let page = kiosk.borrow().item_page.saturating_sub(1);
@@ -639,7 +701,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         let cols = ctx.trade.cols.clone();
         let dept_cell = ctx.trade.dept_cell.clone();
         move || {
-            let Some(ui) = ui_handle.upgrade() else { return };
+            let Some(ui) = ui_handle.upgrade() else {
+                return;
+            };
             if let Ok(mut k) = kiosk.try_borrow_mut() {
                 k.reset_state();
             }
@@ -647,13 +711,15 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             ui.set_page_no(0);
             ui.set_header_page(0);
             ui.set_popup_open(false);
-            let per_page = tiles::dept_per_page(cols.get().max(1), dept_cell.get());
-            let tiles: Vec<DeptDef> =
-                depts_all.borrow().iter().take(per_page).cloned().collect();
+            // Как и в relayout: настройка колонок действует, только
+            // если категорий не меньше пяти.
+            let n_depts = depts_all.borrow().len();
+            let cols_eff = tiles::adaptive_dept_cols(n_depts, cols.get());
+            let per_page = tiles::dept_per_page(cols_eff.max(1), dept_cell.get());
+            let tiles: Vec<DeptDef> = depts_all.borrow().iter().take(per_page).cloned().collect();
             ui.set_depts(slint::ModelRc::new(slint::VecModel::from(tiles)));
             let cap = (((ui.get_screen_w() - 452.0) / 114.0).floor().max(1.0) as usize).max(1);
-            let htiles: Vec<DeptDef> =
-                depts_all.borrow().iter().take(cap).cloned().collect();
+            let htiles: Vec<DeptDef> = depts_all.borrow().iter().take(cap).cloned().collect();
             ui.set_header_depts(slint::ModelRc::new(slint::VecModel::from(htiles)));
             if depts_all.borrow().len() == 1 {
                 if let Some(n) = depts_all.borrow().first().map(|d| d.name.clone()) {
@@ -744,14 +810,15 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                         *st.catalog_up.borrow_mut() = up;
                         if let Ok(mut k) = st.kiosk.try_borrow_mut() {
                             if let Some(p) = k.pending.clone() {
-                                let changed = match st.catalog.borrow().iter().find(|e| e.plu == p.plu) {
-                                    Some(f) => {
-                                        f.price != p.price
-                                            || f.card_price != p.card_price
-                                            || f.name != p.name
-                                    }
-                                    None => true,
-                                };
+                                let changed =
+                                    match st.catalog.borrow().iter().find(|e| e.plu == p.plu) {
+                                        Some(f) => {
+                                            f.price != p.price
+                                                || f.card_price != p.card_price
+                                                || f.name != p.name
+                                        }
+                                        None => true,
+                                    };
                                 if changed {
                                     log::info!(
                                         "карточка PLU {} закрыта: товар изменён синхронизацией",
@@ -780,7 +847,11 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                                 .borrow()
                                 .iter()
                                 .filter(|p| {
-                                    let g = if p.group.is_empty() { "ПРОЧЕЕ" } else { p.group.as_str() };
+                                    let g = if p.group.is_empty() {
+                                        "ПРОЧЕЕ"
+                                    } else {
+                                        p.group.as_str()
+                                    };
                                     gd.get(g).map(|d| d == title.as_str()).unwrap_or(false)
                                 })
                                 .map(tiles::tile_light)
@@ -790,7 +861,10 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
                             *st.items_all.borrow_mut() = tiles;
                             let dt = t0.elapsed();
                             if dt >= std::time::Duration::from_millis(10) {
-                                log::info!("[тайминг] обновление каталога после синхронизации: {} мс", dt.as_millis());
+                                log::info!(
+                                    "[тайминг] обновление каталога после синхронизации: {} мс",
+                                    dt.as_millis()
+                                );
                             }
                             let ipage = st.kiosk.borrow().item_page;
                             (st.show_items)(ipage);
@@ -801,5 +875,9 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
         }
     };
     let refresh_data: Rc<dyn Fn()> = Rc::new(refresh_data);
-    FlowHandles { go_root, refresh_data, relayout }
+    FlowHandles {
+        go_root,
+        refresh_data,
+        relayout,
+    }
 }
