@@ -106,12 +106,14 @@ impl Drop for WeightSource {
 }
 
 /// Ожидание с проверкой stop: Drop не ждёт лишних секунд.
+/// Спит целиком `total`, дробя на шаги и прерываясь на stop.
 fn sleep_interruptible(stop: &AtomicBool, total: Duration) {
     let step = Duration::from_millis(100);
     let mut left = total;
-    while left > step && !stop.load(Ordering::Relaxed) {
-        std::thread::sleep(step);
-        left -= step;
+    while !left.is_zero() && !stop.load(Ordering::Relaxed) {
+        let chunk = left.min(step);
+        std::thread::sleep(chunk);
+        left -= chunk;
     }
 }
 #[cfg(unix)]
@@ -295,6 +297,23 @@ fn poll_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sleep_interruptible_waits_full_duration_below_step() {
+        // total меньше шага (100 мс) должен всё равно выспаться целиком,
+        // а не завершиться мгновенно, как в старой версии.
+        let stop = AtomicBool::new(false);
+        let t0 = std::time::Instant::now();
+        sleep_interruptible(&stop, Duration::from_millis(50));
+        let waited = t0.elapsed();
+        assert!(waited >= Duration::from_millis(40), "waited {waited:?}");
+    }
+    #[test]
+    fn sleep_interruptible_returns_early_on_stop() {
+        let stop = AtomicBool::new(true);
+        let t0 = std::time::Instant::now();
+        sleep_interruptible(&stop, Duration::from_secs(5));
+        assert!(t0.elapsed() < Duration::from_millis(100));
+    }
     #[test]
     fn stale_snapshot_marks_port_down() {
         let mut stale = Snapshot {

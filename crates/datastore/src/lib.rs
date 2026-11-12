@@ -268,7 +268,7 @@ pub fn load_all(conn: &Connection) -> Result<Vec<PluEntry>, StoreError> {
             itemcode: r.get(6)?,
         })
     })?;
-    Ok(rows_collect_warn(rows))
+    rows_collect(rows)
 }
 pub fn get_item(conn: &Connection, plu: &str) -> Result<Option<PluItem>, StoreError> {
     let mut stmt = conn.prepare(
@@ -292,17 +292,14 @@ pub fn get_item(conn: &Connection, plu: &str) -> Result<Option<PluItem>, StoreEr
         })
         .transpose()
 }
-fn rows_collect_warn<T>(
+fn rows_collect<T>(
     rows: rusqlite::MappedRows<'_, impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<T>>,
-) -> Vec<T> {
+) -> Result<Vec<T>, StoreError> {
     let mut out = Vec::new();
     for r in rows {
-        match r {
-            Ok(v) => out.push(v),
-            Err(e) => log::warn!("данные: строка не прочитана и пропущена: {e}"),
-        }
+        out.push(r?);
     }
-    out
+    Ok(out)
 }
 pub fn groups_alpha(conn: &Connection) -> Result<Vec<(String, i64)>, StoreError> {
     let mut stmt = conn.prepare(
@@ -310,7 +307,7 @@ pub fn groups_alpha(conn: &Connection) -> Result<Vec<(String, i64)>, StoreError>
          FROM plucodes GROUP BY g ORDER BY g",
     )?;
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-    Ok(rows_collect_warn(rows))
+    rows_collect(rows)
 }
 const SEED_DEPTS: &[(&str, &str)] = &[
     ("ОВОЩИ", "ovoshi.png"),
@@ -426,7 +423,7 @@ pub fn label_layout_list(conn: &Connection) -> Result<Vec<LabelLayoutRow>, Store
             json: r.get(3)?,
         })
     })?;
-    Ok(rows_collect_warn(rows))
+    rows_collect(rows)
 }
 pub fn label_layout_delete(conn: &Connection, name: &str) -> Result<bool, StoreError> {
     let n = conn.execute("DELETE FROM label_layouts WHERE name = ?1", [name])?;
@@ -471,12 +468,12 @@ pub fn depts_list(conn: &Connection) -> Result<Vec<DeptRow>, StoreError> {
             fg: r.get(4)?,
         })
     })?;
-    Ok(rows_collect_warn(rows))
+    rows_collect(rows)
 }
 pub fn group_depts(conn: &Connection) -> Result<Vec<(String, String)>, StoreError> {
     let mut stmt = conn.prepare("SELECT grp, dept FROM group_dept ORDER BY grp")?;
     let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-    Ok(rows_collect_warn(rows))
+    rows_collect(rows)
 }
 pub fn dept_add(
     conn: &Connection,
@@ -942,6 +939,11 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
 /// Шаг снятия отсутствующих без открытия транзакции.
 fn remove_absent_step(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
     let existing: i64 = conn.query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))?;
+    if items.is_empty() && existing > 0 {
+        return Err(StoreError::Xml(format!(
+            "пустая выгрузка при {existing} товарах в базе: подозрение на битый файл, снятие отменено"
+        )));
+    }
     if existing >= 20 && (items.len() as i64) * 2 < existing {
         return Err(StoreError::Xml(format!(
             "в выгрузке {} товаров при {existing} в базе: подозрение на обрезанный файл, снятие отменено",
@@ -1184,6 +1186,15 @@ pub fn apply_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rows_collect_propagates_read_error() {
+        // Ошибка чтения хотя бы одной строки не должна молча теряться:
+        // иначе товар/отдел пропадает из интерфейса без причины.
+        let conn = open(":memory:".as_ref()).unwrap();
+        let mut stmt = conn.prepare("SELECT 'не-число' AS x").unwrap();
+        let rows = stmt.query_map([], |r| r.get::<_, i64>(0)).unwrap();
+        assert!(rows_collect(rows).is_err());
+    }
     #[test]
     fn table_has_column_sees_real_columns_only() {
         let conn = open(":memory:".as_ref()).unwrap();
@@ -1708,6 +1719,38 @@ mod tests {
         // Полная выгрузка проходит: снятий нет, база цела.
         let all: Vec<PluItem> = parse_plu_xml(&xml).unwrap();
         assert_eq!(remove_absent(&conn, &all).unwrap(), 0);
+    }
+    #[test]
+    fn remove_absent_rejects_empty_upload_on_nonempty_base() {
+        // Битый/пустой plu.xml даёт пустой список. На небольшой базе
+        // (меньше 20 товаров) порог в remove_absent_step не срабатывает,
+        // и пустая выгрузка стёрла бы весь каталог. Обязан быть отказ.
+        let conn = open(":memory:".as_ref()).unwrap();
+        let xml = r#"<body>
+            <item plunumber="1" price="1000" itemcode="0001" namefirst="А" namesecond="" groupcode="21" shelflife="x" />
+            <item plunumber="2" price="2000" itemcode="0002" namefirst="Б" namesecond="" groupcode="21" shelflife="x" />
+        </body>"#;
+        import_plu(&conn, &parse_plu_xml(xml).unwrap()).unwrap();
+        assert!(remove_absent(&conn, &[]).is_err());
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 2);
+    }
+    #[test]
+    fn apply_upload_rejects_empty_upload_on_nonempty_base() {
+        // Тот же сценарий через составную операцию: пустая выгрузка
+        // не должна ни импортировать, ни снимать ничего.
+        let conn = open(":memory:".as_ref()).unwrap();
+        let xml = r#"<body>
+            <item plunumber="1" price="1000" itemcode="0001" namefirst="А" namesecond="" groupcode="21" shelflife="x" />
+        </body>"#;
+        import_plu(&conn, &parse_plu_xml(xml).unwrap()).unwrap();
+        assert!(apply_upload(&conn, &[], None).is_err());
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
     }
     #[test]
     fn remove_absent_tolerates_duplicate_plu_in_upload() {

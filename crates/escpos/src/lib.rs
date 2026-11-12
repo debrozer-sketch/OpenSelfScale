@@ -72,6 +72,15 @@ pub fn to_cp866(text: &str) -> Result<Vec<u8>, EscPosError> {
 fn le16(v: u16) -> [u8; 2] {
     [(v & 0xFF) as u8, (v >> 8) as u8]
 }
+/// Контрольная цифра EAN-13 для 12 цифр payload (веса 1,3,1,3,...).
+fn ean13_check_digit(payload: &str) -> u8 {
+    let mut sum = 0u32;
+    for (i, b) in payload.bytes().enumerate() {
+        let d = (b - b'0') as u32;
+        sum += if i % 2 == 0 { d } else { d * 3 };
+    }
+    ((10 - (sum % 10)) % 10) as u8
+}
 pub struct LabelJob {
     buf: Vec<u8>,
 }
@@ -121,6 +130,10 @@ impl LabelJob {
         if digits.len() != 12 || !digits.bytes().all(|b| b.is_ascii_digit()) {
             return Err(EscPosError::InvalidBarcode(digits.into()));
         }
+        if !(2..=6).contains(&module_dots) || height_dots == 0 {
+            return Err(EscPosError::InvalidBarcode(digits.into()));
+        }
+        let check = ean13_check_digit(digits);
         let [xl, xh] = le16(x);
         self.buf.extend_from_slice(&[ESC, b'$', xl, xh]);
         let [yl, yh] = le16(y);
@@ -130,6 +143,7 @@ impl LabelJob {
         self.buf.extend_from_slice(&[GS, b'H', 0x02]);
         self.buf.extend_from_slice(&[GS, b'k', 0x02]);
         self.buf.extend_from_slice(digits.as_bytes());
+        self.buf.push(b'0' + check);
         self.buf.push(0x00);
         Ok(self)
     }
@@ -342,16 +356,43 @@ mod tests {
             &out,
             &[
                 GS, b'w', 0x02, GS, b'h', 0x30, GS, b'H', 0x02, GS, b'k', 0x02, b'2', b'1', b'0',
-                b'2', b'1', b'3', b'6', b'0', b'1', b'3', b'5', b'0', 0x00,
+                b'2', b'1', b'3', b'6', b'0', b'1', b'3', b'5', b'0', b'8', 0x00,
             ],
         );
         assert!(probe.is_some());
+    }
+    #[test]
+    fn barcode_appends_ean13_check_digit() {
+        // Вход — 12-значный payload без контрольной цифры. Принтер её не
+        // пересчитывает, поэтому печатать надо 13 цифр с вычисленной
+        // контрольной, иначе EAN-13 невалиден. Для 210213601350 это 8.
+        let mut job = LabelJob::begin((448, 232));
+        job.barcode_ean13(0, 0, "210213601350", 2, 0x30).unwrap();
+        let out = job.finish();
+        let probe = window(
+            &out,
+            &[
+                GS, b'k', 0x02, b'2', b'1', b'0', b'2', b'1', b'3', b'6', b'0', b'1', b'3', b'5',
+                b'0', b'8', 0x00,
+            ],
+        );
+        assert!(probe.is_some(), "ожидались 13 цифр с контрольной 8");
     }
     #[test]
     fn barcode_rejects_bad_input() {
         let mut job = LabelJob::begin((448, 232));
         assert!(job.barcode_ean13(0, 0, "123", 2, 0x30).is_err());
         assert!(job.barcode_ean13(0, 0, "21021360135a", 2, 0x30).is_err());
+    }
+    #[test]
+    fn barcode_rejects_out_of_range_module_and_height() {
+        // GS w для EAN-13 допускает 2..=6; нулевая ширина и 0 высота
+        // дают нечитаемый код, который принтер не отвергнет.
+        let mut job = LabelJob::begin((448, 232));
+        assert!(job.barcode_ean13(0, 0, "210213601350", 0, 0x30).is_err());
+        assert!(job.barcode_ean13(0, 0, "210213601350", 7, 0x30).is_err());
+        assert!(job.barcode_ean13(0, 0, "210213601350", 2, 0).is_err());
+        assert!(job.barcode_ean13(0, 0, "210213601350", 2, 0x30).is_ok());
     }
     #[test]
     fn cp866_unknown_char_becomes_question() {

@@ -15,7 +15,12 @@ pub enum ShtrihError {
     Device { cmd: u8, code: u8 },
     #[error("timed out waiting for scale reply")]
     Timeout,
+    #[error("implausible mass {mass_g} g in reply")]
+    MassOutOfRange { mass_g: i32 },
 }
+/// Верхняя граница правдоподобной массы (200 кг). Всё, что больше по
+/// модулю, — признак мусорного кадра, а не реального веса.
+pub const MAX_PLAUSIBLE_MASS_G: i32 = 200_000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScaleReply {
     pub status: u8,
@@ -68,6 +73,9 @@ pub fn parse_reply(frame: &[u8]) -> Result<ScaleReply, ShtrihError> {
     }
     let status = frame[4];
     let raw = i32::from_le_bytes([frame[6], frame[7], frame[8], frame[9]]);
+    if !(-MAX_PLAUSIBLE_MASS_G..=MAX_PLAUSIBLE_MASS_G).contains(&raw) {
+        return Err(ShtrihError::MassOutOfRange { mass_g: raw });
+    }
     Ok(ScaleReply {
         status,
         mass_g: raw,
@@ -282,6 +290,26 @@ mod tests {
         let r = parse_reply(frame).unwrap();
         assert_eq!(r.mass_g, -6);
         assert!(!r.is_stable());
+    }
+    #[test]
+    fn parse_rejects_implausible_mass() {
+        // Мусорный кадр с валидным LRC, но абсурдной массой
+        // (0x80000000 = -2147483648 г) не должен уходить на экран.
+        let mut frame = *b"\x02\x0b:\x00\x15\x00\x46\x05\x00\x00\x00\x00\x00g";
+        frame[6..10].copy_from_slice(&0x8000_0000u32.to_le_bytes());
+        frame[13] = lrc(&frame[1..13]);
+        assert!(matches!(
+            parse_reply(&frame),
+            Err(ShtrihError::MassOutOfRange { .. })
+        ));
+    }
+    #[test]
+    fn parse_allows_plausible_mass() {
+        // 200 кг — верхняя граница реального диапазона, допустима.
+        let mut frame = *b"\x02\x0b:\x00\x15\x00\x46\x05\x00\x00\x00\x00\x00g";
+        frame[6..10].copy_from_slice(&200_000i32.to_le_bytes());
+        frame[13] = lrc(&frame[1..13]);
+        assert_eq!(parse_reply(&frame).unwrap().mass_g, 200_000);
     }
     #[test]
     fn lrc_mismatch_is_reported() {
