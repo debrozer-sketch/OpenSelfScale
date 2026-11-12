@@ -323,8 +323,16 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     drop(k);
                     spawn_pin_task(move || {
                         let t = std::time::Instant::now();
-                        let res = datastore::open(&db_path)
-                            .map(|conn| datastore::auth::verify(&conn, &pin));
+                        let res = datastore::open(&db_path).map(|conn| {
+                            let r = datastore::auth::verify(&conn, &pin);
+                            // Сброшенный по USB-ключу PIN требует смены при входе.
+                            let due = datastore::get_setting(&conn, "pin_change_due")
+                                .ok()
+                                .flatten()
+                                .as_deref()
+                                == Some("1");
+                            (r, due)
+                        });
                         log::info!("вход: проверка PBKDF2 заняла {:?}", t.elapsed());
                         let _ = slint::invoke_from_event_loop(move || {
                             KIOSK_RC.with(|c| {
@@ -332,7 +340,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                 let mut k = krc.borrow_mut();
                                 k.pin_check_busy = false;
                                 match res {
-                                    Ok(Ok(datastore::auth::Auth::Granted(role))) => {
+                                    Ok((Ok(datastore::auth::Auth::Granted(role)), due)) => {
                                         log::info!(
                                             "вход: пароль принят, роль {}",
                                             if role == datastore::auth::Role::Admin {
@@ -341,21 +349,18 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                                 "staff"
                                             }
                                         );
-                                        k.pin_forced = false;
+                                        let admin = role == datastore::auth::Role::Admin;
+                                        k.pin_forced = due && admin;
                                         k.admin_stage = 2;
                                         k.pending = None;
-                                        k.role = if role == datastore::auth::Role::Admin {
-                                            1
-                                        } else {
-                                            0
-                                        };
+                                        k.role = if admin { 1 } else { 0 };
                                         if let Some(ui) = ui_handle2.upgrade() {
                                             ui.set_role(i32::from(k.role));
-                                            ui.set_pin_forced(false);
+                                            ui.set_pin_forced(k.pin_forced);
                                             ui.set_popup_open(false);
                                         }
                                     }
-                                    Ok(Ok(datastore::auth::Auth::Denied { wait_secs })) => {
+                                    Ok((Ok(datastore::auth::Auth::Denied { wait_secs }), _)) => {
                                         log::info!("вход: отказ, пауза {wait_secs} с");
                                         if let Some(ui) = ui_handle2.upgrade() {
                                             if wait_secs == 0 {
@@ -365,7 +370,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                             }
                                         }
                                     }
-                                    Ok(Err(e)) => log::error!("вход: проверка: {e}"),
+                                    Ok((Err(e), _)) => log::error!("вход: проверка: {e}"),
                                     Err(e) => log::error!("вход: база: {e}"),
                                 }
                             });
@@ -572,6 +577,10 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                             }
                             .into(),
                         );
+                        // Требование смены после USB-сброса выполнено.
+                        if uid == 1 {
+                            let _ = datastore::set_setting(&conn, "pin_change_due", "0");
+                        }
                     }
                     r
                 });
@@ -3569,6 +3578,8 @@ fn kiosk_vnc_note(on: bool) {
 /// S11/B12: восстановление доступа файлом-ключом с USB.
 /// Ожидаемое содержимое openscale-reset.key — hex(sha256("openscale-reset:" + machine_id)).
 /// Ключ для конкретного весов генерирует оператор (deploy/make_reset_key.py).
+/// Новый PIN — случайный, записывается на ту же флешку
+/// (openscale-reset-new-pin.txt); детерминированного PIN больше нет.
 pub fn reset_admin_pin_by_usb_key(db_path: &std::path::Path) -> Result<bool, String> {
     let machine = std::fs::read_to_string("/etc/machine-id")
         .map_err(|e| format!("machine-id: {e}"))?
@@ -3582,7 +3593,7 @@ pub fn reset_admin_pin_by_usb_key(db_path: &std::path::Path) -> Result<bool, Str
     h.update(b"openscale-reset:");
     h.update(machine.as_bytes());
     let expected: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
-    let mut found = false;
+    let mut key_mount: Option<std::path::PathBuf> = None;
     for root in ["/media", "/run/media"] {
         let entries = match std::fs::read_dir(root) {
             Ok(e) => e,
@@ -3599,20 +3610,63 @@ pub fn reset_admin_pin_by_usb_key(db_path: &std::path::Path) -> Result<bool, Str
                     continue;
                 };
                 if content.trim().eq_ignore_ascii_case(&expected) {
-                    found = true;
+                    key_mount = Some(mount.path());
                 }
             }
         }
     }
-    if !found {
+    let Some(mount) = key_mount else {
         return Ok(false);
-    }
+    };
     let conn = datastore::open(db_path).map_err(|e| format!("база: {e}"))?;
-    match datastore::auth::create_user(&conn, 1, "admin", "12345") {
-        Ok(Ok(())) => Ok(true),
+    apply_reset_pin(&conn, &mount, &reset_pin())?;
+    Ok(true)
+}
+
+/// Применяет USB-сброс: PIN-файл на носитель, смена PIN, флаг обязательной
+/// смены при входе. PIN-файл пишется первым: если носитель недоступен,
+/// PIN не меняется — оператор не теряет доступ, не узнав новый PIN.
+pub fn apply_reset_pin(
+    conn: &rusqlite::Connection,
+    key_mount: &std::path::Path,
+    pin: &str,
+) -> Result<(), String> {
+    let pin_file = key_mount.join("openscale-reset-new-pin.txt");
+    std::fs::write(&pin_file, format!("{pin}\n"))
+        .map_err(|e| format!("запись PIN на носитель: {e}"))?;
+    match datastore::auth::create_user(conn, 1, "admin", pin) {
+        Ok(Ok(())) => {
+            let _ = datastore::set_setting(conn, "pin_change_due", "1");
+            log::info!(
+                "USB-ключ: PIN администратора сброшен, новый PIN записан в {}",
+                pin_file.display()
+            );
+            Ok(())
+        }
         Ok(Err(msg)) => Err(msg.to_string()),
         Err(e) => Err(e.to_string()),
     }
+}
+
+/// Случайный 5-значный PIN (10000–99999). /dev/urandom — ровно 4 байта
+/// read_exact'ом: файл бесконечен, целиком его читать нельзя.
+pub fn reset_pin() -> String {
+    use std::io::Read;
+    let mut buf = [0u8; 4];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        if f.read_exact(&mut buf).is_ok() {
+            let v = u32::from_be_bytes(buf) % 90_000 + 10_000;
+            return v.to_string();
+        }
+    }
+    // Fallback без urandom: смесь времени и PID (киоск — Linux, путь почти
+    // не встречается; энтропия ниже, но PIN всё же не фиксированный).
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let v = (t ^ (std::process::id() as u32).wrapping_mul(2_654_435_761)) % 90_000 + 10_000;
+    v.to_string()
 }
 
 /// Фоновая проверка PIN. Если поток паникует, флаг `pin_check_busy` обязательно
@@ -3770,6 +3824,71 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+    #[test]
+    fn reset_pin_is_random_five_digits() {
+        for _ in 0..8 {
+            let pin = reset_pin();
+            assert_eq!(pin.len(), 5, "PIN: {pin}");
+            assert!(pin.bytes().all(|b| b.is_ascii_digit()), "PIN: {pin}");
+            let v: u32 = pin.parse().unwrap();
+            assert!((10_000..=99_999).contains(&v), "PIN: {pin}");
+        }
+        assert_ne!(reset_pin(), "", "PIN не пустой");
+    }
+
+    #[test]
+    fn apply_reset_pin_sets_random_pin_and_flag() {
+        let dir = test_dir("usb-reset");
+        let db = dir.join("plu.db");
+        let conn = datastore::open(&db).unwrap();
+        datastore::auth::create_user(&conn, 1, "admin", "12345")
+            .unwrap()
+            .unwrap();
+        let flash = dir.join("usb");
+        std::fs::create_dir_all(&flash).unwrap();
+
+        apply_reset_pin(&conn, &flash, "77777").unwrap();
+
+        let pin_file = flash.join("openscale-reset-new-pin.txt");
+        assert!(pin_file.exists(), "новый PIN записан на носитель");
+        assert_eq!(std::fs::read_to_string(&pin_file).unwrap().trim(), "77777");
+        assert!(matches!(
+            datastore::auth::verify(&conn, "77777"),
+            Ok(datastore::auth::Auth::Granted(_))
+        ));
+        assert_eq!(
+            datastore::get_setting(&conn, "pin_change_due").unwrap(),
+            Some("1".into()),
+            "флаг обязательной смены взведён"
+        );
+        // Снятие флага выполняет смена PIN (код on_pin_try); здесь — запись.
+        let _ = datastore::set_setting(&conn, "pin_change_due", "0");
+        assert_eq!(
+            datastore::get_setting(&conn, "pin_change_due").unwrap(),
+            Some("0".into())
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn apply_reset_pin_without_mount_fails_before_pin_change() {
+        let dir = test_dir("usb-nomount");
+        let db = dir.join("plu.db");
+        let conn = datastore::open(&db).unwrap();
+        datastore::auth::create_user(&conn, 1, "admin", "12345")
+            .unwrap()
+            .unwrap();
+        let err = apply_reset_pin(&conn, &dir.join("нет-такого"), "77777");
+        assert!(err.is_err(), "недоступный носитель отменяет сброс");
+        assert!(
+            matches!(
+                datastore::auth::verify(&conn, "12345"),
+                Ok(datastore::auth::Auth::Granted(_))
+            ),
+            "старый PIN работает"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
