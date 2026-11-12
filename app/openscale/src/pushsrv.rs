@@ -1,8 +1,11 @@
 //! Приёмник загрузок с ПК: HTTP API для этикеток и логотипа.
 //!
 //! Конструктор этикетки (tools/label-designer.html) отправляет раскладку
-//! и логотип прямо на весы по сети. Авторизации нет — как и у FTP-drop;
-//! защита в строгой проверке содержимого: раскладка валидируется
+//! и логотип прямо на весы по сети. Доступ к записи защищён токеном
+//! устройства: киоск при первом старте генерирует случайный токен в
+//! `/var/lib/openscale/pushsrv.token` (0600), конструктор передаёт его
+//! в заголовке `X-OpenScale-Token`. Токен берётся с весов администратором
+//! (SSH). Содержимое дополнительно проверяется: раскладка валидируется
 //! `label::parse`, логотип — полноценным разбором чанков PNG (сигнатура,
 //! IHDR, CRC, IEND, лимиты размеров). Всё остальное отклоняется.
 
@@ -17,6 +20,8 @@ use crate::config::Config;
 
 /// Порт приёмника на весах.
 pub const PORT: u16 = 8080;
+/// Заголовок с токеном устройства.
+const TOKEN_HEADER: &str = "x-openscale-token";
 /// Лимит тела раскладки.
 const MAX_LABEL_BODY: usize = 64 * 1024;
 /// Лимит тела логотипа.
@@ -31,6 +36,75 @@ pub type LogoFlag = Arc<AtomicBool>;
 
 /// Лимит раскладок — как в меню этикеток весов.
 const MAX_LAYOUTS: usize = 8;
+
+/// Путь к токену приёмника рядом с БД.
+pub fn token_path(cfg: &Config) -> PathBuf {
+    cfg.db_path
+        .parent()
+        .map(|d| d.join("pushsrv.token"))
+        .unwrap_or_else(|| PathBuf::from("/var/lib/openscale/pushsrv.token"))
+}
+
+/// Читает или создаёт (один раз) токен устройства. Ошибка возвращает
+/// пустой токен: при пустом токене приёмник отклоняет все записи.
+pub fn get_or_create_token(cfg: &Config) -> String {
+    let path = token_path(cfg);
+    if let Ok(tok) = std::fs::read_to_string(&path) {
+        let tok = tok.trim().to_string();
+        if !tok.is_empty() {
+            return tok;
+        }
+    }
+    let raw = random_bytes();
+    let tok: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    if std::fs::write(&path, &tok).is_err() {
+        log::error!("приёмник: токен не записан в {}", path.display());
+        return String::new();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    log::info!("приёмник: сгенерирован токен: {}", path.display());
+    tok
+}
+
+/// 32 случайных байта: /dev/urandom (бесконечный файл — читаем ровно
+/// 32 байта, не целиком), при недоступности — смесь времени, PID и
+/// адреса стека (киоск — Linux, fallback почти не встречается).
+fn random_bytes() -> [u8; 32] {
+    use std::io::Read;
+    let mut out = [0u8; 32];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        if f.read_exact(&mut out).is_ok() {
+            return out;
+        }
+    }
+    let mut out = [0u8; 32];
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut seed = (t as u64) ^ (std::process::id() as u64) ^ (&out as *const _ as u64);
+    for b in out.iter_mut() {
+        seed = seed.wrapping_mul(0x1000_0000_01B3) ^ (seed >> 7);
+        *b = (seed >> 24) as u8;
+    }
+    out
+}
+
+/// Постоянное по времени сравнение строк.
+fn token_matches(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
+}
 
 /// Запускает приёмник на 0.0.0.0:PORT. Ошибка бинда не валит киоск.
 pub fn spawn(cfg: Arc<Config>) -> LogoFlag {
@@ -49,16 +123,18 @@ pub fn spawn(cfg: Arc<Config>) -> LogoFlag {
 }
 
 fn serve(addr: SocketAddr, cfg: Arc<Config>, flag: LogoFlag) -> std::io::Result<()> {
+    let token = Arc::new(get_or_create_token(&cfg));
     let listener = TcpListener::bind(addr)?;
     log::info!("приёмник загрузок: http://{addr}");
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let cfg = cfg.clone();
         let flag = flag.clone();
+        let token = token.clone();
         std::thread::Builder::new()
             .name("pushsrv-conn".into())
             .spawn(move || {
-                let _ = handle_conn(stream, &cfg, &flag);
+                let _ = handle_conn(stream, &cfg, &flag, &token);
             })
             .ok();
     }
@@ -69,6 +145,7 @@ struct Request {
     method: String,
     path: String,
     body: Vec<u8>,
+    token: Option<String>,
 }
 
 fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
@@ -97,12 +174,16 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
     let method = parts.next().ok_or(400u16)?.to_string();
     let path = parts.next().ok_or(400u16)?.to_string();
     let mut content_length: usize = 0;
+    let mut token: Option<String> = None;
     for line in lines {
         let Some((k, v)) = line.split_once(':') else {
             continue;
         };
         if k.trim().eq_ignore_ascii_case("content-length") {
             content_length = v.trim().parse().map_err(|_| 400u16)?;
+        }
+        if k.trim().eq_ignore_ascii_case(TOKEN_HEADER) {
+            token = Some(v.trim().to_string());
         }
     }
     if content_length > MAX_LOGO_BODY + MAX_HEAD {
@@ -120,26 +201,46 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, u16> {
         body.extend_from_slice(&chunk[..n]);
     }
     body.truncate(content_length);
-    Ok(Request { method, path, body })
+    Ok(Request {
+        method,
+        path,
+        body,
+        token,
+    })
 }
 
 fn find_head_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-fn handle_conn(mut stream: TcpStream, cfg: &Config, flag: &LogoFlag) -> std::io::Result<()> {
+fn handle_conn(
+    mut stream: TcpStream,
+    cfg: &Config,
+    flag: &LogoFlag,
+    token: &str,
+) -> std::io::Result<()> {
     let req = match read_request(&mut stream) {
         Ok(r) => r,
         Err(code) => return respond(&mut stream, code, &err_body(code)),
     };
-    let (code, body) = route(cfg, flag, &req);
+    let (code, body) = route(cfg, flag, &req, token);
     respond(&mut stream, code, &body)
 }
 
-fn route(cfg: &Config, flag: &LogoFlag, req: &Request) -> (u16, String) {
+fn route(cfg: &Config, flag: &LogoFlag, req: &Request, token: &str) -> (u16, String) {
     // CORS для конструктора, открытого как file:// (origin null).
     if req.method == "OPTIONS" {
         return (204, String::new());
+    }
+    let writing = matches!(req.path.as_str(), "/api/label" | "/api/logo");
+    if writing
+        && (token.is_empty()
+            || !req
+                .token
+                .as_deref()
+                .is_some_and(|t| token_matches(t, token)))
+    {
+        return (401, json_err("нужен токен устройства"));
     }
     match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/api/health") => (
@@ -228,6 +329,7 @@ fn respond(stream: &mut TcpStream, code: u16, body: &str) -> std::io::Result<()>
         200 => "OK",
         204 => "No Content",
         400 => "Bad Request",
+        401 => "Unauthorized",
         404 => "Not Found",
         405 => "Method Not Allowed",
         408 => "Request Timeout",
@@ -238,7 +340,7 @@ fn respond(stream: &mut TcpStream, code: u16, body: &str) -> std::io::Result<()>
     let mut head = format!("HTTP/1.1 {code} {reason}\r\nAccess-Control-Allow-Origin: *\r\n");
     if code != 204 {
         head.push_str("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
-        head.push_str("Access-Control-Allow-Headers: Content-Type\r\n");
+        head.push_str("Access-Control-Allow-Headers: Content-Type, X-OpenScale-Token\r\n");
         head.push_str(&format!(
             "Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
@@ -402,6 +504,8 @@ mod tests {
         Arc::new(cfg)
     }
 
+    const TOKEN_OK: &str = "a3f1c9e2b4d6f8a0c1e3d5b7f9a1c3e5d7b9f1a3c5e7d9b1f3a5c7e9d1b3f5a7";
+
     #[test]
     fn png_accepts_valid_and_rejects_broken() {
         let png = png1x1();
@@ -444,8 +548,9 @@ mod tests {
             method: "POST".into(),
             path: "/api/label".into(),
             body: label_json("market-56x38").into_bytes(),
+            token: Some(TOKEN_OK.into()),
         };
-        let (code, body) = route(&cfg, &flag, &req);
+        let (code, body) = route(&cfg, &flag, &req, TOKEN_OK);
         assert_eq!(code, 200, "ответ: {body}");
         let conn = crate::datastore::open(&cfg.db_path).unwrap();
         assert!(crate::datastore::label_layout_get(&conn, "market-56x38")
@@ -457,8 +562,9 @@ mod tests {
             method: "POST".into(),
             path: "/api/label".into(),
             body: br#"{"cmd":"rm -rf /"}"#.to_vec(),
+            token: Some(TOKEN_OK.into()),
         };
-        let (code, body) = route(&cfg, &flag, &bad);
+        let (code, body) = route(&cfg, &flag, &bad, TOKEN_OK);
         assert_eq!(code, 400, "ответ: {body}");
         assert!(body.contains("ok\":false"));
 
@@ -467,8 +573,68 @@ mod tests {
             method: "POST".into(),
             path: "/api/label".into(),
             body: br#"{"format":1,"name":"x","width_mm":56,"height_mm":38,"fields":[]}"#.to_vec(),
+            token: Some(TOKEN_OK.into()),
         };
-        assert_eq!(route(&cfg, &flag, &bad2).0, 400);
+        assert_eq!(route(&cfg, &flag, &bad2, TOKEN_OK).0, 400);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn route_requires_device_token() {
+        let dir = std::env::temp_dir().join(format!("pushsrv-token-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = test_cfg(&dir);
+        let flag: LogoFlag = Arc::new(AtomicBool::new(false));
+        let mk = |token: Option<&str>, path: &str| Request {
+            method: "POST".into(),
+            path: path.into(),
+            body: if path == "/api/logo" {
+                png1x1()
+            } else {
+                label_json("market-56x38").into_bytes()
+            },
+            token: token.map(Into::into),
+        };
+        for path in ["/api/label", "/api/logo"] {
+            let anon = mk(None, path);
+            assert_eq!(
+                route(&cfg, &flag, &anon, TOKEN_OK).0,
+                401,
+                "{path} без токена отклонён"
+            );
+            let wrong = mk(Some("deadbeef"), path);
+            assert_eq!(
+                route(&cfg, &flag, &wrong, TOKEN_OK).0,
+                401,
+                "{path} с чужим токеном отклонён"
+            );
+        }
+        // GET и OPTIONS токен не требуют (пинг и preflight).
+        let health = Request {
+            method: "GET".into(),
+            path: "/api/health".into(),
+            body: vec![],
+            token: None,
+        };
+        assert_eq!(route(&cfg, &flag, &health, TOKEN_OK).0, 200);
+        // Пустой токен устройства приёмника запрещает всё.
+        let tok = mk(Some(TOKEN_OK), "/api/label");
+        assert_eq!(route(&cfg, &flag, &tok, "").0, 401);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn token_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("pushsrv-gen-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = test_cfg(&dir);
+        let t1 = get_or_create_token(&cfg);
+        assert_eq!(t1.len(), 64, "32 байта в hex");
+        let t2 = get_or_create_token(&cfg);
+        assert_eq!(t1, t2, "токен переиспользуется, не перегенерируется");
+        assert_ne!(get_or_create_token(&test_cfg(&dir.join("d2"))), t1);
+        assert!(token_matches(t1.trim(), &t2));
+        assert!(!token_matches(&t1[..63], &t2));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -483,8 +649,9 @@ mod tests {
             method: "POST".into(),
             path: "/api/logo".into(),
             body: png1x1(),
+            token: Some(TOKEN_OK.into()),
         };
-        let (code, body) = route(&cfg, &flag, &req);
+        let (code, body) = route(&cfg, &flag, &req, TOKEN_OK);
         assert_eq!(code, 200, "ответ: {body}");
         assert!(logo_path(&cfg).exists(), "файл логотипа записан");
         assert!(flag.load(Ordering::SeqCst), "флаг перечитывания взведён");
@@ -494,8 +661,9 @@ mod tests {
             method: "POST".into(),
             path: "/api/logo".into(),
             body: b"MZ\x90\x00fake-exe".to_vec(),
+            token: Some(TOKEN_OK.into()),
         };
-        let (code, _) = route(&cfg, &flag, &bad);
+        let (code, _) = route(&cfg, &flag, &bad, TOKEN_OK);
         assert_eq!(code, 400);
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -510,26 +678,34 @@ mod tests {
             method: "OPTIONS".into(),
             path: "/api/label".into(),
             body: vec![],
+            token: None,
         };
-        assert_eq!(route(&cfg, &flag, &opts).0, 204, "preflight разрешён");
+        assert_eq!(
+            route(&cfg, &flag, &opts, TOKEN_OK).0,
+            204,
+            "preflight разрешён"
+        );
         let unknown = Request {
             method: "POST".into(),
             path: "/api/exec".into(),
             body: vec![],
+            token: Some(TOKEN_OK.into()),
         };
-        assert_eq!(route(&cfg, &flag, &unknown).0, 404);
+        assert_eq!(route(&cfg, &flag, &unknown, TOKEN_OK).0, 404);
         let del = Request {
             method: "DELETE".into(),
             path: "/api/label".into(),
             body: vec![],
+            token: Some(TOKEN_OK.into()),
         };
-        assert_eq!(route(&cfg, &flag, &del).0, 405);
+        assert_eq!(route(&cfg, &flag, &del, TOKEN_OK).0, 405);
         let health = Request {
             method: "GET".into(),
             path: "/api/health".into(),
             body: vec![],
+            token: None,
         };
-        let (code, body) = route(&cfg, &flag, &health);
+        let (code, body) = route(&cfg, &flag, &health, TOKEN_OK);
         assert_eq!(code, 200);
         assert!(body.contains("OpenScale"), "ответ: {body}");
         std::fs::remove_dir_all(&dir).ok();
