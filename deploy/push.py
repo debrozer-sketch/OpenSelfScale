@@ -46,8 +46,20 @@ def sudo(client, cmd: str, timeout: int = 240) -> tuple[int, str, str]:
     stdin, stdout, stderr = client.exec_command(wrapped, timeout=timeout)
     stdin.write(cfg["SCALE_PASSWORD"] + "\n")
     stdin.flush()
+    stdin.channel.shutdown_write()
     code = stdout.channel.recv_exit_status()
     return code, stdout.read().decode(errors="replace"), stderr.read().decode(errors="replace")
+
+
+def service_active(client, retries: int = 5, pause: int = 5) -> bool:
+    """is-active с повторами: рестарт сервиса занимает время, одноразовая
+    проверка через 6 с пропускала медленный старт и вела к ложному откату."""
+    for i in range(retries):
+        code, _, _ = sudo(client, f"sleep {pause} && systemctl is-active {SERVICE}")
+        if code == 0:
+            return True
+        print(f"  сервис не active (попытка {i + 1}/{retries}), ждём...", flush=True)
+    return False
 
 
 def deploy(client: scale_ssh.paramiko.SSHClient, sftp, src: Path) -> int:
@@ -85,13 +97,11 @@ def deploy(client: scale_ssh.paramiko.SSHClient, sftp, src: Path) -> int:
         return 1
     print(f"  заменён {BIN} (предыдущая версия: {BIN}.prev)", flush=True)
 
-    code, _, _ = sudo(client, f"systemctl restart {SERVICE} && sleep 6 && systemctl is-active {SERVICE}")
-    active = code == 0
-    if not active:
+    sudo(client, f"systemctl restart {SERVICE}")
+    if not service_active(client):
         print("  сервис не поднялся — откат к предыдущему бинарнику", flush=True)
         sudo(client, f"mv -f {BIN}.prev {BIN} && systemctl restart {SERVICE}")
-        code2, out2, _ = sudo(client, f"sleep 5 && systemctl is-active {SERVICE}")
-        if code2 == 0:
+        if service_active(client):
             print("  откат выполнен, сервис работает на предыдущей версии", flush=True)
         else:
             print("  !!! откат тоже не поднял сервис — требуется ручное вмешательство", flush=True)

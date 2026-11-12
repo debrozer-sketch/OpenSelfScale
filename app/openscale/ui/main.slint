@@ -846,6 +846,54 @@ export component MainWindow inherits Window {
           }
           clicked => { }
       }
+    if root.db-unavailable : Rectangle {
+        // Блокирующий оверлей: торговля и меню недоступны до восстановления БД.
+        // Объявлен до TouchArea логотипа не случайно: логотип поверх оверлея,
+        // удержание открывает вход персонала — оператор видит честную ошибку
+        // БД при попытке входа, а не мёртвый экран.
+        x: 0; y: 0;
+        width: root.width;
+        height: root.height;
+        background: Theme.bg;
+        TouchArea { }
+        Rectangle {
+            x: (parent.width - 720px) / 2;
+            y: (parent.height - 240px) / 2;
+            width: 720px;
+            height: 240px;
+            border-radius: Theme.r-button;
+            background: Theme.surface;
+            border-width: 1px;
+            border-color: Theme.ink;
+            VerticalLayout {
+                padding: 32px;
+                spacing: 16px;
+                alignment: center;
+                Text {
+                    text: "БАЗА ДАННЫХ НЕДОСТУПНА";
+                    font-size: Theme.font-lg;
+                    font-weight: 700;
+                    color: Theme.ink;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Торговля приостановлена. Обратитесь к администратору.";
+                    font-size: Theme.font-md;
+                    color: Theme.ink-soft;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.db-error-text;
+                    font-size: Theme.font-sm;
+                    color: Theme.ink-faint;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    overflow: elide;
+                }
+            }
+        }
+    }
     if screen == 0 : Rectangle {
         x: 0; y: 160px;
         width: root.width;
@@ -3378,51 +3426,6 @@ if root.screen == 30 : MenuPage { // Сеть и обмен
             horizontal-alignment: center;
             vertical-alignment: center;
             overflow: elide;
-        }
-    }
-    if root.db-unavailable : Rectangle {
-        // Блокирующий оверлей: торговля и меню недоступны до восстановления БД.
-        x: 0; y: 0;
-        width: root.width;
-        height: root.height;
-        background: Theme.bg;
-        TouchArea { }
-        Rectangle {
-            x: (parent.width - 720px) / 2;
-            y: (parent.height - 240px) / 2;
-            width: 720px;
-            height: 240px;
-            border-radius: Theme.r-button;
-            background: Theme.surface;
-            border-width: 1px;
-            border-color: Theme.ink;
-            VerticalLayout {
-                padding: 32px;
-                spacing: 16px;
-                alignment: center;
-                Text {
-                    text: "БАЗА ДАННЫХ НЕДОСТУПНА";
-                    font-size: Theme.font-lg;
-                    font-weight: 700;
-                    color: Theme.ink;
-                    horizontal-alignment: center;
-                }
-                Text {
-                    text: "Торговля приостановлена. Обратитесь к администратору.";
-                    font-size: Theme.font-md;
-                    color: Theme.ink-soft;
-                    horizontal-alignment: center;
-                    wrap: word-wrap;
-                }
-                Text {
-                    text: root.db-error-text;
-                    font-size: Theme.font-sm;
-                    color: Theme.ink-faint;
-                    horizontal-alignment: center;
-                    wrap: word-wrap;
-                    overflow: elide;
-                }
-            }
         }
     }
 }

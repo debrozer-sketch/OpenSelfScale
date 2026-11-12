@@ -214,7 +214,9 @@ pub const SCREENS: &[Screen] = &[
     },
 ];
 
-const FALLBACK_SLINT: u8 = 7;
+// Неизвестный stage рендерится как главное меню (stage 2 → slint 6),
+// что согласовано с FALLBACK_TITLE.
+const FALLBACK_SLINT: u8 = 6;
 const FALLBACK_TITLE: &str = "МЕНЮ НАСТРОЕК";
 
 fn screen_of(stage: u8) -> Option<&'static Screen> {

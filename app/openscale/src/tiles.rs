@@ -6,7 +6,11 @@ thread_local! {
     static IMG_CACHE: RefCell<HashMap<PathBuf, Option<slint::Image>>> =
         RefCell::new(HashMap::new());
 }
-const IMG_CACHE_MAX: usize = 768;
+const IMG_CACHE_MAX: usize = 2560;
+/// Декодированные картинки каталога: место в памяти растёт с числом PLU,
+/// лимит выше реального каталога (штатно до ~2450 позиций). При переполнении
+/// удаляем половину карты (не всё): загрузка страницы не сбрасывает кэш
+/// соседних страниц целиком.
 fn load_img_cached(path: &Path) -> Option<slint::Image> {
     IMG_CACHE.with(|c| {
         let mut map = c.borrow_mut();
@@ -15,7 +19,11 @@ fn load_img_cached(path: &Path) -> Option<slint::Image> {
         }
         let loaded = slint::Image::load_from_path(path).ok();
         if map.len() >= IMG_CACHE_MAX {
-            map.clear();
+            let drop_to = map.len() / 2;
+            let keys: Vec<PathBuf> = map.keys().take(drop_to).cloned().collect();
+            for k in keys {
+                map.remove(&k);
+            }
         }
         map.insert(path.to_path_buf(), loaded.clone());
         loaded

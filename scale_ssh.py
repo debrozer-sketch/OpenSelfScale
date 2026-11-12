@@ -7,7 +7,7 @@
 Логин/пароль читаются из .env рядом со скриптом и никогда не печатаются.
 
 Jump-хост (если весы не видны напрямую): SCALE_JUMP в .env. Авторизация
-на jump — ключом SCALE_JUMP_KEY (по умолчанию ~/.ssh/openscale_bastion),
+на jump — ключом SCALE_JUMP_KEY (по умолчанию ~/.ssh/scalefw_bastion),
 иначе паролем SCALE_JUMP_PASSWORD, иначе SCALE_PASSWORD. Переменные
 окружения SCALE_* перекрывают значения из .env.
 

@@ -370,7 +370,12 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                                             }
                                         }
                                     }
-                                    Ok((Err(e), _)) => log::error!("вход: проверка: {e}"),
+                                    Ok((Err(e), _)) => {
+                                        log::error!("вход: проверка: {e}");
+                                        if let Some(ui) = ui_handle2.upgrade() {
+                                            ui.set_pin_error("База данных недоступна".into());
+                                        }
+                                    }
                                     Err(e) => log::error!("вход: база: {e}"),
                                 }
                             });
