@@ -9,7 +9,7 @@
 
 - Ubuntu 16.04 LTS, kernel 4.4.0-28-generic, hostname `scales`, X11 (startx из rc.local).
 - Диск `/` 25 ГБ, занято 3.7 ГБ; RAM 4 ГБ. enp3s0 = 192.0.2.50/24 (статика).
-- Слушают: sshd (22), vsftpd (21), x11vnc (5900, пароль REMOVED открытым текстом в `.xsessionrc`).
+- Слушают: sshd (22), vsftpd (21), x11vnc (5900, пароль в открытом тексте в `.xsessionrc` — удалён из документа).
 - Версия ПО: v.2.0.2.65.48dd52d — та же, что в `AUDIT.md`.
 
 ## 2. Живой конвейер данных (подтверждено метками времени)
@@ -66,8 +66,8 @@ upstart-артефакт `~/scales.conf` с опечаткой `end srcript` (н
 
 ## 6. Безопасность (фактическое состояние)
 
-- VNC-пароль REMOVED открытым текстом в `.xsessionrc`, порт 5900 наружу в LAN магазина.
-- FTP-креды центра `pos:REMOVED` в `/sync/syncfiles/sync.x`.
+- VNC-пароль в открытом тексте в `.xsessionrc`, порт 5900 наружу в LAN магазина (пароль удалён из документа, ротирован).
+- FTP-креды центра `pos:пароль` в `/sync/syncfiles/sync.x` (пароль удалён из документа).
 - sudo-пароль администратора напечатан в `.bash_history` (оператор вводил его в
   интерактиве; значение совпадает с SSH-паролем весов).
 - vsftpd: `userlist_enable=YES` + `userlist_deny=NO`, но `/etc/vsftpd.userlist`
