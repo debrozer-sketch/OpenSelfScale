@@ -204,6 +204,7 @@ pub fn start(
                 // тик только запускает печать, массу не пересчитывает.
                 if k.phase == 2 && !tray_blocked && k.print_at.is_none()
                     && k.print_weight_g.is_some_and(|g| g > 0)
+                    && k.print_thread_idle()
                 {
                     let weight_g = k.print_weight_g.unwrap_or(0);
                     k.print_op += 1;
@@ -216,7 +217,7 @@ pub fn start(
                     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
                     k.cancel_print = Some(cancel.clone());
                     log::info!("печать: PLU {plu}, {weight_g} г (операция #{op})");
-                    std::thread::spawn(move || {
+                    k.print_thread = Some(std::thread::spawn(move || {
                         let res = match item {
                             Some(item) => {
                                 print::print_for_item_with_cancel(&cfg, &item, weight_g, cancel)
@@ -229,7 +230,7 @@ pub fn start(
                             unknown: e.is_uncertain(),
                         });
                         let _ = tx.send((op, res));
-                    });
+                    }));
                 }
                 const PRINT_TIMEOUT: Duration = Duration::from_secs(30);
                 if k.phase == 2 && k.print_weight_g.is_some()

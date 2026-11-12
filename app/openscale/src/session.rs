@@ -62,6 +62,10 @@ pub struct Kiosk {
     pub imp_files: Vec<std::path::PathBuf>,
     pub imp_pending: String,
     pub cancel_print: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Поток текущей печати: новая печать не стартует, пока он жив —
+    /// иначе после отмены по таймауту возможен второй этикеточный прогон
+    /// поверх ещё не завершённого предыдущего.
+    pub print_thread: Option<std::thread::JoinHandle<()>>,
     pub labels_rows: Vec<(String, i64, i64, usize)>,
     pub labels_files: Vec<std::path::PathBuf>,
     pub labels_pending_del: Option<String>,
@@ -114,6 +118,7 @@ impl Kiosk {
             imp_files: Vec::new(),
             imp_pending: String::new(),
             cancel_print: None,
+            print_thread: None,
             labels_rows: Vec::new(),
             labels_files: Vec::new(),
             labels_pending_del: None,
@@ -131,6 +136,10 @@ impl Kiosk {
         let op = self.print_op + 1;
         *self = Kiosk::new();
         self.print_op = op;
+    }
+    /// Свободен ли слот печати: поток предыдущего задания завершён.
+    pub fn print_thread_idle(&self) -> bool {
+        self.print_thread.as_ref().is_none_or(|t| t.is_finished())
     }
     pub fn admin_fingerprint(&self) -> u64 {
         let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
@@ -207,6 +216,19 @@ mod tests {
         assert!(k.print_weight_g.is_none());
         assert!(k.idle_since.is_none());
         assert_eq!(k.print_op, 1, "поздние результаты печати инвалидируются");
+    }
+    #[test]
+    fn print_thread_idle_gates_on_live_thread() {
+        let mut k = Kiosk::new();
+        assert!(k.print_thread_idle(), "печати ещё не было");
+        k.print_thread = Some(std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(80))
+        }));
+        assert!(!k.print_thread_idle(), "поток жив — новая печать ждёт");
+        if let Some(t) = k.print_thread.take() {
+            t.join().unwrap();
+        }
+        assert!(k.print_thread_idle(), "поток завершён — слот свободен");
     }
     #[test]
     fn weight_state_thresholds() {
