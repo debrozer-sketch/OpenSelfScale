@@ -377,12 +377,28 @@ fn read_xml(name: &std::path::Path) -> Result<String, String> {
     let bytes = std::fs::read(name).map_err(|e| format!("{}: {e}", name.display()))?;
     decode_xml(name, bytes)
 }
+/// Осознанное усечение ассортимента: сторона выгрузки кладёт truncate.flg
+/// рядом с plu.xml в drop-каталоге. FTP-путь флага не имеет — усечение
+/// через центр не разрешается.
+fn allow_truncation(dir: &std::path::Path) -> bool {
+    let flag = dir.join("truncate.flg");
+    if flag.exists() {
+        log::warn!(
+            "выгрузка: {} найден — порог усечения отключён, снятие отсутствующих выполняется как есть",
+            flag.display()
+        );
+        let _ = std::fs::remove_file(&flag);
+        return true;
+    }
+    false
+}
 fn apply_upload(
     cfg: &Config,
     items: &[datastore::PluItem],
     groups: Option<&Vec<(String, Vec<String>)>>,
     plu_data: &str,
     ldata: &str,
+    allow_truncation: bool,
 ) -> Result<(usize, String), String> {
     archive(
         &cfg.center.history_dir,
@@ -395,9 +411,13 @@ fn apply_upload(
     // установленная БД не заменяется пустой); создание — только первичная установка.
     let db = crate::backup::CliDb::open(cfg, false, true).map_err(|e| format!("база: {e}"))?;
     // Атомарное применение: импорт, снятие и раскладка в одной транзакции.
-    let (imported, removed, layout) =
-        datastore::apply_upload(&db.conn, items, groups.map(|g| g.as_slice()))
-            .map_err(|e| format!("приём выгрузки: {e}"))?;
+    let (imported, removed, layout) = datastore::apply_upload(
+        &db.conn,
+        items,
+        groups.map(|g| g.as_slice()),
+        allow_truncation,
+    )
+    .map_err(|e| format!("приём выгрузки: {e}"))?;
     let removed_note = if removed > 0 {
         format!(", снято {removed}")
     } else {
@@ -561,7 +581,14 @@ fn drop_receive(cfg: &Config, dir: &std::path::Path) -> Result<Option<String>, S
     if imgs_new > 0 {
         crate::thumbs::ensure_dir(&local, std::time::Duration::from_secs(25));
     }
-    let (imported, layout_note) = apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata)?;
+    let (imported, layout_note) = apply_upload(
+        cfg,
+        &items,
+        groups.as_ref(),
+        &plu_data,
+        &ldata,
+        allow_truncation(dir),
+    )?;
     let mut deferred = 0usize;
     let mut rm = |p: &std::path::Path, cap: &Option<MetaCap>| {
         if !delete_if_unchanged(p, *cap) {
@@ -690,7 +717,7 @@ fn run_ftp(cfg: &Config, c: &crate::config::CenterProfile) -> Result<String, Str
     }
     let _ = ftp.quit();
     let (imported, layout_note) =
-        apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata_str)?;
+        apply_upload(cfg, &items, groups.as_ref(), &plu_data, &ldata_str, false)?;
     Ok(format!(
         "выгрузка: {} товаров в файле (обновлено {imported}), картинок: новых {imgs_new}, уже были {imgs_skip}{layout_note}",
         items.len()
