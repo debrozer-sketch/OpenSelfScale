@@ -157,18 +157,19 @@ impl CliDb {
         };
         let opened = match probe_startup(cfg) {
             DbStartup::Ready => {
-                // URI mode=rw: открыть только существующий файл, без создания —
+                // mode=rw: открыть только существующий файл, без создания —
                 // БД не появится пустой, даже если файл исчез между проверками.
-                let uri = uri_rw(&cfg.db_path);
-                rusqlite::Connection::open_with_flags(
-                    uri,
+                // probe_startup уже подтвердил схему: повторное открытие через
+                // datastore::open (с CREATE) не нужно.
+                let conn = rusqlite::Connection::open_with_flags(
+                    uri_rw(&cfg.db_path),
                     rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
                         | rusqlite::OpenFlags::SQLITE_OPEN_URI,
                 )
                 .map_err(|e| format!("{}: {e}", cfg.db_path.display()))?;
-                datastore::open(&cfg.db_path)
-                    .map(|conn| CliDb { conn, _lock: lock })
-                    .map_err(|e| format!("база: {e}"))
+                conn.busy_timeout(std::time::Duration::from_secs(5))
+                    .map_err(|e| format!("база: {e}"))?;
+                Ok(CliDb { conn, _lock: lock })
             }
             DbStartup::FirstInstall if allow_create => {
                 if let Some(dir) = cfg.db_path.parent() {
@@ -450,8 +451,10 @@ fn do_backup(cfg: &crate::config::Config, dir: &Path) -> Result<PathBuf, String>
     Ok(final_path)
 }
 
-/// Ротация: хранить не более keep копий; последняя заведомо исправная
-/// копия не удаляется (кандидатов проверяем перед удалением).
+/// Ротация: хранить не более keep копий. Удаляем лишние старые копии
+/// только если самая новая копия проходит integrity_check — одна проверка
+/// на ротацию вместо проверки каждой оставшейся при каждом удалении.
+/// Самая новая испорчена — ничего не удаляем: старые исправные остаются.
 fn rotate(dir: &Path, keep: usize) {
     let mut copies: Vec<PathBuf> = match std::fs::read_dir(dir) {
         Ok(rd) => rd
@@ -467,25 +470,26 @@ fn rotate(dir: &Path, keep: usize) {
         Err(_) => return,
     };
     copies.sort();
-    while copies.len() > keep {
-        let victim = match copies.first() {
-            Some(p) => p.clone(),
-            None => return,
-        };
-        // Удаляем только если после удаления останется хотя бы одна исправная.
-        let rest_valid = copies
-            .iter()
-            .skip(1)
-            .any(|p| integrity_check(p).map(|r| r == "ok").unwrap_or(false));
-        if !rest_valid {
-            log::info!("резерв: последняя копия {} не удаляется", victim.display());
-            return;
-        }
+    if copies.len() <= keep {
+        return;
+    }
+    let newest = match copies.last() {
+        Some(p) => p.clone(),
+        None => return,
+    };
+    let newest_ok = integrity_check(&newest).map(|r| r == "ok").unwrap_or(false);
+    if !newest_ok {
+        log::warn!(
+            "резерв: последняя копия {} не проходит проверку — ротация отложена",
+            newest.display()
+        );
+        return;
+    }
+    for victim in copies.drain(..copies.len() - keep) {
         match std::fs::remove_file(&victim) {
             Ok(()) => log::info!("резерв: удалена старая копия {}", victim.display()),
             Err(e) => log::warn!("резерв: не удалить {}: {e}", victim.display()),
         }
-        copies.remove(0);
     }
 }
 
@@ -983,26 +987,39 @@ fn restore_core(
     }
 }
 
+/// Снимок за текущие сутки (UTC, как в именах ts_name): суточный бэкап
+/// переживает рестарты киоска без состояния в памяти.
+fn today_backup_exists(dir: &Path) -> bool {
+    // "openscale-YYYYMMDD-" из свежесформированного имени.
+    let prefix = ts_name()[..19].to_string();
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten().any(|e| {
+                e.file_name()
+                    .to_str()
+                    .map(|n| n.starts_with(&prefix) && n.ends_with(".db"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
 /// Суточный автоматический снимок в отдельном потоке: не мешает торговле,
 /// ошибки — только в лог. Возвращает JoinHandle для владельца жизненного цикла.
+/// Состояние — не в памяти, а в каталоге снимков: после рестарта киоска
+/// снимок за сегодня не повторяется, так что частые рестарты не мешают.
 pub fn spawn_daily(cfg: std::sync::Arc<crate::config::Config>) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
         .name("backup-daily".into())
         .spawn(move || {
-            let mut last_ok: Option<std::time::Instant> = None;
+            let dir = default_backup_dir(&cfg.db_path);
             loop {
-                std::thread::sleep(std::time::Duration::from_secs(3600));
-                if last_ok
-                    .map(|t| t.elapsed() < std::time::Duration::from_secs(86_400))
-                    .unwrap_or(false)
-                {
+                std::thread::sleep(std::time::Duration::from_secs(60));
+                if today_backup_exists(&dir) {
                     continue;
                 }
                 match create_backup(&cfg, None) {
-                    Ok(p) => {
-                        log::info!("резерв: суточный снимок {}", p.display());
-                        last_ok = Some(std::time::Instant::now());
-                    }
+                    Ok(p) => log::info!("резерв: суточный снимок {}", p.display()),
                     Err(e) => log::warn!("резерв: суточный снимок не создан: {e}"),
                 }
             }
@@ -1744,6 +1761,46 @@ mod tests {
         }
         rotate(&bdir, KEEP_BACKUPS);
         assert!(good.exists(), "последняя исправная копия удалена");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rotation_skips_when_newest_copy_broken() {
+        let (dir, cfg) = setup("newestbad");
+        let bdir = dir.join("backups");
+        std::fs::create_dir_all(&bdir).unwrap();
+        // Ровно keep исправных копий и испорченная с самым новым именем:
+        // ротация не удаляет ничего, пока новая копия не проходит проверку.
+        add_item(&cfg, "101");
+        let mut goods = Vec::new();
+        for _ in 0..KEEP_BACKUPS {
+            let p = create_backup(&cfg, Some(&bdir)).unwrap();
+            goods.push(p);
+        }
+        let broken = bdir.join("openscale-20991231-235959.db");
+        std::fs::write(&broken, b"broken").unwrap();
+        rotate(&bdir, KEEP_BACKUPS);
+        for g in &goods {
+            assert!(g.exists(), "исправная копия {} удалена", g.display());
+        }
+        assert!(broken.exists(), "испорченная новая удалена");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn today_backup_detection() {
+        let (dir, cfg) = setup("today");
+        let bdir = dir.join("backups");
+        std::fs::create_dir_all(&bdir).unwrap();
+        assert!(!today_backup_exists(&bdir), "каталог пуст");
+        // Вчерашний снимок не считается.
+        let y = bdir.join("openscale-20200101-000000.db");
+        std::fs::write(&y, b"x").unwrap();
+        assert!(!today_backup_exists(&bdir), "вчерашний не считается");
+        // Сегодняшний считается.
+        let today = bdir.join(ts_name());
+        std::fs::write(&today, b"x").unwrap();
+        assert!(today_backup_exists(&bdir), "сегодняшний считается");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
