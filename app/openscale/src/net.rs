@@ -1,7 +1,16 @@
 use std::net::Ipv4Addr;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
-const IFACE: &str = "enp3s0";
+/// Имя сетевого интерфейса — из конфига ([net_iface], по умолчанию enp3s0),
+/// устанавливается при старте киоска (net::set_iface).
+static IFACE: OnceLock<String> = OnceLock::new();
+pub fn set_iface(iface: &str) {
+    let _ = IFACE.set(iface.trim().to_string());
+}
+fn iface() -> &'static str {
+    IFACE.get().map(String::as_str).unwrap_or("enp3s0")
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetConfig {
     pub ip: String,
@@ -87,7 +96,7 @@ pub fn spawn_live_monitor() {
     });
 }
 pub fn read_live() -> NetConfig {
-    let addr_out = run("ip", &["-4", "addr", "show", "dev", IFACE]);
+    let addr_out = run("ip", &["-4", "addr", "show", "dev", iface()]);
     let mut ip = String::new();
     let mut pre = 24u8;
     for l in addr_out.lines() {
@@ -124,7 +133,7 @@ pub fn read_live() -> NetConfig {
 }
 pub fn read_mode() -> bool {
     std::fs::read_to_string("/etc/network/interfaces")
-        .map(|s| s.contains(&format!("iface {IFACE} inet dhcp")))
+        .map(|s| s.contains(&format!("iface {} inet dhcp", iface())))
         .unwrap_or(false)
 }
 pub fn validate(
@@ -132,7 +141,7 @@ pub fn validate(
     mask: &str,
     gateway: &str,
     dns: &str,
-) -> Result<(Ipv4Addr, u8, Ipv4Addr, Ipv4Addr), String> {
+) -> Result<(Ipv4Addr, u8, Ipv4Addr, Option<Ipv4Addr>), String> {
     let ip: Ipv4Addr = ip.parse().map_err(|_| format!("неверный IP: {ip}"))?;
     let pre = if let Some(p) = mask.strip_prefix('/') {
         p.parse::<u8>()
@@ -153,7 +162,17 @@ pub fn validate(
     let gateway: Ipv4Addr = gateway
         .parse()
         .map_err(|_| format!("неверный шлюз: {gateway}"))?;
-    let dns: Ipv4Addr = dns.parse().map_err(|_| format!("неверный DNS: {dns}"))?;
+    // DNS необязателен: изолированная сеть без резолвера — легальная
+    // конфигурация, пустое поле не блокирует применение статики.
+    let dns = if dns.trim().is_empty() {
+        None
+    } else {
+        let dns: Ipv4Addr = dns.parse().map_err(|_| format!("неверный DNS: {dns}"))?;
+        if dns.is_unspecified() || dns.is_broadcast() || dns.is_multicast() {
+            return Err(format!("недопустимый DNS: {dns}"));
+        }
+        Some(dns)
+    };
     let m = u32::MAX << (32 - pre as u32);
     let host = |a: Ipv4Addr| u32::from(a) & !m;
     if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() || ip.is_broadcast() {
@@ -168,9 +187,6 @@ pub fn validate(
     if u32::from(gateway) & m != u32::from(ip) & m {
         return Err(format!("шлюз {gateway} вне подсети {ip}/{pre}"));
     }
-    if dns.is_unspecified() || dns.is_broadcast() || dns.is_multicast() {
-        return Err(format!("недопустимый DNS: {dns}"));
-    }
     Ok((ip, pre, gateway, dns))
 }
 pub fn apply(ip: &str, prefix: u8, gateway: &str, dns: &str) -> Result<(), String> {
@@ -182,17 +198,39 @@ pub fn apply_dhcp() -> Result<(), String> {
 fn apply_helper(args: &[&str]) -> Result<(), String> {
     // stdin — null: sudo не должен наследовать tty киоска. -n запрещает
     // парольный prompt: при проблеме sudoers — ошибка, а не остановка.
-    let out = Command::new("sudo")
+    // Таймаут 30 с: скрипт сам ограничен пингом шлюза (5 с) и dhcpcd (30 с),
+    // зависший sudo не должен держать слот применения вечно.
+    let mut child = Command::new("sudo")
         .arg("-n")
         .arg("/usr/local/sbin/openscale-net-apply")
         .args(args)
         .stdin(std::process::Stdio::null())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("sudo: {e}"))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if status.success() {
+                    return Ok(());
+                }
+                let mut err = String::new();
+                if let Some(mut e) = child.stderr.take() {
+                    use std::io::Read;
+                    let _ = e.read_to_string(&mut err);
+                }
+                return Err(String::from_utf8_lossy(err.as_bytes()).trim().to_string());
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("скрипт сети не завершился за 30 с, прерван".into());
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => return Err(format!("sudo: {e}")),
+        }
     }
 }
 pub fn net_rows_set(ui: &crate::MainWindow, kiosk: &crate::session::Kiosk) {
@@ -249,6 +287,20 @@ mod tests {
         .is_err());
         assert!(validate("не ip", "255.255.255.0", "203.0.113.1", "198.51.100.53").is_err());
         assert!(validate("203.0.113.10", "255.255.255.0", "шлюз", "198.51.100.53").is_err());
+    }
+    #[test]
+    fn validate_optional_dns() {
+        let (_, _, _, dns) = validate("203.0.113.10", "255.255.255.0", "203.0.113.1", "").unwrap();
+        assert_eq!(dns, None, "пустой DNS допустим");
+        let (_, _, _, dns) =
+            validate("203.0.113.10", "/24", "203.0.113.1", "198.51.100.53").unwrap();
+        assert_eq!(dns.map(|d| d.to_string()).as_deref(), Some("198.51.100.53"));
+        assert!(validate("203.0.113.10", "255.255.255.0", "203.0.113.1", "999.1.1.1").is_err());
+    }
+    #[test]
+    fn set_iface_changes_lookup() {
+        set_iface("enp2s0");
+        assert_eq!(iface(), "enp2s0");
     }
     #[test]
     fn nonsense_settings_are_rejected() {

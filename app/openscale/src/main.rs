@@ -516,6 +516,7 @@ fn run_kiosk(cfg: openscale::config::Config) {
     thumbs::spawn_background(cfg.ui.img_dir.join("plu"));
     let sync_rx = sync::spawn_auto_sync(&cfg);
     print::spawn_daemon(&cfg);
+    net::set_iface(&cfg.net_iface);
     net::spawn_live_monitor();
     let cfg_plain = Arc::new((*cfg).clone());
     let logo_updated = pushsrv::spawn(cfg_plain.clone());

@@ -526,7 +526,15 @@ mod tests {
         drop(conn);
         let path = export(&cfg).expect("export");
         let body = std::fs::read_to_string(&path).unwrap();
-        for leak in ["setup_", "pin_salt", "pin_hash", "label_layout_name"] {
+        // Пароль зеркала картинок — секрет устройства: в cfg-экспорт не
+        // попадает (экспорт лежит на FTP-каталоге и может читаться другими).
+        for leak in [
+            "setup_",
+            "pin_salt",
+            "pin_hash",
+            "label_layout_name",
+            "imgsync_password",
+        ] {
             assert!(
                 !body.contains(leak),
                 "в файле экспорта найдено: {leak}\n{body}"

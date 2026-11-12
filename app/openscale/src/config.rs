@@ -170,6 +170,9 @@ pub struct Config {
     pub incoming_dir: PathBuf,
     pub db_path: PathBuf,
     pub log_file: PathBuf,
+    /// Имя главного сетевого интерфейса (сетевые экраны киоска и скрипт
+    /// openscale-net-apply). По умолчанию enp3s0.
+    pub net_iface: String,
     #[serde(skip)]
     pub warnings: Vec<String>,
 }
@@ -185,6 +188,7 @@ impl Default for Config {
             incoming_dir: PathBuf::from("/var/ftp/scale"),
             db_path: PathBuf::from("/home/scales/plu.db"),
             log_file: PathBuf::from("/var/log/openscale/kiosk.log"),
+            net_iface: "enp3s0".into(),
             warnings: Vec::new(),
         }
     }
@@ -199,6 +203,7 @@ const KNOWN_TOP: &[&str] = &[
     "incoming_dir",
     "db_path",
     "log_file",
+    "net_iface",
 ];
 const KNOWN_SECTIONS: &[(&str, &[&str])] = &[
     ("scales", &["kind", "port", "baud"]),

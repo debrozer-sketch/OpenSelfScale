@@ -2,8 +2,8 @@
 Принцип: к оригинальному initrd.gz ISO конкатенируется второй gzip-cpio
 архив, содержащий /preseed.cfg. Ядро Linux разворачивает конкатенированные
 cpio-архивы последовательно, d-i при auto=true priority=critical читает
-/preseed.cfg автоматически. Пароль root подставляется из .env, в репозиторий
-не попадает (deploy/preseed.cfg хранит плейсхолдер __ROOT_PW__).
+/preseed.cfg автоматически. Паролей в initrd нет: root-вход только по
+SSH-ключу (SCALE_SSH_PUBKEY из .env), адрес зеркала — MIRROR_IP.
 Запуск из каталога проекта:  python deploy/make_initrd.py
 Результат:                   deploy/netboot/initrd-preseed.gz
 """
@@ -39,10 +39,6 @@ def cpio_trailer() -> bytes:
     return cpio_newc_entry("TRAILER!!!", b"")
 def main() -> int:
     env = load_env()
-    pw = env.get("SCALE_PASSWORD")
-    if not pw:
-        print("нет SCALE_PASSWORD в .env — не могу подставить пароль root", file=sys.stderr)
-        return 1
     mirror = env.get("MIRROR_IP")
     if not mirror:
         print("нет MIRROR_IP в .env — не могу подставить адрес зеркала", file=sys.stderr)
@@ -51,22 +47,20 @@ def main() -> int:
     if not pubkey:
         print("нет SCALE_SSH_PUBKEY в .env — не могу поставить ключ root", file=sys.stderr)
         return 1
-    mode = env.get("SCALE_SSH_MODE", "key").strip().lower()
-    if mode not in ("key", "password"):
-        print("SCALE_SSH_MODE должен быть key или password", file=sys.stderr)
-        return 1
-    permit = "prohibit-password" if mode == "key" else "yes"
+    # Пароль root в initrd не зашивается: вход только по ключу
+    # (PermitRootLogin prohibit-password в preseed).
     seed = (
         SEED_SRC.read_text(encoding="utf-8")
-        .replace("__ROOT_PW__", pw)
         .replace("__MIRROR_IP__", mirror)
         .replace("__ROOT_PUBKEY__", pubkey)
-        .replace("__SSH_PERMIT__", permit)
     )
-    for placeholder in ("__ROOT_PW__", "__MIRROR_IP__", "__ROOT_PUBKEY__", "__SSH_PERMIT__"):
+    for placeholder in ("__MIRROR_IP__", "__ROOT_PUBKEY__", "__ROOT_PW__", "__SSH_PERMIT__"):
         if placeholder in seed:
             print(f"плейсхолдер не заменён: {placeholder}", file=sys.stderr)
             return 1
+    if "ROOT_PW" in seed or "PermitRootLogin yes" in seed:
+        print("preseed содержит пароль root или password-вход — так нельзя", file=sys.stderr)
+        return 1
     base = INITRD_SRC.read_bytes()
     seed_cpio = cpio_newc_entry("preseed.cfg", seed.encode("utf-8")) + cpio_trailer()
     out = base + gzip.compress(seed_cpio, mtime=0)

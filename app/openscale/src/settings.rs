@@ -1822,20 +1822,19 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
                     } else {
                         match net::validate(&buf[0], &buf[1], &buf[2], &buf[3]) {
                             Ok((ip, pre, gw, dns)) => {
-                                match net::apply(
-                                    &ip.to_string(),
-                                    pre,
-                                    &gw.to_string(),
-                                    &dns.to_string(),
-                                ) {
+                                let dns_str = dns.map_or(String::new(), |d| d.to_string());
+                                match net::apply(&ip.to_string(), pre, &gw.to_string(), &dns_str) {
                                     Ok(()) => {
+                                        let dns_log = dns
+                                            .map(|d| d.to_string())
+                                            .unwrap_or_else(|| "—".into());
                                         log_action(
                                             &cfg_task.db_path,
                                             "сеть",
-                                            format!("статика {ip}/{pre} шлюз {gw} dns {dns}"),
+                                            format!("статика {ip}/{pre} шлюз {gw} dns {dns_log}"),
                                         );
                                         log::info!(
-                                            "сеть: применено {ip}/{pre} шлюз {gw} dns {dns}"
+                                            "сеть: применено {ip}/{pre} шлюз {gw} dns {dns_log}"
                                         );
                                         (true, net_popup_text(&net::read_live()))
                                     }
