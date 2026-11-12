@@ -594,6 +594,7 @@ fn drop_receive(cfg: &Config, dir: &std::path::Path) -> Result<Option<String>, S
         truncation_allowed,
     )?;
     let mut deferred = 0usize;
+    let mut truncation_left = false;
     let mut rm = |p: &std::path::Path, cap: &Option<MetaCap>| {
         if !delete_if_unchanged(p, *cap) {
             deferred += 1;
@@ -615,13 +616,21 @@ fn drop_receive(cfg: &Config, dir: &std::path::Path) -> Result<Option<String>, S
         // Флаг удаляется только после успешного применения И после
         // успешного удаления файлов выгрузки: иначе повторный приём
         // (изменившийся файл / готовый флаг) пойдёт без override и
-        // откажет навсегда. Флаг без метадаты удаляется безусловно.
+        // откажет навсегда.
         if deferred == 0 {
-            if std::fs::remove_file(dir.join("truncate.flg")).is_ok() {
-                log::warn!("выгрузка (drop): усечение ассортимента разрешено truncate.flg");
+            match std::fs::remove_file(dir.join("truncate.flg")) {
+                Ok(()) => {
+                    log::warn!("выгрузка (drop): усечение ассортимента разрешено truncate.flg");
+                }
+                Err(e) => {
+                    truncation_left = true;
+                    log::warn!(
+                        "выгрузка (drop): truncate.flg не удалён ({e}) — приём повторится с флагом"
+                    );
+                }
             }
         } else {
-            deferred += 1;
+            truncation_left = true;
             log::warn!(
                 "выгрузка (drop): truncate.flg оставлен — приём повторится с тем же флагом усечения"
             );
@@ -631,6 +640,12 @@ fn drop_receive(cfg: &Config, dir: &std::path::Path) -> Result<Option<String>, S
         return Err(format!(
             "приём выполнен, но {deferred} исходных файлов изменились — не удалены, повторный приём отложен до стабильных файлов"
         ));
+    }
+    if truncation_left {
+        return Err(
+            "приём выполнен, но truncate.flg не удалён — следующий приём повторится с тем же флагом усечения"
+                .into(),
+        );
     }
     Ok(Some(format!(
         "выгрузка (drop): {} товаров (обновлено {imported}), картинок: новых {imgs_new}, уже были {imgs_skip}, bmp {imgs_bmp}{layout_note}",

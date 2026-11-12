@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 pub const DONE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
@@ -137,13 +138,90 @@ impl Kiosk {
         }
     }
     pub fn reset_state(&mut self) {
-        let op = self.print_op + 1;
+        // Незакрытая отмена печати переживает любой сброс состояния
+        // (админ-idle, возврат на витрину): cancel_print, print_at и поток
+        // демона сохраняются вместе с print_op, иначе admin-idle стёр бы
+        // отмену и запустил вторую этикетку поверх недавнего задания.
+        // print_op при незакрытой отмене НЕ инкрементируется: отчёт демона
+        // об отменённой операции обязан остаться «текущим».
+        let cancelling = self.print_cancelled;
+        let op = if cancelling {
+            self.print_op
+        } else {
+            self.print_op + 1
+        };
+        let (cancel, at, thread, err_at) = (
+            self.cancel_print.take(),
+            self.print_at,
+            self.print_thread.take(),
+            self.error_at,
+        );
         *self = Kiosk::new();
         self.print_op = op;
+        if cancelling {
+            self.print_cancelled = true;
+            self.cancel_print = cancel;
+            self.print_at = at;
+            self.print_thread = thread;
+            self.phase = 5;
+            self.error_at = err_at;
+        }
     }
     /// Свободен ли слот печати: поток предыдущего задания завершён.
     pub fn print_thread_idle(&self) -> bool {
         self.print_thread.as_ref().is_none_or(|t| t.is_finished())
+    }
+    /// Подтверждение товара блокировано: печать идёт/завершается, БД
+    /// недоступна или в силе отмена по таймауту (байты могли уже уйти).
+    pub fn confirm_blocked(&self) -> bool {
+        self.phase >= 2 || self.db_unavailable || self.print_cancelled
+    }
+    /// Отправляет cancel демону: повтор запрещён до отчёта или Abandon.
+    pub fn send_print_cancel(&mut self) {
+        if let Some(c) = self.cancel_print.take() {
+            c.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.print_cancelled = true;
+        self.phase = 5;
+        self.error_at = Some(Instant::now());
+    }
+    /// Демон молчит PRINT_TIMEOUT + CANCEL_GRACE: отрекаемся от операции.
+    /// Принятый риск: физическая этикетка возможна, её поздний отчёт станет
+    /// «поздним» и будет проигран, запись журнала останется с ok=NULL.
+    pub fn abandon_print(&mut self) {
+        self.print_at = None;
+        self.print_op += 1;
+        self.cancel_print = None;
+        self.print_cancelled = false;
+        self.phase = 5;
+        self.error_at = Some(Instant::now());
+    }
+    /// Приём отчёта демона. false — операция не текущая (поздний отчёт,
+    /// например после Abandon): состояние не трогается. true — отчёт принят
+    /// и фаза отражает фактический исход (Ok → 3, достоверная ошибка → 4,
+    /// неизвестный результат → 5).
+    pub fn accept_print_result(
+        &mut self,
+        op: u64,
+        res: &Result<u32, crate::print::PrintFail>,
+    ) -> bool {
+        if op != self.print_op {
+            return false;
+        }
+        self.print_at = None;
+        self.print_cancelled = false;
+        self.cancel_print = None;
+        match res {
+            Ok(_) => {
+                self.phase = 3;
+                self.done_at = Some(Instant::now());
+            }
+            Err(f) => {
+                self.phase = if f.unknown { 5 } else { 4 };
+                self.error_at = Some(Instant::now());
+            }
+        }
+        true
     }
     pub fn admin_fingerprint(&self) -> u64 {
         let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
@@ -248,5 +326,117 @@ mod tests {
         s.stable = false;
         assert_eq!(weight_state(&s, 0.010), 1);
         assert_eq!(weight_state(&s, 2.0), 0);
+    }
+
+    fn cancelled_kiosk() -> Kiosk {
+        let mut k = Kiosk::new();
+        k.print_op = 7;
+        k.print_at = Some(Instant::now());
+        k.cancel_print = Some(Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        k.send_print_cancel();
+        k
+    }
+
+    /// Инвариант 2: повтор запрещён, пока отмена не закрыта отчётом/Abandon.
+    #[test]
+    fn cancel_blocks_confirmation_until_closed() {
+        let mut k = cancelled_kiosk();
+        assert!(
+            k.confirm_blocked(),
+            "отмена в силе — подтверждение блокировано"
+        );
+        // Отчёт демона: Ok → операция закрыта, подтверждение разрешено.
+        let res = Ok(1350);
+        assert!(k.accept_print_result(7, &res));
+        assert!(!k.print_cancelled, "отчёт закрыл отмену — повтор разрешён");
+        assert_eq!(
+            k.phase, 3,
+            "этикетка вышла — оператор видит нормальный исход"
+        );
+        // Abandon — единственный выход без отчёта.
+        let mut k = cancelled_kiosk();
+        assert!(k.confirm_blocked());
+        k.abandon_print();
+        assert!(
+            !k.print_cancelled,
+            "после Abandon отмена не блокирует подтверждение"
+        );
+        assert_eq!(
+            k.print_op, 8,
+            "операция отреклась — поздний отчёт инвалидируется"
+        );
+    }
+
+    /// Инвариант 1: отчёт демона по отменённой операции не «поздний».
+    #[test]
+    fn daemon_report_of_cancelled_operation_is_current() {
+        let mut k = cancelled_kiosk();
+        let res = Err(crate::print::PrintFail {
+            text: "печать отменена во время выполнения".into(),
+            unknown: true,
+        });
+        assert!(
+            k.accept_print_result(7, &res),
+            "op не инкрементировался при отмене"
+        );
+        assert_eq!(k.phase, 5, "неизвестный результат остаётся неизвестным");
+        assert!(!k.print_cancelled, "отчёт закрыл отмену");
+        // Поздний отчёт (после Abandon или параллельной операции) игнорируется.
+        let mut k = cancelled_kiosk();
+        k.abandon_print();
+        assert!(
+            !k.accept_print_result(7, &res),
+            "op после Abandon — поздний"
+        );
+    }
+
+    /// Инвариант 3: ни один путь сброса не стирает незакрытую отмену
+    /// (админ-idle, возврат экранов) и не инкрементирует print_op.
+    #[test]
+    fn reset_state_preserves_uncancelled_operation() {
+        let mut k = cancelled_kiosk();
+        k.print_thread = Some(std::thread::spawn(|| {}));
+        k.reset_state();
+        assert!(k.print_cancelled, "отмена пережила reset_state");
+        assert!(
+            k.cancel_print.is_none(),
+            "флаг демона уже взведён при SendCancel (Arc у демона)"
+        );
+        assert!(k.print_at.is_some(), "таймер Abandon продолжает работать");
+        assert!(k.print_thread.is_some(), "поток демона сохранён");
+        assert_eq!(k.print_op, 7, "отчёт демона остаётся текущим");
+        assert_eq!(k.phase, 5);
+        assert!(k.confirm_blocked());
+        // Отчёт после сброса принимается как текущий.
+        let res = Err(crate::print::PrintFail {
+            text: "запись в порт не удалась".into(),
+            unknown: true,
+        });
+        assert!(k.accept_print_result(7, &res));
+        assert_eq!(k.phase, 5);
+        // Обычный сброс без отмены инкрементирует op, как раньше.
+        let mut k = Kiosk::new();
+        k.print_op = 7;
+        k.reset_state();
+        assert_eq!(
+            k.print_op, 8,
+            "поздние результаты старой печати инвалидируются"
+        );
+        assert!(!k.print_cancelled);
+    }
+
+    /// Инвариант 4: Abandon работает и из сброшенного (админ-idle)
+    /// состояния — таймер отмены не привязан к фазе 2.
+    #[test]
+    fn abandon_reachable_after_reset_state() {
+        let mut k = cancelled_kiosk();
+        k.reset_state();
+        k.abandon_print();
+        assert!(
+            !k.print_cancelled,
+            "отмена снята — подтверждение больше не блокировано ею"
+        );
+        assert!(k.print_at.is_none());
+        assert_eq!(k.phase, 5, "фаза 5 уходит по ERROR_TIMEOUT");
     }
 }

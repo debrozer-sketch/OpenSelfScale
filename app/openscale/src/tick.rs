@@ -170,31 +170,19 @@ pub fn start(
                     }
                 }
                 while let Ok((op, res)) = print_rx.try_recv() {
-                    if op != k.print_op {
+                    if !k.accept_print_result(op, &res) {
                         log::warn!("печать: поздний результат операции #{op} пропущен");
                         continue;
                     }
-                    k.print_at = None;
-                    k.print_cancelled = false;
-                    k.cancel_print = None;
-                    match res {
+                    match &res {
                         Ok(g) => {
                             log::info!("этикетка напечатана: {g} г");
-                            k.phase = 3;
-                            k.done_at = Some(Instant::now());
                             if cfg.kiosk.return_to_root_after_print {
                                 k.reset_state();
                                 go_root();
                             }
                         }
-                        Err(f) => {
-                            log::error!("печать: {}", f.text);
-                            // Неизвестный результат — отдельное состояние
-                            // (фаза 5): этикетка могла выйти, оператора
-                            // предупреждаем о возможном дубликате.
-                            k.phase = if f.unknown { 5 } else { 4 };
-                            k.error_at = Some(Instant::now());
-                        }
+                        Err(f) => log::error!("печать: {}", f.text),
                     }
                 }
                 // B16: пока принтер ждёт снятия этикетки — новую этикетку не
@@ -236,41 +224,23 @@ pub fn start(
                 }
                 const PRINT_TIMEOUT: Duration = Duration::from_secs(30);
                 const CANCEL_GRACE: Duration = Duration::from_secs(60);
-                if k.phase == 2 && k.print_weight_g.is_some() && k.print_at.is_some() {
+                // Живая операция печати: фаза 2 (идёт) или незакрытая отмена,
+                // пережившая reset_state (фаза 5). Таймеры отмены работают
+                // в обоих состояниях, пока print_at жив.
+                if k.print_at.is_some() && (k.phase == 2 || k.print_cancelled) {
                     let elapsed = k.print_at.map(|t| t.elapsed()).unwrap_or_default();
                     match print_cancel_decision(k.print_cancelled, elapsed, PRINT_TIMEOUT, CANCEL_GRACE) {
                         PrintCancelDecision::None => {}
                         PrintCancelDecision::SendCancel => {
                             log::warn!("печать не завершилась за {PRINT_TIMEOUT:?} — отмена, результат неизвестен");
-                            if let Some(c) = k.cancel_print.take() {
-                                c.store(true, std::sync::atomic::Ordering::Relaxed);
-                            }
-                            // print_op и print_at не трогаем: повторное
-                            // подтверждение блокировано (print_cancelled), а
-                            // отчёт демона об этой операции не считается поздним
-                            // и покажет оператору фактический исход.
-                            k.print_cancelled = true;
-                            // Отменённое задание уже могло печататься: это
-                            // неизвестный результат, а не достоверная ошибка.
-                            k.phase = 5;
-                            k.error_at = Some(Instant::now());
+                            // print_op и print_at не трогаем: отчёт демона
+                            // об этой операции не считается поздним и
+                            // покажет оператору фактический исход.
+                            k.send_print_cancel();
                         }
                         PrintCancelDecision::Abandon => {
-                            // Демон не отрапортовал об отменённой операции
-                            // (завис/погиб) — отрекаемся от неё, иначе фаза
-                            // зависнет навсегда. Принятое решение: после
-                            // Abandon физическая этикетка возможна (задание
-                            // могло дойти до принтера), её поздний отчёт
-                            // станет «поздним» и будет проигнан, запись
-                            // журнала останется с ok=NULL. Возврат торговли
-                            // важнее идеального учёта зависшего принтера.
                             log::error!("печать: демон не отчитался об отменённой операции за {CANCEL_GRACE:?}");
-                            k.print_at = None;
-                            k.print_op += 1;
-                            k.cancel_print = None;
-                            k.print_cancelled = false;
-                            k.phase = 5;
-                            k.error_at = Some(Instant::now());
+                            k.abandon_print();
                         }
                     }
                 }
