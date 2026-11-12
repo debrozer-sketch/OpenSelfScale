@@ -645,6 +645,155 @@ fn ui_scenarios() {
             let k = app.kiosk.borrow();
             assert_eq!(k.phase, 2, "S12: покупка подтверждена после восстановления");
         }
+        // Дождаться естественной ошибки порта (S12-печать), вернуть фазу.
+        wait_until("S12: печать вернула ошибку порта", || {
+            app.kiosk.borrow().phase != 2
+        })
+        .await;
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.error_at = Some(Instant::now() - std::time::Duration::from_secs(9));
+        }
+        advance(TICK.as_millis() as u64).await;
+
+        // S21. Сквозной сценарий отмены печати: таймер тика → SendCancel →
+        // переживание reset_state (админ-idle) → отчёт демона. Мок-демон
+        // занимает PRINTER_TX: Print-запросы пересылаются тесту и молчат,
+        // прочие — подтверждаются немедленно. Композиция «таймеры тика +
+        // методы Kiosk + reset_state» проверяется целиком, backdating
+        // print_at заменяет реальные 30-секундные ожидания.
+        let (mock_tx, mock_rx) = std::sync::mpsc::channel::<crate::print::PrinterRequest>();
+        let (job_tx, job_rx) = std::sync::mpsc::channel::<crate::print::PrinterRequest>();
+        assert!(
+            crate::print::test_set_printer_tx(mock_tx),
+            "S21: мок-демон установлен"
+        );
+        let _mock_thread = std::thread::spawn(move || {
+            for req in mock_rx {
+                match &req {
+                    crate::print::PrinterRequest::Print { .. } => {
+                        let _ = job_tx.send(req);
+                    }
+                    crate::print::PrinterRequest::Feed { ack } => {
+                        let _ = ack.send(Ok(()));
+                    }
+                    crate::print::PrinterRequest::Test { ack, .. } => {
+                        let _ = ack.send(Ok(()));
+                    }
+                    crate::print::PrinterRequest::Diagnostics { ack } => {
+                        let _ = ack.send(crate::print::PrinterDiagnostics::default());
+                    }
+                    crate::print::PrinterRequest::Reset { ack } => {
+                        let _ = ack.send(Ok(()));
+                    }
+                    crate::print::PrinterRequest::Calibrate { ack } => {
+                        let _ = ack.send(Ok(0));
+                    }
+                }
+            }
+        });
+        reset_to_root(&app).await;
+        app.set_weight(1.35, true, true);
+        ui.invoke_dept_tapped("ФРУКТЫ".into());
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_plu_tapped("101".into());
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_plu_confirm();
+        advance(TICK.as_millis() as u64).await;
+        let req = job_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("S21: задание печати в мок-демоне");
+        let crate::print::PrinterRequest::Print {
+            ack: print_ack,
+            cancel: cancel_flag,
+            ..
+        } = req
+        else {
+            panic!("S21: ждали Print");
+        };
+        let op0 = app.kiosk.borrow().print_op;
+        {
+            let mut k = app.kiosk.borrow_mut();
+            // Backdating: печать «идёт» 31 с — тик отправляет SendCancel.
+            k.print_at = Some(Instant::now() - Duration::from_secs(31));
+        }
+        advance(TICK.as_millis() as u64).await;
+        {
+            let k = app.kiosk.borrow();
+            assert!(k.print_cancelled, "S21: SendCancel по таймеру тика");
+            assert_eq!(k.phase, 5, "S21: честный «неизвестный результат»");
+            assert_eq!(k.print_op, op0, "S21: операция не отрекается");
+        }
+        assert!(
+            cancel_flag.load(std::sync::atomic::Ordering::Relaxed),
+            "S21: флаг отмены взведён у мок-демона"
+        );
+        // Админ-idle: сброс состояния не стирает незакрытую отмену.
+        reset_to_root(&app).await;
+        {
+            let k = app.kiosk.borrow();
+            assert!(k.print_cancelled, "S21: отмена пережила reset_state");
+            assert_eq!(k.print_op, op0, "S21: отчёт демона остаётся текущим");
+            assert!(k.print_at.is_some(), "S21: таймер Abandon продолжает работать");
+        }
+        // Отчёт демона Ok (этикетка вышла) — операция закрывается.
+        print_ack.send(Ok(())).expect("S21: ack отправлен");
+        wait_until("S21: отчёт принят", || {
+            let k = app.kiosk.borrow();
+            !k.print_cancelled && k.phase == 3
+        })
+        .await;
+        // Abandon-вариант: тот же путь без отчёта — отречение через 91 с.
+        // Из фазы 3 выходим по DONE_TIMEOUT (backdating: реальных секунд
+        // не ждём), затем новое подтверждение.
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.done_at = Some(Instant::now() - crate::session::DONE_TIMEOUT);
+        }
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(app.kiosk.borrow().phase, 0, "S21: фаза 3 ушла по DONE_TIMEOUT");
+        app.set_weight(1.35, true, true);
+        ui.invoke_plu_tapped("101".into());
+        advance(TICK.as_millis() as u64).await;
+        ui.invoke_plu_confirm();
+        advance(TICK.as_millis() as u64).await;
+        let req2 = job_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("S21: второе задание в мок-демоне");
+        let crate::print::PrinterRequest::Print { ack: ack2, .. } = req2 else {
+            panic!("S21: ждали Print (2)");
+        };
+        {
+            let mut k = app.kiosk.borrow_mut();
+            // 31 с: SendCancel; затем ещё 60 с молчания демона: Abandon.
+            k.print_at = Some(Instant::now() - Duration::from_secs(31));
+        }
+        advance(TICK.as_millis() as u64).await;
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.print_at = Some(Instant::now() - Duration::from_secs(91));
+        }
+        advance(TICK.as_millis() as u64).await;
+        {
+            let k = app.kiosk.borrow();
+            assert!(!k.print_cancelled, "S21: Abandon снял блокировку");
+            assert!(k.print_at.is_none(), "S21: таймер сброшен");
+            assert_eq!(k.phase, 5, "S21: после Abandon — «неизвестный результат»");
+        }
+        // Поздний отчёт первого задания (уже отреклись) игнорируется.
+        ack2.send(Ok(())).expect("S21: поздний ack");
+        advance(TICK.as_millis() as u64).await;
+        {
+            let k = app.kiosk.borrow();
+            assert_eq!(k.phase, 5, "S21: поздний отчёт после Abandon не меняет фазу");
+        }
+        {
+            let mut k = app.kiosk.borrow_mut();
+            k.error_at = Some(Instant::now() - std::time::Duration::from_secs(9));
+        }
+        advance(TICK.as_millis() as u64).await;
+        assert_eq!(app.kiosk.borrow().phase, 0, "S21: возврат к торговле");
+
 
         // S18. Обслуживание: статусы из реальных данных, BUSY, копия,
         // подтверждение тестовой печати.

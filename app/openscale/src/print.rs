@@ -631,6 +631,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::sync::Arc;
 static PRINTER_TX: std::sync::OnceLock<mpsc::Sender<PrinterRequest>> = std::sync::OnceLock::new();
+/// Тестовый хук: подменяет канал демона мок-приёмником (ui_tests).
+/// Работает один раз на процесс: последующие вызовы игнорируются.
+#[cfg(test)]
+pub fn test_set_printer_tx(tx: mpsc::Sender<PrinterRequest>) -> bool {
+    PRINTER_TX.set(tx).is_ok()
+}
 static HEALTH: std::sync::OnceLock<std::sync::Mutex<PrinterHealth>> = std::sync::OnceLock::new();
 pub fn daemon_running(cfg: &crate::config::Config) -> bool {
     cfg.printer.enabled && PRINTER_TX.get().is_some()
