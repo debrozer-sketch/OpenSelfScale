@@ -44,13 +44,26 @@ pub fn save(conn: &Connection, buf: &[String; 4]) -> Result<bool, String> {
     Ok(!buf[0].trim().is_empty())
 }
 
+#[cfg(test)]
 fn conf_path_for_tests(dir: &std::path::Path) -> PathBuf {
     dir.join("imgsync.conf")
 }
 
+/// Алфавит значений conf: тот же, что у парсера скрипта scale-imgsync.
+/// Всё, что сюда не входит, не попадает в conf — скрипт гарантированно
+/// принимает конфиг, записанный киоском.
+fn conf_safe(v: &str) -> bool {
+    v.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"._/:@%+,~ -".contains(&b))
+}
+
 /// Записывает conf-файл для скрипта (key=value, 600, атомарно).
 /// Пустой адрес убирает файл — cron-скрипт молча завершится.
-pub fn write_conf_at(path: &std::path::Path, buf: &[String; 4]) -> Result<(), String> {
+pub fn write_conf_at(
+    path: &std::path::Path,
+    buf: &[String; 4],
+    local_dir: &std::path::Path,
+) -> Result<(), String> {
     let host = buf[0].trim();
     if host.is_empty() {
         match std::fs::remove_file(path) {
@@ -63,7 +76,24 @@ pub fn write_conf_at(path: &std::path::Path, buf: &[String; 4]) -> Result<(), St
     let user = buf[1].trim();
     let password = buf[2].trim();
     let remote = buf[3].trim().trim_end_matches('/');
-    let body = format!("host={host}\nuser={user}\npassword={password}\nremote_path={remote}/\n");
+    let fields = [
+        ("адрес", host),
+        ("пользователь", user),
+        ("пароль", password),
+        ("путь", remote),
+        ("каталог", &local_dir.display().to_string()),
+    ];
+    for (name, v) in fields {
+        if !conf_safe(v) {
+            return Err(format!(
+                "{name}: символ вне допустимого набора (буквы, цифры, пробел, - _ . / : @ % + , ~)"
+            ));
+        }
+    }
+    let body = format!(
+        "host={host}\nuser={user}\npassword={password}\nremote_path={remote}/\nlocal_dir={}\n",
+        local_dir.display()
+    );
     let tmp = path.with_extension("conf.tmp");
     std::fs::write(&tmp, &body).map_err(|e| format!("запись: {e}"))?;
     #[cfg(unix)]
@@ -77,8 +107,8 @@ pub fn write_conf_at(path: &std::path::Path, buf: &[String; 4]) -> Result<(), St
     Ok(())
 }
 
-pub fn write_conf(buf: &[String; 4]) -> Result<(), String> {
-    write_conf_at(&PathBuf::from(CONF_PATH), buf)
+pub fn write_conf(buf: &[String; 4], local_dir: &std::path::Path) -> Result<(), String> {
+    write_conf_at(&PathBuf::from(CONF_PATH), buf, local_dir)
 }
 
 /// Разбор conf-файла скрипта (key=value). Нужен, чтобы показать в UI
@@ -135,9 +165,21 @@ pub fn fetch_now(cfg: &Config) -> Result<String, String> {
         .output()
         .map_err(|e| format!("запуск: {e}"))?;
     if !out.status.success() {
+        let tail: String = String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .rev()
+            .map(|l| l.trim())
+            .find(|l| !l.is_empty())
+            .unwrap_or("")
+            .to_string();
         return Err(format!(
-            "зеркало завершилось с ошибкой (код {:?})",
-            out.status.code()
+            "зеркало завершилось с ошибкой (код {:?}){}",
+            out.status.code(),
+            if tail.is_empty() {
+                String::new()
+            } else {
+                format!(": {tail}")
+            }
         ));
     }
     let after = fetch_count(&dir);
@@ -248,14 +290,20 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("imgsync-conf-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = conf_path_for_tests(&dir);
+        let local = PathBuf::from("/var/lib/openscale/img/plu");
         write_conf_at(
             &path,
             &["h1".into(), "u".into(), "p".into(), "MappleTouch".into()],
+            &local,
         )
         .unwrap();
         let body = std::fs::read_to_string(&path).unwrap();
         assert!(body.contains("host=h1"));
         assert!(body.contains("remote_path=MappleTouch/"));
+        assert!(
+            body.contains(&format!("local_dir={}", local.display())),
+            "скрипт требует local_dir — киоск обязан его писать"
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -264,8 +312,36 @@ mod tests {
                 0o600
             );
         }
-        write_conf_at(&path, &["".into(), "".into(), "".into(), "".into()]).unwrap();
+        write_conf_at(&path, &["".into(), "".into(), "".into(), "".into()], &local).unwrap();
         assert!(!path.exists(), "пустой адрес убирает файл");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn conf_rejects_unsafe_value() {
+        let dir = std::env::temp_dir().join(format!("imgsync-bad-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = conf_path_for_tests(&dir);
+        let local = PathBuf::from("/var/lib/openscale/img/plu");
+        for bad in [
+            ["h;1", "u", "p", "x"],
+            ["h1", "u$X", "p", "x"],
+            ["h1", "u", "p'q", "x"],
+            ["h1", "u", "p", "x&y"],
+            ["h1", "u", "p", "x`y"],
+        ] {
+            let buf: [String; 4] = bad.map(Into::into);
+            let err = write_conf_at(&path, &buf, &local).unwrap_err();
+            assert!(err.contains("вне допустимого"), "{bad:?}: {err}");
+        }
+        // Пробел и имя каталога с точками — допустимы (в кавычках скрипта).
+        write_conf_at(
+            &path,
+            &["h1".into(), "u".into(), "p".into(), "a b".into()],
+            &local,
+        )
+        .unwrap();
+        assert!(path.exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -282,6 +358,7 @@ mod tests {
                 "pw".into(),
                 "MappleTouch/".into(),
             ],
+            &PathBuf::from("/var/lib/openscale/img/plu"),
         )
         .unwrap();
         let buf = read_conf_at(&path).expect("conf читается");

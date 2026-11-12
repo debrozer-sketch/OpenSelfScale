@@ -1,17 +1,49 @@
 #!/bin/bash
+# lftp-зеркало картинок киоска. Читает /var/lib/openscale/imgsync.conf.
+# Формат conf: key=value по одному на строку, без пробелов вокруг '='.
+# Значения ограничены алфавитом: буквы, цифры, пробел и - _ . / : @ % + , ~ —
+# тем же, что фильтр экрана киоска. Conf исполняется построчным парсером,
+# а не '.': значение из файла не может стать shell- или lftp-кодом.
 set -u
 CONF=/var/lib/openscale/imgsync.conf
 LOCK=/run/openscale-imgsync.lock
 [ -r "$CONF" ] || { echo "imgsync: нет $CONF" >&2; exit 1; }
-. "$CONF"
-: "${host:?}" "${user:?}" "${password:?}" "${remote_path:?}" "${local_dir:?}"
+host= user= password= remote_path= local_dir=
+while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|\#*) continue ;; esac
+    case "$line" in *=*) ;; *) echo "imgsync: строка не key=value: $line" >&2; exit 1 ;; esac
+    key=${line%%=*}
+    val=${line#*=}
+    case "$val" in
+        *[!A-Za-z0-9._/:@%+,~\ -]*)
+            echo "imgsync: недопустимые символы в '$key'" >&2
+            exit 1
+            ;;
+    esac
+    case "$key" in
+        host) host=$val ;;
+        user) user=$val ;;
+        password) password=$val ;;
+        remote_path) remote_path=$val ;;
+        local_dir) local_dir=$val ;;
+    esac
+done < "$CONF"
+: "${host:?}" "${user:?}" "${password:?}" "${remote_path:?}"
+local_dir=${local_dir:-/var/lib/openscale/img/plu}
 mkdir -p "$local_dir"
 exec 9>"$LOCK"
 flock -n 9 || exit 0
 # S8: пароль не в argv (виден в ps) — передаётся через окружение lftp.
+# Пути в lftp-команде — в одинарных кавычках: значения без ' (гарантировано
+# белым списком) не могут разорвать команду.
 export LFTP_PASSWORD="$password"
-lftp --env-password -u "$user" "$host" \
+log=$(lftp --env-password -u "$user" "$host" \
     -e "set net:timeout 30; set net:max-retries 2; \
-        mirror --only-newer --no-perms $remote_path $local_dir; bye" \
-    2>&1 | logger -t openscale-imgsync
-exit ${PIPESTATUS[0]}
+        mirror --only-newer --no-perms '$remote_path' '$local_dir'; bye" 2>&1)
+code=$?
+printf '%s\n' "$log" | logger -t openscale-imgsync
+if [ "$code" -ne 0 ]; then
+    echo "imgsync: lftp код $code: $(printf '%s\n' "$log" | tail -n 1)" >&2
+    exit "$code"
+fi
+exit 0

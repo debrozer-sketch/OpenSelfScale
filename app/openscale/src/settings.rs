@@ -1905,7 +1905,7 @@ pub fn install(ctx: &AppContext, flow: &crate::flow::FlowHandles) {
             let result = (|| -> Result<bool, String> {
                 let conn = datastore::open(&cfg.db_path).map_err(|e| format!("база: {e}"))?;
                 let active = imgsync::save(&conn, &buf)?;
-                imgsync::write_conf(&buf)?;
+                imgsync::write_conf(&buf, &cfg.ui.img_dir.join("plu"))?;
                 Ok(active)
             })();
             let (ok, text) = match result {
