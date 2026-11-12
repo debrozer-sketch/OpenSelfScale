@@ -142,7 +142,21 @@ pub fn spawn(cfg: Arc<Config>) -> LogoFlag {
 
 /// Максимум одновременных соединений: поток на соединение на J1900 —
 /// ограниченный ресурс, неограниченный спавн = тривиальный DoS accept-цикла.
+/// Лимит мягкий (±0): проверка и инкремент живут в однопоточном accept-цикле,
+/// декременты идут из воркеров и могут только занизить счётчик. При переводе
+/// accept в пул потоков проверку и инкремент придётся атомарить.
 const MAX_CONNS: usize = 8;
+
+/// RAII-слот соединения: декремент счётчика на любом выходе воркера,
+/// включая панику handle_conn — иначе 8 паник умирают приёмник.
+struct ConnSlot {
+    active: Arc<std::sync::atomic::AtomicUsize>,
+}
+impl Drop for ConnSlot {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::Relaxed);
+    }
+}
 
 fn serve(addr: SocketAddr, cfg: Arc<Config>, flag: LogoFlag) -> std::io::Result<()> {
     let token = Arc::new(get_or_create_token(&cfg));
@@ -166,8 +180,8 @@ fn serve(addr: SocketAddr, cfg: Arc<Config>, flag: LogoFlag) -> std::io::Result<
             .spawn({
                 let active = active.clone();
                 move || {
+                    let _slot = ConnSlot { active };
                     let _ = handle_conn(stream, &cfg, &flag, &token);
-                    active.fetch_sub(1, Ordering::Relaxed);
                 }
             });
         if spawned.is_err() {

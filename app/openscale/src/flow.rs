@@ -58,6 +58,7 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             };
             k.pending = Some(entry.clone());
             if let Some(ui) = ui_handle.upgrade() {
+                ui.set_popup_notice("".into());
                 ui.set_popup_plu(tiles::tile_of(&entry, &img_dir));
                 ui.set_popup_open(true);
             }
@@ -79,6 +80,17 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             let Some(entry) = k.pending.clone() else {
                 return;
             };
+            // Отменённая по таймауту печать не отчиталась демоном: байты
+            // могли уже уйти, повторная этикетка = риск дубликата. Оператору
+            // показываем причину: молчаливое отклонение кнопки выглядит как
+            // зависание киоска.
+            if k.print_cancelled {
+                log::warn!("печать: отмена в силе, подтверждение отклонено до отчёта демона");
+                if let Some(ui) = ui_handle.upgrade() {
+                    ui.set_popup_notice("Предыдущая печать ещё завершается, подождите".into());
+                }
+                return;
+            }
             let min_kg = trade.min_weight_g.get() / 1000.0;
             // Один снимок на подтверждение: та же масса, по которой popup
             // показывал сумму, становится весом этикетки. Пересчёт в тике
@@ -107,12 +119,6 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             k.print_weight_g = Some(((snap.mass_kg.max(0.0)) * 1000.0).round() as u32);
             k.pending = None;
             k.selected = Some(item);
-            // Отменённая по таймауту печать не отчиталась демоном: байты
-            // могли уже уйти, повторная этикетка = риск дубликата.
-            if k.print_cancelled {
-                log::warn!("печать: отмена в силе, подтверждение отклонено до отчёта демона");
-                return;
-            }
             k.phase = 2;
             k.idle_since = None;
             if let Some(ui) = ui_handle.upgrade() {

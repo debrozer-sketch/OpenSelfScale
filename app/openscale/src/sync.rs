@@ -378,19 +378,14 @@ fn read_xml(name: &std::path::Path) -> Result<String, String> {
     decode_xml(name, bytes)
 }
 /// Осознанное усечение ассортимента: сторона выгрузки кладёт truncate.flg
-/// рядом с plu.xml в drop-каталоге. FTP-путь флага не имеет — усечение
+/// рядом с plu.xml в drop-каталоге. Флаг только читается: удаление —
+/// после успешного применения, вместе с остальными файлами выгрузки
+/// (иначе транзитная ошибка применения съедает флаг, а повтор через 5 с
+/// идёт без override и отказывает навсегда). Факт разрешения усечения
+/// фиксируется в history-архиве. FTP-путь флага не имеет — усечение
 /// через центр не разрешается.
 fn allow_truncation(dir: &std::path::Path) -> bool {
-    let flag = dir.join("truncate.flg");
-    if flag.exists() {
-        log::warn!(
-            "выгрузка: {} найден — порог усечения отключён, снятие отсутствующих выполняется как есть",
-            flag.display()
-        );
-        let _ = std::fs::remove_file(&flag);
-        return true;
-    }
-    false
+    dir.join("truncate.flg").exists()
 }
 fn apply_upload(
     cfg: &Config,
@@ -400,11 +395,14 @@ fn apply_upload(
     ldata: &str,
     allow_truncation: bool,
 ) -> Result<(usize, String), String> {
+    // Факт разрешения усечения уходит в архив вместе с выгрузкой:
+    // постфактум видно, что половину каталога снимали осознанно.
     archive(
         &cfg.center.history_dir,
         &[("plu.xml", plu_data)]
             .into_iter()
             .chain(groups.map(|_| ("layout.xml", ldata)))
+            .chain((allow_truncation).then(|| ("truncate.flg", "requested")))
             .collect::<Vec<_>>(),
     );
     // Единый безопасный доступ: flock SH + fail-closed (потерянная/повреждённая
@@ -418,8 +416,13 @@ fn apply_upload(
         allow_truncation,
     )
     .map_err(|e| format!("приём выгрузки: {e}"))?;
+    let truncation_note = if allow_truncation {
+        ", усечение разрешено truncate.flg"
+    } else {
+        ""
+    };
     let removed_note = if removed > 0 {
-        format!(", снято {removed}")
+        format!(", снято {removed}{truncation_note}")
     } else {
         String::new()
     };
@@ -581,13 +584,14 @@ fn drop_receive(cfg: &Config, dir: &std::path::Path) -> Result<Option<String>, S
     if imgs_new > 0 {
         crate::thumbs::ensure_dir(&local, std::time::Duration::from_secs(25));
     }
+    let truncation_allowed = allow_truncation(dir);
     let (imported, layout_note) = apply_upload(
         cfg,
         &items,
         groups.as_ref(),
         &plu_data,
         &ldata,
-        allow_truncation(dir),
+        truncation_allowed,
     )?;
     let mut deferred = 0usize;
     let mut rm = |p: &std::path::Path, cap: &Option<MetaCap>| {
@@ -606,6 +610,22 @@ fn drop_receive(cfg: &Config, dir: &std::path::Path) -> Result<Option<String>, S
     }
     for (p, cap) in &copied {
         rm(p, cap);
+    }
+    if truncation_allowed {
+        // Флаг удаляется только после успешного применения И после
+        // успешного удаления файлов выгрузки: иначе повторный приём
+        // (изменившийся файл / готовый флаг) пойдёт без override и
+        // откажет навсегда. Флаг без метадаты удаляется безусловно.
+        if deferred == 0 {
+            if std::fs::remove_file(dir.join("truncate.flg")).is_ok() {
+                log::warn!("выгрузка (drop): усечение ассортимента разрешено truncate.flg");
+            }
+        } else {
+            deferred += 1;
+            log::warn!(
+                "выгрузка (drop): truncate.flg оставлен — приём повторится с тем же флагом усечения"
+            );
+        }
     }
     if deferred > 0 {
         return Err(format!(

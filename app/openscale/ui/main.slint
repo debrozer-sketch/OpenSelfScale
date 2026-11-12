@@ -580,6 +580,7 @@ export component MainWindow inherits Window {
     in property <bool> popup-under-min: false;
     in property <bool> popup-unstable: false;
     in property <bool> popup-scales-off: false;
+    in property <string> popup-notice: "";
     in property <bool> db-unavailable: false;
     in property <string> db-error-text: "";
     callback plu-confirm();
@@ -1508,7 +1509,16 @@ export component MainWindow inherits Window {
                 vertical-alignment: center;
                 color: Theme.ink;
             }
-            if root.popup-empty : Text {
+            if root.popup-notice != "" : Text {
+                x: 24px; y: 140px;
+                width: parent.width - 540px; height: 48px;
+                text: root.popup-notice;
+                font-size: Theme.font-lg;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: Theme.danger;
+            }
+            if root.popup-empty && root.popup-notice == "" : Text {
                 x: 24px; y: 140px;
                 width: parent.width - 540px; height: 48px;
                 text: root.popup-scales-off ? "Весы недоступны"
