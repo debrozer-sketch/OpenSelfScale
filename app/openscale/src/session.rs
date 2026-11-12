@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 pub const DONE_TIMEOUT: Duration = Duration::from_secs(3);
 pub const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
@@ -188,6 +187,8 @@ impl Kiosk {
     /// Демон молчит PRINT_TIMEOUT + CANCEL_GRACE: отрекаемся от операции.
     /// Принятый риск: физическая этикетка возможна, её поздний отчёт станет
     /// «поздним» и будет проигран, запись журнала останется с ok=NULL.
+    /// Гейт потока при этом сохраняется: живой поток демона продолжает
+    /// удерживать print_thread_idle до своего завершения.
     pub fn abandon_print(&mut self) {
         self.print_at = None;
         self.print_op += 1;
@@ -332,7 +333,9 @@ mod tests {
         let mut k = Kiosk::new();
         k.print_op = 7;
         k.print_at = Some(Instant::now());
-        k.cancel_print = Some(Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        k.cancel_print = Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            false,
+        )));
         k.send_print_cancel();
         k
     }

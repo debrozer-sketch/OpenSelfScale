@@ -866,6 +866,60 @@ mod tests {
         assert!(delete_if_unchanged(&p, cap));
         assert!(stranger.exists(), "посторонний файл не трогается");
     }
+    fn plu_xml(count: usize) -> String {
+        let mut xml = String::from("<body>");
+        for i in 0..count {
+            xml.push_str(&format!(
+                r#"<item plunumber="25010{i:02}" price="1000" itemcode="0001" namefirst="ТОВАР {i}" namesecond="" groupcode="21" shelflife="x" />"#
+            ));
+        }
+        xml.push_str("</body>");
+        xml
+    }
+    /// Флаг усечения живёт до успешного применения: транзитная ошибка
+    /// (недоступная БД) не съедает override — повторный приём с тем же
+    /// флагом проходит. Успех удаляет флаг.
+    #[test]
+    fn drop_truncate_flag_survives_failed_apply() {
+        let dir = std::env::temp_dir().join(format!("os-sync-trunc-{}", std::process::id()));
+        let incoming = dir.join("in");
+        std::fs::create_dir_all(&incoming).unwrap();
+        let mut cfg = Config::default();
+        cfg.db_path = dir.join("plu.db");
+        cfg.incoming_dir = incoming.clone();
+        cfg.center.history_dir = dir.join("hist");
+        cfg.center.img_local_dir = dir.join("imgs");
+        // Транзитная ошибка применения: путь БД занят каталогом.
+        std::fs::create_dir_all(&cfg.db_path).unwrap();
+        std::fs::write(incoming.join("plu.xml"), plu_xml(10)).unwrap();
+        std::fs::write(incoming.join("truncate.flg"), "on").unwrap();
+        std::fs::write(incoming.join("ready.flg"), "").unwrap();
+        let err = run_drop(&cfg).unwrap_err();
+        assert!(err.contains("база"), "{err}");
+        assert!(
+            incoming.join("truncate.flg").exists(),
+            "флаг пережил отказ применения — повтор пойдёт с тем же override"
+        );
+        assert!(
+            incoming.join("ready.flg").exists(),
+            "файлы выгрузки не удаляются при отказе"
+        );
+        // БД починена: тот же приём проходит, флаг удалён.
+        std::fs::remove_dir_all(&cfg.db_path).unwrap();
+        let report = run_drop(&cfg).unwrap().expect("приём состоялся");
+        assert!(report.contains("10"), "{report}");
+        assert!(
+            !incoming.join("truncate.flg").exists(),
+            "флаг съеден успехом"
+        );
+        assert!(!incoming.join("ready.flg").exists());
+        let conn = datastore::open(&cfg.db_path).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 10);
+        std::fs::remove_dir_all(&dir).ok();
+    }
     #[test]
     fn xml_with_trailing_garbage_after_body_is_accepted() {
         // Касса дописала мусор (битый UTF-8, вплоть до обрывка со своим
