@@ -937,19 +937,32 @@ pub fn import_plu(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreEr
     Ok(n)
 }
 /// Шаг снятия отсутствующих без открытия транзакции.
-fn remove_absent_step(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
+///
+/// `allow_truncation` — осознанное разрешение усечения (сокращение
+/// ассортимента больше половины базы). Порог против битых/обрезанных
+/// файлов остаётся защитой по умолчанию: без флага легитимное крупное
+/// сокращение невозможно применить, пока сторона выгрузки явно не
+/// подтвердит его (в drop-протоколе — файл truncate.flg рядом с plu.xml).
+fn remove_absent_step(
+    conn: &Connection,
+    items: &[PluItem],
+    allow_truncation: bool,
+) -> Result<usize, StoreError> {
     let existing: i64 = conn.query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))?;
     if items.is_empty() && existing > 0 {
         return Err(StoreError::Xml(format!(
             "пустая выгрузка при {existing} товарах в базе: подозрение на битый файл, снятие отменено"
         )));
     }
-    if existing >= 20 && (items.len() as i64) * 2 < existing {
+    if !allow_truncation && existing >= 20 && (items.len() as i64) * 2 < existing {
         return Err(StoreError::Xml(format!(
-            "в выгрузке {} товаров при {existing} в базе: подозрение на обрезанный файл, снятие отменено",
+            "в выгрузке {} товаров при {existing} в базе: подозрение на обрезанный файл, снятие отменено (для осознанного сокращения ассортимента добавьте в выгрузку truncate.flg)",
             items.len()
         )));
     }
+    // Ошибка на середине прошлого вызова могла оставить таблицу на
+    // соединении — пересоздаём с очисткой.
+    conn.execute_batch("DROP TABLE IF EXISTS incoming_plu")?;
     conn.execute_batch("CREATE TEMP TABLE incoming_plu (plu TEXT PRIMARY KEY)")?;
     {
         let mut stmt = conn.prepare("INSERT OR IGNORE INTO incoming_plu (plu) VALUES (?1)")?;
@@ -964,24 +977,30 @@ fn remove_absent_step(conn: &Connection, items: &[PluItem]) -> Result<usize, Sto
     conn.execute_batch("DROP TABLE incoming_plu")?;
     Ok(n)
 }
-pub fn remove_absent(conn: &Connection, items: &[PluItem]) -> Result<usize, StoreError> {
+pub fn remove_absent(
+    conn: &Connection,
+    items: &[PluItem],
+    allow_truncation: bool,
+) -> Result<usize, StoreError> {
     let tx = conn.unchecked_transaction()?;
-    let n = remove_absent_step(&tx, items)?;
+    let n = remove_absent_step(&tx, items, allow_truncation)?;
     tx.commit()?;
     Ok(n)
 }
 /// Атомарное применение одной выгрузки: импорт + снятие отсутствующих +
 /// раскладка. Либо все изменения фиксируются, либо при любой ошибке база
-/// остаётся в прежнем состоянии.
+/// остаётся в прежнем состоянии. `allow_truncation` — осознанное разрешение
+/// усечения (см. remove_absent_step).
 pub fn apply_upload(
     conn: &Connection,
     items: &[PluItem],
     groups: Option<&[(String, Vec<String>)]>,
+    allow_truncation: bool,
 ) -> Result<(usize, usize, Option<(usize, usize)>), StoreError> {
     validate_plu_items(items)?;
     let tx = conn.unchecked_transaction()?;
     let imported = import_plu_step(&tx, items)?;
-    let removed = remove_absent_step(&tx, items)?;
+    let removed = remove_absent_step(&tx, items, allow_truncation)?;
     let layout = match groups {
         Some(g) => Some(apply_layout_step(&tx, g)?),
         None => None,
@@ -1559,7 +1578,8 @@ mod tests {
             atomic_item("B", "ТОВАР Б КГ", 200),
         ];
         let groups = vec![("ГР".to_string(), vec!["A".to_string()])];
-        let (imported, removed, layout) = apply_upload(&conn, &items, Some(&groups)).unwrap();
+        let (imported, removed, layout) =
+            apply_upload(&conn, &items, Some(&groups), false).unwrap();
         assert_eq!(imported, 2);
         assert_eq!(removed, 0);
         assert_eq!(layout, Some((1, 1)), "переназначен A, без группы остался B");
@@ -1583,7 +1603,7 @@ mod tests {
             atomic_item("B", "ТОВАР Б КГ", 200),
         ];
         let groups = vec![("ГР".to_string(), vec!["A".to_string()])];
-        let err = apply_upload(&conn, &items, Some(&groups)).unwrap_err();
+        let err = apply_upload(&conn, &items, Some(&groups), false).unwrap_err();
         assert!(err.to_string().contains("обрезанный файл"), "{err}");
         assert_eq!(
             catalog(&conn),
@@ -1609,7 +1629,7 @@ mod tests {
         items.push(atomic_item("A", "ТОВАР А КГ", 100));
         items.push(atomic_item("B", "ТОВАР Б КГ", 200));
         let groups = vec![("FAIL".to_string(), vec!["A".to_string()])];
-        let err = apply_upload(&conn, &items, Some(&groups)).unwrap_err();
+        let err = apply_upload(&conn, &items, Some(&groups), false).unwrap_err();
         assert!(err.to_string().contains("layout fail"), "{err}");
         assert_eq!(
             catalog(&conn),
@@ -1626,7 +1646,8 @@ mod tests {
         ];
         let groups = vec![("ГР".to_string(), vec!["A".to_string()])];
         for round in 1..=2 {
-            let (imported, removed, layout) = apply_upload(&conn, &items, Some(&groups)).unwrap();
+            let (imported, removed, layout) =
+                apply_upload(&conn, &items, Some(&groups), false).unwrap();
             assert_eq!(imported, 2, "повтор {round}: upsert возвращает все позиции");
             assert_eq!(removed, 0, "повтор {round}: снимать нечего");
             assert_eq!(
@@ -1686,14 +1707,14 @@ mod tests {
         let all = parse_plu_xml(SAMPLE).unwrap();
         // Выгрузка только с одним из двух товаров: второй снят с учёта.
         let kept: Vec<PluItem> = vec![all[0].clone()];
-        let removed = remove_absent(&conn, &kept).unwrap();
+        let removed = remove_absent(&conn, &kept, false).unwrap();
         assert_eq!(removed, 1);
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
         // Повторный вызов с тем же набором — идемпотентен.
-        assert_eq!(remove_absent(&conn, &kept).unwrap(), 0);
+        assert_eq!(remove_absent(&conn, &kept, false).unwrap(), 0);
     }
     #[test]
     fn remove_absent_rejects_suspiciously_small_upload() {
@@ -1711,14 +1732,56 @@ mod tests {
         import_plu(&conn, &parse_plu_xml(&xml).unwrap()).unwrap();
         // «Обрезанная» выгрузка: 10 из 21 (< половины) — отказ.
         let half: Vec<PluItem> = parse_plu_xml(&xml).unwrap().into_iter().take(10).collect();
-        assert!(remove_absent(&conn, &half).is_err());
+        assert!(remove_absent(&conn, &half, false).is_err());
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 21);
         // Полная выгрузка проходит: снятий нет, база цела.
         let all: Vec<PluItem> = parse_plu_xml(&xml).unwrap();
-        assert_eq!(remove_absent(&conn, &all).unwrap(), 0);
+        assert_eq!(remove_absent(&conn, &all, false).unwrap(), 0);
+    }
+    #[test]
+    fn remove_absent_truncation_override_allows_shrinking() {
+        // Осознанное сокращение ассортимента больше половины: без флага —
+        // отказ, с флагом — применение. Пустая выгрузка остаётся отказом
+        // даже с флагом: «снять всё» не входит в контракт усечения.
+        let conn = open(":memory:".as_ref()).unwrap();
+        let mut xml = String::from("<body>");
+        for i in 0..21 {
+            xml.push_str(&format!(
+                r#"<item plunumber="25010{i:02}" price="1000" itemcode="0001" namefirst="ТОВАР {i}" namesecond="" groupcode="21" shelflife="x" />"#
+            ));
+        }
+        xml.push_str("</body>");
+        import_plu(&conn, &parse_plu_xml(&xml).unwrap()).unwrap();
+        let half: Vec<PluItem> = parse_plu_xml(&xml).unwrap().into_iter().take(10).collect();
+        assert!(remove_absent(&conn, &half, false).is_err());
+        let removed = remove_absent(&conn, &half, true).unwrap();
+        assert_eq!(removed, 11);
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 10);
+        assert!(remove_absent(&conn, &[], true).is_err());
+    }
+    #[test]
+    fn remove_absent_survives_orphaned_temp_table() {
+        // Ошибка посреди прошлого вызова могла оставить TEMP-таблицу на
+        // соединении: повторный вызов обязан пересоздать её, а не падать.
+        let conn = open(":memory:".as_ref()).unwrap();
+        import_plu(&conn, &parse_plu_xml(SAMPLE).unwrap()).unwrap();
+        conn.execute_batch("CREATE TEMP TABLE incoming_plu (plu TEXT PRIMARY KEY)")
+            .unwrap();
+        conn.execute("INSERT INTO incoming_plu (plu) VALUES ('мусор')", [])
+            .unwrap();
+        let all = parse_plu_xml(SAMPLE).unwrap();
+        assert_eq!(remove_absent(&conn, &all, false).unwrap(), 0);
+        // «мусор» из чужой таблицы не снял ничего: таблица пересоздана.
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, all.len() as i64);
     }
     #[test]
     fn remove_absent_rejects_empty_upload_on_nonempty_base() {
@@ -1731,7 +1794,7 @@ mod tests {
             <item plunumber="2" price="2000" itemcode="0002" namefirst="Б" namesecond="" groupcode="21" shelflife="x" />
         </body>"#;
         import_plu(&conn, &parse_plu_xml(xml).unwrap()).unwrap();
-        assert!(remove_absent(&conn, &[]).is_err());
+        assert!(remove_absent(&conn, &[], false).is_err());
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
             .unwrap();
@@ -1746,7 +1809,7 @@ mod tests {
             <item plunumber="1" price="1000" itemcode="0001" namefirst="А" namesecond="" groupcode="21" shelflife="x" />
         </body>"#;
         import_plu(&conn, &parse_plu_xml(xml).unwrap()).unwrap();
-        assert!(apply_upload(&conn, &[], None).is_err());
+        assert!(apply_upload(&conn, &[], None, false).is_err());
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
             .unwrap();
@@ -1760,7 +1823,7 @@ mod tests {
         import_plu(&conn, &parse_plu_xml(SAMPLE).unwrap()).unwrap();
         let all = parse_plu_xml(SAMPLE).unwrap();
         let dup: Vec<PluItem> = vec![all[0].clone(), all[0].clone()];
-        assert_eq!(remove_absent(&conn, &dup).unwrap(), 1);
+        assert_eq!(remove_absent(&conn, &dup, false).unwrap(), 1);
         let n: i64 = conn
             .query_row("SELECT COUNT(*) FROM plucodes", [], |r| r.get(0))
             .unwrap();

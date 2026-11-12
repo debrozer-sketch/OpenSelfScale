@@ -107,6 +107,12 @@ pub fn install(ctx: &AppContext) -> FlowHandles {
             k.print_weight_g = Some(((snap.mass_kg.max(0.0)) * 1000.0).round() as u32);
             k.pending = None;
             k.selected = Some(item);
+            // Отменённая по таймауту печать не отчиталась демоном: байты
+            // могли уже уйти, повторная этикетка = риск дубликата.
+            if k.print_cancelled {
+                log::warn!("печать: отмена в силе, подтверждение отклонено до отчёта демона");
+                return;
+            }
             k.phase = 2;
             k.idle_since = None;
             if let Some(ui) = ui_handle.upgrade() {

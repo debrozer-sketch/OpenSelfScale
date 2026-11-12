@@ -30,6 +30,15 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < "$CONF"
 : "${host:?}" "${user:?}" "${password:?}" "${remote_path:?}"
 local_dir=${local_dir:-/var/lib/openscale/img/plu}
+# Root-скрипт не должен mkdir-ить произвольные каталоги по указанию
+# владельца conf: local_dir строго внутри каталога данных киоска.
+case "$local_dir" in
+    /var/lib/openscale/*) ;;
+    *)
+        echo "imgsync: local_dir вне /var/lib/openscale/: $local_dir" >&2
+        exit 1
+        ;;
+esac
 mkdir -p "$local_dir"
 exec 9>"$LOCK"
 flock -n 9 || exit 0

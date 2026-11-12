@@ -175,6 +175,8 @@ pub fn start(
                         continue;
                     }
                     k.print_at = None;
+                    k.print_cancelled = false;
+                    k.cancel_print = None;
                     match res {
                         Ok(g) => {
                             log::info!("этикетка напечатана: {g} г");
@@ -233,19 +235,38 @@ pub fn start(
                     }));
                 }
                 const PRINT_TIMEOUT: Duration = Duration::from_secs(30);
-                if k.phase == 2 && k.print_weight_g.is_some()
-                    && k.print_at.is_some_and(|t| t.elapsed() > PRINT_TIMEOUT)
-                {
-                    log::warn!("печать не завершилась за {PRINT_TIMEOUT:?} — отмена, результат неизвестен");
-                    if let Some(c) = k.cancel_print.take() {
-                        c.store(true, std::sync::atomic::Ordering::Relaxed);
+                const CANCEL_GRACE: Duration = Duration::from_secs(60);
+                if k.phase == 2 && k.print_weight_g.is_some() && k.print_at.is_some() {
+                    let elapsed = k.print_at.map(|t| t.elapsed()).unwrap_or_default();
+                    match print_cancel_decision(k.print_cancelled, elapsed, PRINT_TIMEOUT, CANCEL_GRACE) {
+                        PrintCancelDecision::None => {}
+                        PrintCancelDecision::SendCancel => {
+                            log::warn!("печать не завершилась за {PRINT_TIMEOUT:?} — отмена, результат неизвестен");
+                            if let Some(c) = k.cancel_print.take() {
+                                c.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            // print_op и print_at не трогаем: повторное
+                            // подтверждение блокировано (print_cancelled), а
+                            // отчёт демона об этой операции не считается поздним
+                            // и покажет оператору фактический исход.
+                            k.print_cancelled = true;
+                            // Отменённое задание уже могло печататься: это
+                            // неизвестный результат, а не достоверная ошибка.
+                            k.phase = 5;
+                            k.error_at = Some(Instant::now());
+                        }
+                        PrintCancelDecision::Abandon => {
+                            // Демон не отрапортовал об отменённой операции
+                            // (завис/погиб) — отрекаемся от неё, иначе фаза
+                            // зависнет навсегда.
+                            log::error!("печать: демон не отчитался об отменённой операции за {CANCEL_GRACE:?}");
+                            k.print_at = None;
+                            k.print_op += 1;
+                            k.cancel_print = None;
+                            k.phase = 5;
+                            k.error_at = Some(Instant::now());
+                        }
                     }
-                    k.print_at = None;
-                    k.print_op += 1;
-                    // Отменённое задание уже могло печататься: это
-                    // неизвестный результат, а не достоверная ошибка.
-                    k.phase = 5;
-                    k.error_at = Some(Instant::now());
                 }
                 if k.phase == 3 && k.done_at.is_some_and(|t| t.elapsed() > DONE_TIMEOUT) {
                     k.phase = 0;
@@ -533,10 +554,43 @@ fn layout_ready(conn: &rusqlite::Connection) -> bool {
         })
 }
 
+/// Решение по отмене незавершённой печати. Класс «повтор запрещён до
+/// отчёта демона» между SendCancel и отчётом: фаза 5, print_at жив,
+/// on_plu_confirm отклоняется по print_cancelled.
+#[derive(Debug, PartialEq)]
+pub enum PrintCancelDecision {
+    None,
+    SendCancel,
+    Abandon,
+}
+pub fn print_cancel_decision(
+    cancelled: bool,
+    elapsed: Duration,
+    print_timeout: Duration,
+    cancel_grace: Duration,
+) -> PrintCancelDecision {
+    if !cancelled {
+        if elapsed > print_timeout {
+            PrintCancelDecision::SendCancel
+        } else {
+            PrintCancelDecision::None
+        }
+    } else if elapsed > print_timeout + cancel_grace {
+        PrintCancelDecision::Abandon
+    } else {
+        // Отчёт демона по-прежнему ожидается: операция не «поздняя»,
+        // повтор блокирован, исход ещё покажется.
+        PrintCancelDecision::None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::layout_ready;
     use super::logo_entry_screen;
+    use super::print_cancel_decision;
+    use super::PrintCancelDecision;
+    use std::time::Duration;
 
     #[test]
     fn logo_entry_on_customer_screens() {
@@ -572,5 +626,31 @@ mod tests {
         datastore::label_layout_put(&conn, "market-56x38", 56, 38, "{}").unwrap();
         assert!(layout_ready(&conn), "шаблон существует и выбран");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cancel_decision_waits_for_daemon_report() {
+        let t30 = Duration::from_secs(30);
+        let t60 = Duration::from_secs(60);
+        assert_eq!(
+            print_cancel_decision(false, t30 - Duration::from_millis(1), t30, t60),
+            PrintCancelDecision::None,
+            "до таймаута — печати не отменяется"
+        );
+        assert_eq!(
+            print_cancel_decision(false, t30 + Duration::from_secs(1), t30, t60),
+            PrintCancelDecision::SendCancel,
+            "таймаут — демон получает cancel"
+        );
+        assert_eq!(
+            print_cancel_decision(true, t30 + Duration::from_secs(1), t30, t60),
+            PrintCancelDecision::None,
+            "отмена в силе: отчёт демона ожидается, повтор запрещён"
+        );
+        assert_eq!(
+            print_cancel_decision(true, t30 + t60 + Duration::from_secs(1), t30, t60),
+            PrintCancelDecision::Abandon,
+            "демон молчит слишком долго — операция отрекается"
+        );
     }
 }

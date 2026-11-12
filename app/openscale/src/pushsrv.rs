@@ -5,7 +5,10 @@
 //! устройства: киоск при первом старте генерирует случайный токен в
 //! `/var/lib/openscale/pushsrv.token` (0600), конструктор передаёт его
 //! в заголовке `X-OpenScale-Token`. Токен берётся с весов администратором
-//! (SSH). Содержимое дополнительно проверяется: раскладка валидируется
+//! (SSH). Ротация: удалить файл токена и перезапустить киоск — токен
+//! читается при старте приёмника. Токен живёт рядом с БД, но в резервные
+//! копии и cfg-обмен не попадает (backup копирует только .db).
+//! Содержимое дополнительно проверяется: раскладка валидируется
 //! `label::parse`, логотип — полноценным разбором чанков PNG (сигнатура,
 //! IHDR, CRC, IEND, лимиты размеров). Всё остальное отклоняется.
 
@@ -45,8 +48,9 @@ pub fn token_path(cfg: &Config) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/var/lib/openscale/pushsrv.token"))
 }
 
-/// Читает или создаёт (один раз) токен устройства. Ошибка возвращает
-/// пустой токен: при пустом токене приёмник отклоняет все записи.
+/// Читает или создаёт (один раз) токен устройства. Ошибка (включая
+/// недоступный /dev/urandom) возвращает пустой токен: при пустом токене
+/// приёмник отклоняет все записи — fail-closed.
 pub fn get_or_create_token(cfg: &Config) -> String {
     let path = token_path(cfg);
     if let Ok(tok) = std::fs::read_to_string(&path) {
@@ -55,7 +59,16 @@ pub fn get_or_create_token(cfg: &Config) -> String {
             return tok;
         }
     }
-    let raw = random_bytes();
+    // Криптографический fallback не предусмотрен: предсказуемый токен хуже
+    // честного отказа (записи отклоняются, администратор видит журнал).
+    let raw = random_bytes().map_err(|e| format!("/dev/urandom: {e}"));
+    let raw = match raw {
+        Ok(b) => b,
+        Err(e) => {
+            log::error!("приёмник: токен не сгенерирован ({e}), записи отклоняются");
+            return String::new();
+        }
+    };
     let tok: String = raw.iter().map(|b| format!("{b:02x}")).collect();
     if std::fs::write(&path, &tok).is_err() {
         log::error!("приёмник: токен не записан в {}", path.display());
@@ -70,28 +83,33 @@ pub fn get_or_create_token(cfg: &Config) -> String {
     tok
 }
 
-/// 32 случайных байта: /dev/urandom (бесконечный файл — читаем ровно
-/// 32 байта, не целиком), при недоступности — смесь времени, PID и
-/// адреса стека (киоск — Linux, fallback почти не встречается).
-fn random_bytes() -> [u8; 32] {
+/// 32 случайных байта из /dev/urandom (бесконечный файл — читаем ровно
+/// 32 байта, не целиком). В проде недоступный urandom — ошибка: генерировать
+/// предсказуемую энтропию нельзя (fail-closed). Тестовая среда (Windows)
+/// получает детерминированный источник — проверяются длина и стабильность.
+fn random_bytes() -> std::io::Result<[u8; 32]> {
     use std::io::Read;
     let mut out = [0u8; 32];
     if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
         if f.read_exact(&mut out).is_ok() {
-            return out;
+            return Ok(out);
         }
     }
-    let mut out = [0u8; 32];
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let mut seed = (t as u64) ^ (std::process::id() as u64) ^ (&out as *const _ as u64);
-    for b in out.iter_mut() {
-        seed = seed.wrapping_mul(0x1000_0000_01B3) ^ (seed >> 7);
-        *b = (seed >> 24) as u8;
+    #[cfg(test)]
+    {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let mut seed = t as u64 ^ (std::process::id() as u64);
+        for b in out.iter_mut() {
+            seed = seed.wrapping_mul(0x1000_0000_01B3) ^ (seed >> 7);
+            *b = (seed >> 24) as u8;
+        }
+        return Ok(out);
     }
-    out
+    #[cfg(not(test))]
+    Err(std::io::Error::other("/dev/urandom недоступен"))
 }
 
 /// Постоянное по времени сравнение строк.
@@ -122,21 +140,40 @@ pub fn spawn(cfg: Arc<Config>) -> LogoFlag {
     flag
 }
 
+/// Максимум одновременных соединений: поток на соединение на J1900 —
+/// ограниченный ресурс, неограниченный спавн = тривиальный DoS accept-цикла.
+const MAX_CONNS: usize = 8;
+
 fn serve(addr: SocketAddr, cfg: Arc<Config>, flag: LogoFlag) -> std::io::Result<()> {
     let token = Arc::new(get_or_create_token(&cfg));
+    let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let listener = TcpListener::bind(addr)?;
     log::info!("приёмник загрузок: http://{addr}");
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
+        if active.load(Ordering::Relaxed) >= MAX_CONNS {
+            log::warn!("приёмник: лимит соединений {MAX_CONNS} исчерпан — отказ");
+            let mut s = stream;
+            let _ = s.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            continue;
+        }
+        active.fetch_add(1, Ordering::Relaxed);
         let cfg = cfg.clone();
         let flag = flag.clone();
         let token = token.clone();
-        std::thread::Builder::new()
+        let spawned = std::thread::Builder::new()
             .name("pushsrv-conn".into())
-            .spawn(move || {
-                let _ = handle_conn(stream, &cfg, &flag, &token);
-            })
-            .ok();
+            .spawn({
+                let active = active.clone();
+                move || {
+                    let _ = handle_conn(stream, &cfg, &flag, &token);
+                    active.fetch_sub(1, Ordering::Relaxed);
+                }
+            });
+        if spawned.is_err() {
+            // Поток не создан: счётчик не должен «протекать».
+            active.fetch_sub(1, Ordering::Relaxed);
+        }
     }
     Ok(())
 }

@@ -3623,7 +3623,7 @@ pub fn reset_admin_pin_by_usb_key(db_path: &std::path::Path) -> Result<bool, Str
         return Ok(false);
     };
     let conn = datastore::open(db_path).map_err(|e| format!("база: {e}"))?;
-    apply_reset_pin(&conn, &mount, &reset_pin())?;
+    apply_reset_pin(&conn, &mount, &reset_pin()?)?;
     Ok(true)
 }
 
@@ -3653,24 +3653,17 @@ pub fn apply_reset_pin(
 }
 
 /// Случайный 5-значный PIN (10000–99999). /dev/urandom — ровно 4 байта
-/// read_exact'ом: файл бесконечен, целиком его читать нельзя.
-pub fn reset_pin() -> String {
+/// read_exact'ом: файл бесконечен, целиком его читать нельзя. Недоступный
+/// urandom — ошибка: сброс отменяется. Предсказуемый PIN (время+PID) в
+/// защитной операции хуже честного отказа.
+pub fn reset_pin() -> Result<String, String> {
     use std::io::Read;
     let mut buf = [0u8; 4];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        if f.read_exact(&mut buf).is_ok() {
-            let v = u32::from_be_bytes(buf) % 90_000 + 10_000;
-            return v.to_string();
-        }
-    }
-    // Fallback без urandom: смесь времени и PID (киоск — Linux, путь почти
-    // не встречается; энтропия ниже, но PIN всё же не фиксированный).
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    let v = (t ^ (std::process::id() as u32).wrapping_mul(2_654_435_761)) % 90_000 + 10_000;
-    v.to_string()
+    let mut f = std::fs::File::open("/dev/urandom").map_err(|e| format!("/dev/urandom: {e}"))?;
+    f.read_exact(&mut buf)
+        .map_err(|e| format!("/dev/urandom: {e}"))?;
+    let v = u32::from_be_bytes(buf) % 90_000 + 10_000;
+    Ok(v.to_string())
 }
 
 /// Фоновая проверка PIN. Если поток паникует, флаг `pin_check_busy` обязательно
@@ -3829,16 +3822,18 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
+    // Путь защищённой операции использует /dev/urandom: среда без него
+    // (Windows) не покрывается этим тестом.
+    #[cfg(unix)]
     #[test]
     fn reset_pin_is_random_five_digits() {
         for _ in 0..8 {
-            let pin = reset_pin();
+            let pin = reset_pin().unwrap();
             assert_eq!(pin.len(), 5, "PIN: {pin}");
             assert!(pin.bytes().all(|b| b.is_ascii_digit()), "PIN: {pin}");
             let v: u32 = pin.parse().unwrap();
             assert!((10_000..=99_999).contains(&v), "PIN: {pin}");
         }
-        assert_ne!(reset_pin(), "", "PIN не пустой");
     }
 
     #[test]

@@ -751,6 +751,20 @@ const PRESENT_WAIT_MAX: Duration = Duration::from_secs(20);
 const STALE_JOB: Duration = Duration::from_secs(25);
 const RECOVER_COOLDOWN: Duration = Duration::from_secs(10);
 const RECOVER_MAX: u8 = 3;
+/// После конца последнего задания фон ещё это окно может застать принтер
+/// молча печатающим хвост (present_wait истёк, байты в буфере). ESC @ в
+/// recover сбросил бы недопечатанное задание — в этом окне лестница
+/// восстановления без шага сброса (только DLE ENQ).
+const RECOVER_QUIET: Duration = Duration::from_secs(30);
+static LAST_PRINT_END: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+fn since_last_print_end() -> Duration {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let last = LAST_PRINT_END.load(std::sync::atomic::Ordering::Relaxed);
+    Duration::from_secs((now - last).clamp(0, i64::MAX) as u64)
+}
 const L4_READ_TIMEOUT: Duration = Duration::from_millis(300);
 const SCAN_STEP_UNITS: u8 = 7;
 enum Fail {
@@ -968,11 +982,18 @@ fn scan_label_length(port: &mut Box<dyn serialport::SerialPort>) -> Result<u32, 
     res
 }
 fn recover_printer(port: &mut Box<dyn serialport::SerialPort>) -> Option<u8> {
-    let steps: [(&str, Vec<u8>); 3] = [
+    // ESC @ сбрасывает буфер печати: если принтер мог ещё молча печатать
+    // хвост недавнего задания, шаг сброса пропускается.
+    let quiet = since_last_print_end() >= RECOVER_QUIET;
+    let mut steps: Vec<(&str, Vec<u8>)> = vec![
         ("DLE ENQ 1", escpos::build_recover(1).to_vec()),
         ("DLE ENQ 2", escpos::build_recover(2).to_vec()),
-        ("ESC @", escpos::build_init().to_vec()),
     ];
+    if quiet {
+        steps.push(("ESC @", escpos::build_init().to_vec()));
+    } else {
+        log::info!("принтер: сброс ESC @ отложен — недавняя печать могла остаться в буфере");
+    }
     for (name, cmd) in steps {
         if port.write_all(&cmd).is_err() || port.flush().is_err() {
             return None;
@@ -1001,8 +1022,30 @@ fn ensure_ready(port: &mut Box<dyn serialport::SerialPort>) -> Result<(), Fail> 
         }
         Some(_) => Ok(()),
         None => {
-            log::warn!("принтер: нет ответа на статус перед печатью, печатаю без предпроверки");
-            Ok(())
+            // Молчание бывает разовым (шум на линии, порт занят): одна
+            // повторная проба. Дважды молчащий принтер пропускаем без
+            // предпроверки — осознанный риск: у PT-561 L4 может молчать
+            // и при живом принтере, а блокировать торговлю нельзя.
+            std::thread::sleep(Duration::from_millis(200));
+            match read_l4(port, 3) {
+                Some(b) if escpos::l4_fault(b) => {
+                    log::warn!("принтер: авария на повторной пробе (L4 = {b:#04X})");
+                    match recover_printer(port) {
+                        Some(_) => Ok(()),
+                        None => Err(Fail::Printer(
+                            "принтер в аварии: проверьте ленту/крышку, при необходимости перезапустите питание".into(),
+                        )),
+                    }
+                }
+                Some(_) => {
+                    log::info!("принтер: статус пришёл на повторной пробе");
+                    Ok(())
+                }
+                None => {
+                    log::warn!("принтер: нет ответа на статус дважды, печатаю без предпроверки");
+                    Ok(())
+                }
+            }
         }
     }
 }
@@ -1011,8 +1054,13 @@ fn print_job(
     bytes: &[u8],
     mon: &mut Monitor,
     present_wait: Duration,
+    cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<(), Fail> {
     ensure_ready(port)?;
+    // Отмена до отправки байтов — достоверная: этикетки точно не было.
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(Fail::Printer("задание печати отменено до отправки".into()));
+    }
     drain_port_rx(port);
     // С этой точки байты задания могут уйти в принтер: любая ошибка записи
     // не позволяет достоверно сказать, напечаталась ли этикетка.
@@ -1027,6 +1075,17 @@ fn print_job(
     let mut last = None;
     while t0.elapsed() < present_wait {
         std::thread::sleep(Duration::from_millis(250));
+        // Отмена во время печати — неизвестный результат: байты уже
+        // отправлены, этикетка могла выйти (частично или полностью).
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            log::warn!(
+                "принтер: отмена во время печати ({}ms), байты задания отправлены",
+                t0.elapsed().as_millis()
+            );
+            return Err(Fail::Uncertain(
+                "печать отменена во время выполнения, результат неизвестен".into(),
+            ));
+        }
         let s = read_l4(port, 1);
         trace.push_str(&format!("{}ms:{} ", t0.elapsed().as_millis(), fmt_l4(s)));
         match s {
@@ -1076,6 +1135,13 @@ fn outcome_mark(res: &Result<(), Fail>) -> Option<bool> {
         Err(Fail::Uncertain(_)) => None,
         Err(Fail::Io(_) | Fail::Printer(_)) => Some(false),
     }
+}
+fn mark_print_end() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    LAST_PRINT_END.store(now, std::sync::atomic::Ordering::Relaxed);
 }
 fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>) {
     let mut prn: Option<escpos::EscPosPrinter<Box<dyn serialport::SerialPort>>> = None;
@@ -1134,8 +1200,9 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 let wait = Duration::from_secs(cfg.printer.present_wait_secs.max(1) as u64)
                     .min(PRESENT_WAIT_MAX);
                 let res = with_port(cfg, &mut prn, |p| {
-                    print_job(p.port_mut(), &bytes, &mut mon, wait)
+                    print_job(p.port_mut(), &bytes, &mut mon, wait, &cancel)
                 });
+                mark_print_end();
                 if res.is_err() {
                     mon.note_failure();
                 }
@@ -1219,11 +1286,13 @@ fn daemon_loop(cfg: &crate::config::Config, rx: &mpsc::Receiver<PrinterRequest>)
                 // Тот же путь, что у товарной печати: print_job ждёт
                 // подтверждения датчика лотка. Тестовая этикетка выходит
                 // так же, как товарная — PT-561 подтверждает её выдачу.
+                let no_cancel = std::sync::atomic::AtomicBool::new(false);
                 let wait = Duration::from_secs(cfg.printer.present_wait_secs.max(1) as u64)
                     .min(PRESENT_WAIT_MAX);
                 let res = with_port(cfg, &mut prn, |p| {
-                    print_job(p.port_mut(), &bytes, &mut mon, wait)
+                    print_job(p.port_mut(), &bytes, &mut mon, wait, &no_cancel)
                 });
+                mark_print_end();
                 if res.is_err() {
                     mon.note_failure();
                 }
@@ -1774,7 +1843,8 @@ pub fn print_test_label_cli(cfg: &crate::config::Config) -> Result<(), PrintErro
     let wait =
         Duration::from_secs(cfg.printer.present_wait_secs.max(1) as u64).min(PRESENT_WAIT_MAX);
     let mut mon = Monitor::default();
-    print_job(&mut port, &bytes, &mut mon, wait)
+    let no_cancel = std::sync::atomic::AtomicBool::new(false);
+    print_job(&mut port, &bytes, &mut mon, wait, &no_cancel)
         .map_err(|e| PrintError::Io(std::io::Error::other(e.text())))
 }
 fn grid_probe_bytes(spec: &crate::label::LabelSpec, item: &datastore::PluItem) -> Vec<u8> {

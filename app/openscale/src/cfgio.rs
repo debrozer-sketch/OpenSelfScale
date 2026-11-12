@@ -130,8 +130,9 @@ pub fn export(cfg: &Config) -> Result<PathBuf, String> {
     };
     let dir = export_dir(cfg);
     std::fs::create_dir_all(&dir).map_err(|e| format!("каталог {}: {e}", dir.display()))?;
-    let stamp = crate::print::now_stamp().0.replace('.', "");
-    let stamp = format!("{stamp}-{}", crate::print::now_stamp().1.replace(':', ""));
+    // Один вызов: два подряд на полночь давали дату «вчера» со временем «сегодня».
+    let (d, t) = crate::print::now_stamp();
+    let stamp = format!("{}-{}", d.replace('.', ""), t.replace(':', ""));
     let path = dir.join(format!("openscale-cfg-{stamp}.toml"));
     let body = toml::to_string_pretty(&file).map_err(|e| format!("сериализация: {e}"))?;
     std::fs::write(&path, body).map_err(|e| format!("запись {}: {e}", path.display()))?;

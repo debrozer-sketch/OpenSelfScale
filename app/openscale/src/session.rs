@@ -62,6 +62,9 @@ pub struct Kiosk {
     pub imp_files: Vec<std::path::PathBuf>,
     pub imp_pending: String,
     pub cancel_print: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Отмена по таймауту отправлена демону, отчёт о печати ещё не пришёл:
+    /// повторное подтверждение товара блокировано — байты могли уже уйти.
+    pub print_cancelled: bool,
     /// Поток текущей печати: новая печать не стартует, пока он жив —
     /// иначе после отмены по таймауту возможен второй этикеточный прогон
     /// поверх ещё не завершённого предыдущего.
@@ -118,6 +121,7 @@ impl Kiosk {
             imp_files: Vec::new(),
             imp_pending: String::new(),
             cancel_print: None,
+            print_cancelled: false,
             print_thread: None,
             labels_rows: Vec::new(),
             labels_files: Vec::new(),
